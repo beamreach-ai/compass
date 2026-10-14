@@ -1,0 +1,157 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html {
+  scrollbar-gutter: stable both-edges;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen,
+    Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+  background-color: #f8f9fa;
+  color: #212529;
+  margin: 0 auto;
+  padding: 0;
+  overflow-y: scroll;
+}
+
+/* The 80% body width is the look of the standalone pages (login, sign-out).
+   The workspace shell sizes itself (max-w-screen-2xl) so its tables get the room. */
+@media (min-width: 1280px) {
+  body:not(:has(.workspace-shell)) {
+    max-width: 80%;
+  }
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+.logo {
+  max-height: 40px;
+  width: 80px;
+  margin: 1rem auto;
+  display: block;
+}
+
+.page-header {
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin: 2rem 0 1rem 0;
+  text-align: center;
+}
+
+.table-wrapper {
+  margin: 2rem auto;
+  padding: 1rem;
+  background-color: white;
+  border-radius: 8px;
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.05);
+}
+
+.container {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 2rem;
+}
+
+/* Zero-specificity defaults so component utilities (Tailwind) win over them. */
+:where(table) {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 2rem;
+  background-color: white;
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.05);
+}
+
+:where(th, td) {
+  padding: 1rem;
+  text-align: left;
+  border-bottom: 1px solid #dee2e6;
+}
+
+:where(th) {
+  background-color: #f1f3f5;
+  font-weight: 600;
+}
+
+:where(tr:hover) {
+  background-color: #f8f9fa;
+}
+
+/* Responsive table: below 768px each row becomes a card and every cell a
+   "label: value" line, the label coming from the cell's data-label. */
+@media (max-width: 767px) {
+  table.rt, table.rt tbody, table.rt tr, table.rt td { display: block; width: 100%; }
+  table.rt thead { display: none; }
+  table.rt tr { padding: .5rem .75rem; border-bottom: 1px solid #e5e7eb; }
+  table.rt td { display: flex; justify-content: space-between; align-items: flex-start; gap: .75rem; padding: .2rem 0; border: 0; text-align: right; }
+  table.rt td > * { min-width: 0; }
+  table.rt td[data-label]::before { content: attr(data-label); flex-shrink: 0; color: #6b7280; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; text-align: left; }
+  table.rt td.rt-block { display: block; text-align: left; }
+}
+
+button {
+  background-color: #0077cc;
+  color: white;
+  border: none;
+  padding: 0.6rem 1.2rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 500;
+  transition: background-color 0.2s ease;
+}
+
+button:hover {
+  background-color: #005fa3;
+}
+
+button:disabled {
+  background-color: #ccc;
+  cursor: not-allowed;
+}
+
+@keyframes progress-stripes {
+  0% {
+    background-position: 0% 50%;
+  }
+  100% {
+    background-position: 200% 50%;
+  }
+}
+
+.bg-progress-animated {
+  background-image: linear-gradient(
+    90deg,
+    rgba(59, 130, 246, 0.9),
+    rgba(147, 197, 253, 0.9),
+    rgba(59, 130, 246, 0.9)
+  );
+  background-size: 200% 100%;
+  animation: progress-stripes 1.5s linear infinite;
+}
+
+@keyframes progress-spinner-rotate {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+.progress-spinner {
+  display: inline-block;
+  width: 0.9rem;
+  height: 0.9rem;
+  border-radius: 9999px;
+  border: 2px solid rgba(59, 130, 246, 0.45);
+  border-top-color: rgba(59, 130, 246, 1);
+  animation: progress-spinner-rotate 0.8s linear infinite;
+}

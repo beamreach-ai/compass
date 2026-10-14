@@ -1,0 +1,20 @@
+# Build the two images from this checkout instead of pulling the release:
+#
+#   python -m build --wheel          # dist/compass_open-*.whl, what docker/Dockerfile installs
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml build
+#   docker compose up -d             # the same tags docker-compose.yml runs
+services:
+  compass:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+  dashboard:
+    build:
+      context: .
+      dockerfile: dashboard/Dockerfile.dashboard
+      args:
+        NEXT_PUBLIC_EDITION: open

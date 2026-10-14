@@ -1,0 +1,22 @@
+# Rebuild trigger 2025-11-15
+FROM node:20-alpine
+
+WORKDIR /app
+
+COPY dashboard/package*.json ./
+RUN npm install
+
+COPY dashboard .
+
+# open | product: the open edition hides licence, billing and Beamreach branding (app/lib/edition.ts)
+ARG NEXT_PUBLIC_EDITION=product
+ENV NEXT_PUBLIC_EDITION=$NEXT_PUBLIC_EDITION
+# product only: the founder contact in the sidebar (app/lib/edition.ts)
+ARG NEXT_PUBLIC_SUPPORT_WHATSAPP=
+ARG NEXT_PUBLIC_SUPPORT_EMAIL=
+ENV NEXT_PUBLIC_SUPPORT_WHATSAPP=$NEXT_PUBLIC_SUPPORT_WHATSAPP NEXT_PUBLIC_SUPPORT_EMAIL=$NEXT_PUBLIC_SUPPORT_EMAIL
+ENV NODE_ENV=production
+RUN npm run build
+
+EXPOSE 3000
+CMD ["npm", "run", "start"]

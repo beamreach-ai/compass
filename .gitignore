@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+/build/
+/dist/
+/.venv/
+.pytest_cache/
+.ruff_cache/
+
+# Dashboard
+/dashboard/node_modules/
+/dashboard/.next/
+/dashboard/.next-*/
+*.tsbuildinfo
+
+# A local install made from this checkout (docs/quickstart.md): its config
+# holds your GitHub token and dashboard password, its map is yours.
+/.env
+/config/
+/map/
+
+# Terraform working directories and plans can contain secrets
+**/.terraform/
+*.tfplan
+*.tfstate
+*.tfstate.backup
+
+# Editors and OS
+.DS_Store
+.idea/
+.vscode/
