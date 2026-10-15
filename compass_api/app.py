@@ -24,15 +24,11 @@ OPEN_DISABLED_FEATURES = "security,finops,compliance,policies"
 
 
 def routers() -> list:
-    """Every router the installed captains declare, the core's first, each captain's
-    in its manifest's order (compass_core.captains)."""
+    """(router, prefix) for every router the installed captains declare, the core's
+    first, each captain's in its manifest's order (compass_core.captains.routers)."""
     from compass_core import captains
 
-    found = []
-    for manifest in captains.manifests():
-        for ref in manifest.routers:
-            found.append(captains.load_reference(ref))
-    return found
+    return captains.routers()
 
 
 def _configure_environment() -> None:
@@ -115,8 +111,8 @@ def create_app() -> FastAPI:
             settings.invalidate_bootstrap_sections(getattr(workspace_ctx, "workspace_id", None))
         return response
 
-    for router in routers():
-        app.include_router(router)
+    for router, prefix in routers():
+        app.include_router(router, prefix=prefix)
 
     @app.exception_handler(captains.CaptainUnavailable)
     async def _captain_unavailable(request, exc):  # noqa: ANN001

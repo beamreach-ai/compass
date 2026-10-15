@@ -65,9 +65,12 @@ def get_app_config(config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         active = _captains.active(config, disabled_features=disabled_features)
         owner = {t["key"]: t["captain"] for t in _manifest_tabs()}
         enabled_tabs = [tab for tab in enabled_tabs if owner.get(tab) is None or owner[tab] in active]
+    # the mode's default, else the production default, else the first tab the workspace has
     preferred_default_tab = extensions.default_tab(app_mode) or "maps"
-    if preferred_default_tab not in enabled_tabs and enabled_tabs:
-        preferred_default_tab = enabled_tabs[0]
+    for candidate in (preferred_default_tab, extensions.default_tab("production"), enabled_tabs[0] if enabled_tabs else None):
+        if candidate and candidate in enabled_tabs:
+            preferred_default_tab = candidate
+            break
 
     requested_default_tab = (os.getenv("DEFAULT_TAB") or "").strip().lower()
     default_tab = requested_default_tab or preferred_default_tab

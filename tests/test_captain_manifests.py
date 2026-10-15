@@ -93,8 +93,9 @@ def test_route_prefixes_cover_the_routers_paths(manifests):
             continue
         for ref in m.routers:
             router = captains.load_reference(ref)
+            mount = (m.router_prefixes or {}).get(ref, "")
             for route in router.routes:
-                path = getattr(route, "path", "")
+                path = mount + getattr(route, "path", "")
                 owner = captains.captain_for_path(path)
                 assert owner is not None, f"{path} ({ref}) belongs to no captain"
 
