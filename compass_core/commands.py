@@ -330,7 +330,8 @@ def _save(workspace, config: Dict[str, Any]) -> None:
 
 def captains(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Every installed captain and its state for the workspace."""
-    from compass_core import captain_admin, captains as registry
+    from compass_core import captain_admin
+    from compass_core import captains as registry
 
     workspace = resolve(payload)
     return {
@@ -372,7 +373,8 @@ def disable(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 def configure(payload: Dict[str, Any]) -> Dict[str, Any]:
     """captain=<name> [set='{...}'] [replace=true]: show or edit the captain's config section."""
-    from compass_core import captain_admin, captains as registry
+    from compass_core import captain_admin
+    from compass_core import captains as registry
 
     name = str(payload.get("captain") or payload.get("name") or "")
     manifest = registry.manifest(name)

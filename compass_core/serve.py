@@ -22,7 +22,6 @@ import logging
 import os
 import signal
 import threading
-import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 

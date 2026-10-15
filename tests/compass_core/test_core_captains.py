@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 from compass_core import captain_admin, captains, dispatch, licence, queue
 from compass_core import config as core_config
-from compass_core.captains import CaptainManifest, TabSpec
+from compass_core.captains import CaptainManifest
 
 
 @pytest.fixture

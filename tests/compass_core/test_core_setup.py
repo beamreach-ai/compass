@@ -7,7 +7,8 @@ import boto3
 import pytest
 from moto import mock_aws
 
-from compass_core import commands, config as core_config, dispatch, queue, serve
+from compass_core import commands, dispatch, queue, serve
+from compass_core import config as core_config
 
 
 def test_init_config_writes_a_complete_workspace_file(tmp_path, monkeypatch):

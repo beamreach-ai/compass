@@ -3,17 +3,17 @@ on or off, licensed, and each captain's configuration."""
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from fastapi import APIRouter, Body, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from compass_api.routes._app_config import ensure_not_read_only, ensure_settings_enabled
+from compass_api.routes._workspace import get_actor_ids, get_workspace_config, save_config
 from compass_core import captain_admin
 from compass_core import captains as registry
 from compass_core import licence as _licence
-from compass_api.routes._app_config import ensure_not_read_only, ensure_settings_enabled
-from compass_api.routes._workspace import get_actor_ids, get_workspace_config, save_config
 
 router = APIRouter()
 

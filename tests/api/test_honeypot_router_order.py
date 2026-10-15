@@ -13,6 +13,7 @@ from moto import mock_aws
 from compass_api.routes import honeypot_actions, honeypot_incidents, honeypots
 from compass_core.keys import workspace_pk
 
+
 def _include_order():
     """The order the app includes routers in: the honeypot manifest's (compass_core.captains)."""
     from compass_core import captains

@@ -24,11 +24,11 @@ from pydantic import BaseModel, Field
 
 from compass_api import extensions
 from compass_api.infra_scan import mark_infra_scan_pending
-from compass_core import captain_admin
-from compass_core import captains as _captains
 from compass_api.routes._app_config import ensure_settings_enabled, get_app_config
 from compass_api.routes._infra_scan import current_infra_scan_summary, enqueue_full_infra_scan
 from compass_api.routes._workspace import get_workspace_config, get_workspace_context, save_config
+from compass_core import captain_admin
+from compass_core import captains as _captains
 from compass_core.aws import build_target_session, resolve_target_account_id, resolve_target_region
 from compass_core.github import (
     build_github_app_manifest,
