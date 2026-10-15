@@ -3,7 +3,7 @@ on or off, licensed, and each captain's configuration."""
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Body, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -13,6 +13,7 @@ from compass_api.routes._app_config import ensure_not_read_only, ensure_settings
 from compass_api.routes._workspace import get_actor_ids, get_workspace_config, save_config
 from compass_core import captain_admin
 from compass_core import captains as registry
+from compass_core import catalog as _catalog
 from compass_core import licence as _licence
 
 router = APIRouter()
@@ -38,6 +39,14 @@ def list_captains(request: Request) -> Dict[str, Any]:
         "incompatible": registry.incompatible(),
         "broken": registry.broken(),
     }
+
+
+@router.get("/api/captains/catalog")
+def get_catalog(request: Request, q: Optional[str] = None, refresh: bool = False) -> Dict[str, Any]:
+    """What can be installed: the catalog's entries, each with its status here
+    (installed, update, install, incompatible, vendor) and the COMPASS_EXTENSIONS line.
+    Declared before /api/captains/{name}, which would otherwise take "catalog" for a name."""
+    return _catalog.listing(query=q, config=get_workspace_config(request), refresh=refresh)
 
 
 @router.get("/api/captains/{name}")

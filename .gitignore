@@ -30,3 +30,7 @@ __pycache__/
 .DS_Store
 .idea/
 .vscode/
+
+# build output of the example captains (pip install .)
+examples/*/build/
+examples/*/*.egg-info/

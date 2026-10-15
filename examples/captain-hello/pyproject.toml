@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+# The example captain (docs/writing_a_captain.md): copy this directory to start
+# your own. Install it into a running Compass by naming it in COMPASS_EXTENSIONS.
+[project]
+name = "compass-captain-hello"
+version = "0.1.0"
+description = "Says hello: the example Compass captain"
+requires-python = ">=3.12"
+license = { text = "Apache-2.0" }
+# compass-open is what runs it; it is not a dependency, so installing this into
+# a Compass image never reinstalls Compass itself.
+dependencies = []
+
+[project.entry-points."compass.captains"]
+hello = "captains.hello.manifest:MANIFEST"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["captains.hello*"]

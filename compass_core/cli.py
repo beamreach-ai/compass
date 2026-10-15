@@ -23,7 +23,7 @@ from typing import Any, Dict, List, Optional
 
 from compass_core import anthropic_model, captains, dispatch, llm
 
-CORE_SHORTHAND = {"init_config", "init_tables", "init_alerts", "serve", "api", "login", "captains", "enable", "disable", "configure"}
+CORE_SHORTHAND = {"init_config", "init_tables", "init_alerts", "serve", "api", "login", "captains", "enable", "disable", "configure", "catalog"}
 
 
 def parse_pairs(pairs: List[str]) -> Dict[str, Any]:

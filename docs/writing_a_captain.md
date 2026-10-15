@@ -3,8 +3,9 @@
 A captain is the unit people install, turn on or off, and configure
 (`docs/captain_extensions_spec.md`). It is a Python package with one manifest;
 the manifest is the only place the rest of Compass learns about it from. The
-smallest complete one is `tests/fixtures/captain_hello/`, and
-`tests/test_writing_a_captain.py` drives it through everything below.
+smallest complete one is `examples/captain-hello/`, a pip-installable package:
+copy that directory to start. `tests/test_writing_a_captain.py` drives it
+through everything below.
 
 ## 1. The manifest
 
@@ -141,9 +142,37 @@ a richer view is a component registered under your key in the build.
 
 ## 9. The test
 
-Copy `tests/test_writing_a_captain.py`: set `COMPASS_CAPTAINS` to your manifest,
+Copy `tests/test_writing_a_captain.py`: put your package on `sys.path`, set `COMPASS_CAPTAINS` to your manifest,
 build the open app, and assert your tab is in the bootstrap, your command runs,
 your config round-trips, and turning you off refuses your writes and hides
 your tab. `tests/test_captain_manifests.py` runs over every discovered manifest,
 so the structural checks (unique names and tab keys, resolvable routers and
 services, valid schema, prefixes covering your routes) are free.
+
+## 10. Publishing to the catalog
+
+Settings → Captains → Available lists the captain catalog, one JSON file in the
+public repository (`compass_core/catalog.json`). Every Compass reads it from
+`main` (or `COMPASS_CATALOG_URL`), and falls back to the copy it shipped with.
+To list your captain, open a pull request adding an entry:
+
+```json
+{
+  "name": "hello",
+  "label": "Hello",
+  "summary": "One or two sentences: what it does for the person who installs it.",
+  "author": "You",
+  "homepage": "https://… (docs)",
+  "source": "https://… (the code)",
+  "tier": "open",
+  "tags": ["example"],
+  "version": "0.1.0",
+  "requires_core": ">=0.2,<1",
+  "pip": "your-distribution @ git+https://github.com/you/repo.git@v0.1.0"
+}
+```
+
+`name`, `version` and `requires_core` must match your manifest. Pin `pip` to an
+exact version or tag, never a branch: what someone installs from the catalog
+must be what was reviewed. `tests/compass_core/test_core_catalog.py` validates
+every entry, so the pull request's CI says whether it is well formed.

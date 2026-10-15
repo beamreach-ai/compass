@@ -1,0 +1,66 @@
+{
+  "schema": 1,
+  "captains": [
+    {
+      "name": "hello",
+      "label": "Hello",
+      "summary": "Says hello. The example captain: one command, one route, a tab and a config form. Copy it to start your own.",
+      "author": "Beamreach",
+      "homepage": "https://github.com/beamreach-ai/compass/blob/main/docs/writing_a_captain.md",
+      "source": "https://github.com/beamreach-ai/compass/tree/main/examples/captain-hello",
+      "tier": "open",
+      "tags": ["example", "template"],
+      "version": "0.1.0",
+      "requires_core": ">=0.2,<1",
+      "pip": "compass-captain-hello @ git+https://github.com/beamreach-ai/compass.git@v0.3.0#subdirectory=examples/captain-hello"
+    },
+    {
+      "name": "engine",
+      "label": "Remediation",
+      "summary": "Plans and opens the fix for a security finding as a pull request, with a human or autopilot approving.",
+      "author": "Beamreach",
+      "homepage": "https://beamreach.ai/compass/pricing.html",
+      "tier": "cloud",
+      "tags": ["security", "remediation", "beamreach"],
+      "version": "0.2.0",
+      "requires_core": ">=0.2,<1",
+      "pip": null
+    },
+    {
+      "name": "triage",
+      "label": "Triage",
+      "summary": "Assesses each finding's risk and urgency with a model and gates autopilot on it.",
+      "author": "Beamreach",
+      "homepage": "https://beamreach.ai/compass/pricing.html",
+      "tier": "cloud",
+      "tags": ["security", "triage", "beamreach"],
+      "version": "0.2.0",
+      "requires_core": ">=0.2,<1",
+      "pip": null
+    },
+    {
+      "name": "audit",
+      "label": "Security audit",
+      "summary": "Runs Prowler, Checkov, Trivy and Gitleaks against the account and the repositories; the DevSecOps and Compliance views.",
+      "author": "Beamreach",
+      "homepage": "https://beamreach.ai/compass/pricing.html",
+      "tier": "cloud",
+      "tags": ["security", "compliance", "beamreach"],
+      "version": "0.2.0",
+      "requires_core": ">=0.2,<1",
+      "pip": null
+    },
+    {
+      "name": "finops",
+      "label": "FinOps",
+      "summary": "Scans the account for cost findings, estimates the savings and opens the cost fixes.",
+      "author": "Beamreach",
+      "homepage": "https://beamreach.ai/compass/pricing.html",
+      "tier": "cloud",
+      "tags": ["cost", "finops", "beamreach"],
+      "version": "0.2.0",
+      "requires_core": ">=0.2,<1",
+      "pip": null
+    }
+  ]
+}
