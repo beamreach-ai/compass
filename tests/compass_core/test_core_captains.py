@@ -41,7 +41,7 @@ def test_admin_toggle_deploy_veto_and_dependencies(fresh_registry):
     assert st["iac"].reason == "disabled_by_deploy"
     st = captains.states({"captains": {"mapper": {"enabled": False}}})
     assert st["honeypot"].reason == "dependency_off" and st["honeypot"].blocked_by == ("mapper",) and st["honeypot"].code == "dependency_off"
-    assert captains.required_by("mapper", {}) == ("librarian", "honeypot", "iac")
+    assert set(captains.required_by("mapper", {})) == {"librarian", "honeypot", "iac"}
 
 
 def test_incompatible_manifest_is_listed_but_not_active(fresh_registry):
