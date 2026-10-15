@@ -10,12 +10,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends git ca-certific
 COPY --from=terraform /bin/terraform /usr/local/bin/terraform
 COPY ${WHEEL} /tmp/dist/
 RUN pip install --no-cache-dir "$(ls /tmp/dist/*.whl)[anthropic]" && rm -rf /tmp/dist
+COPY docker/entrypoint.sh /usr/local/bin/compass-entrypoint
+RUN chmod +x /usr/local/bin/compass-entrypoint
 WORKDIR /compass
 ENV COMPASS_CONFIG=/compass/config/local.json \
     COMPASS_MAP_DIR=/compass/map \
     COMPASS_MAP_PORT=8787 \
     COMPASS_ALLOW_LOCAL_IAM=1 \
+    COMPASS_EXTENSIONS_DIR=/compass/extensions \
     PYTHONUNBUFFERED=1
 EXPOSE 8787
-ENTRYPOINT ["compass"]
+# Extensions (COMPASS_EXTENSIONS, a list of pip requirements) are installed into
+# /compass/extensions on start; their captains are found by entry point.
+ENTRYPOINT ["compass-entrypoint"]
 CMD ["serve"]

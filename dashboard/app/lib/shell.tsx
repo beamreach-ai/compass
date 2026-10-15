@@ -122,8 +122,34 @@ export type InfraScanSummary = {
   disabled_reason?: string | null;
 };
 
+// One row of the bootstrap's `captains`: compass_core.captains.CaptainState.to_dict()
+export type CaptainSummary = {
+  name: string;
+  label: string;
+  summary: string;
+  tier: "open" | "cloud" | "enterprise";
+  feature: string;
+  version: string;
+  requires_core: string;
+  tabs: Array<{ key: string; label: string; group: string; feature: string; views: string[] }>;
+  depends_on: string[];
+  has_config: boolean;
+  settings_component?: string | null;
+  core: boolean;
+  installed: boolean;
+  compatible: boolean;
+  licensed: boolean;
+  enabled: boolean;
+  blocked_by: string[];
+  active: boolean;
+  reason?: string | null;
+  install_hint?: string | null;
+};
+
 export type SettingsBootstrap = {
   app?: AppConfigSummary;
+  core_version?: string;
+  captains?: CaptainSummary[];
   workspace: SessionSummary;
   aws: AwsSettingsSummary;
   github: GithubSettingsSummary;
@@ -157,7 +183,10 @@ export type Shell = {
   infraScanned: boolean;
   infraScanBlocked: boolean;
   queueJobs: QueueJob[];
+  queueError: string | null;
   fetchQueueJobs: () => Promise<void>;
+  // the mapper job that is queued or running, if any (the infra-scan banner and the Maps tab follow it)
+  activeMapperJob: QueueJob | null;
   registerSettingsSaveParticipant: (id: string, participant: SettingsSaveParticipant) => void;
   unregisterSettingsSaveParticipant: (id: string) => void;
   clearSettingsSaveSuccess: () => void;

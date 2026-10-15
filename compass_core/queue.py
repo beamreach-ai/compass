@@ -23,6 +23,15 @@ logger = logging.getLogger("compass.queue")
 Dispatch = Callable[[str, str, Dict[str, Any]], Any]
 
 
+def check_enqueue(captain: str, payload: Any) -> None:
+    """Refuse a captain the payload's workspace cannot run (compass_core.captains);
+    every queue implementation calls this first, so the refusal comes before a
+    job record exists and with the reason."""
+    from compass_core import captains as _captains
+
+    _captains.ensure_active_for_payload(captain, payload if isinstance(payload, dict) else {})
+
+
 class JobQueue(Protocol):
     def enqueue(
         self,
@@ -83,6 +92,7 @@ class InlineQueue:
                 "no job queue is configured: call compass_core.queue.set_job_queue(...) "
                 "or give InlineQueue a dispatch function"
             )
+        check_enqueue(captain, payload)
         workspace_id = str(payload.get("workspace_id")) if isinstance(payload, dict) and payload.get("workspace_id") else None
         store = self.store
         if store is not None:
@@ -171,6 +181,7 @@ class StoreQueue:
         queue: Optional[str] = None,
         enforce_single_active_session: bool = False,
     ) -> Dict[str, Any]:
+        check_enqueue(captain, payload)
         workspace_id = str(payload.get("workspace_id") or "default") if isinstance(payload, dict) else "default"
         if enforce_single_active_session and session_id:
             active = self.store.find_active_job(session_id=session_id, workspace_id=workspace_id, captain=captain, command=command)
@@ -193,7 +204,22 @@ class QueueProxy:
 
     Routers keep one ``queue_client`` attribute as they always have; it follows
     whatever ``set_job_queue`` installed (the product's Celery client, or the
-    inline queue), and a test can still patch a method on it."""
+    inline queue), and a test can still patch a method on it. The common
+    methods are real methods that delegate at call time: a patch restored by
+    monkeypatch then puts back a method of the proxy, not of whichever queue
+    happened to be installed when the patch was made."""
+
+    def enqueue(self, **kwargs: Any) -> Dict[str, Any]:
+        return job_queue().enqueue(**kwargs)
+
+    def enqueue_and_wait(self, **kwargs: Any) -> Any:
+        return job_queue().enqueue_and_wait(**kwargs)  # type: ignore[attr-defined]
+
+    def get_job(self, job_id: str, workspace_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        return job_queue().get_job(job_id, workspace_id=workspace_id)
+
+    def list_jobs(self, limit: int = 100, workspace_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        return job_queue().list_jobs(limit=limit, workspace_id=workspace_id)  # type: ignore[attr-defined]
 
     def __getattr__(self, name: str) -> Any:
         return getattr(job_queue(), name)

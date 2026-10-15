@@ -26,10 +26,22 @@ dependencies = [
     "uvicorn[standard]>=0.30",
     "PyJWT>=2.8,<3",
     "python-multipart>=0.0.9",
+    "packaging>=23",
+    "jsonschema>=4",
 ]
 
 [project.scripts]
 compass = "compass_core.cli:main"
+
+# The captains this distribution ships (compass_core.captains.discover); an
+# extension adds its own under the same group.
+[project.entry-points."compass.captains"]
+core = "compass_core.manifest:MANIFEST"
+mapper = "captains.mapper.manifest:MANIFEST"
+librarian = "captains.librarian.manifest:MANIFEST"
+honeypot = "captains.honeypot.manifest:MANIFEST"
+iac = "captains.iac.manifest:MANIFEST"
+prs = "captains.prs.manifest:MANIFEST"
 
 [project.optional-dependencies]
 # a model for the incident summary, drift-fix HCL and PR triage (compass_core.llm)

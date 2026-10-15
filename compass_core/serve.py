@@ -1,15 +1,18 @@
 """`compass serve`: the open version running unattended.
 
-One process, three loops, no broker:
+One process, no broker. It runs, for every captain that is active in the
+workspace, the background services its manifest declares
+(compass_core.captains.ServiceSpec): the decoys' alert consumers, the PR
+watcher's tick, the map re-scan when an interval is set. Beside them the core
+runs the jobs the API queued (``compass_core.queue.StoreQueue``) and, with
+``map_port``, a static viewer of the map.
 
-- alert consumers: one thread per decoy alert queue (``honeypot.alert_queue_urls``
-  or ``alert_queue_url`` in the workspace config, else HONEYPOT_ALERT_QUEUE_URLS);
-  each alert is recorded, then investigate and respond run in-process through
-  the open dispatcher;
-- the PR watcher tick every ``prs_tick`` seconds (default 300; 0 = off);
-- a map re-scan every ``map_interval`` seconds (default 0 = off).
+Intervals come from the serve payload or the environment, by the setting name
+the service declares (``prs_tick`` → ``PRS_TICK_SECONDS`` for compatibility,
+otherwise ``COMPASS_<SETTING>``). A captain turned off while serving has its
+services stopped on the next check (every ``captains_poll`` seconds).
 
-Stops on SIGINT/SIGTERM. The product runs the same loops as Celery workers and
+Stops on SIGINT/SIGTERM. The product runs the same work as Celery workers and
 an API-side ticker.
 """
 
@@ -21,22 +24,39 @@ import signal
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
+from compass_core import captains as registry
 from compass_core import dispatch
-from compass_core.cli import COMMAND_MODULES, load_commands
+from compass_core.captains import CaptainManifest, ServiceSpec
+from compass_core.config import workspace_config
 from compass_core.workspace import captain_config, resolve
 
 logger = logging.getLogger("compass.serve")
 
+_LEGACY_ENV = {"prs_tick": "PRS_TICK_SECONDS", "map_interval": "COMPASS_MAP_INTERVAL"}
 
-def queue_urls(config: Dict[str, Any]) -> List[str]:
-    hp = config.get("honeypot") if isinstance(config.get("honeypot"), dict) else {}
-    urls = hp.get("alert_queue_urls") or ([hp["alert_queue_url"]] if hp.get("alert_queue_url") else [])
-    if not urls:
-        raw = os.getenv("HONEYPOT_ALERT_QUEUE_URLS") or os.getenv("HONEYPOT_ALERT_QUEUE_URL") or ""
-        urls = [u.strip() for u in raw.split(",") if u.strip()]
-    return [str(u) for u in urls]
+
+def interval_from_env(setting: str) -> Optional[int]:
+    raw = os.getenv(_LEGACY_ENV.get(setting, "")) or os.getenv(f"COMPASS_{setting.upper()}")
+    if raw in (None, ""):
+        return None
+    try:
+        return int(raw)
+    except ValueError:
+        return None
+
+
+class _Running:
+    def __init__(self, manifest: CaptainManifest, spec: ServiceSpec, stop: threading.Event, thread: threading.Thread):
+        self.manifest = manifest
+        self.spec = spec
+        self.stop = stop
+        self.thread = thread
+
+    @property
+    def key(self) -> str:
+        return f"{self.manifest.name}:{self.spec.name}"
 
 
 class Server:
@@ -51,25 +71,29 @@ class Server:
         map_port: int = 0,
         map_dir: str = "map",
         job_poll: float = 2.0,
+        intervals: Optional[Dict[str, int]] = None,
+        captains_poll: float = 30.0,
     ) -> None:
         self.workspace_id = workspace_id
         self.config = config
-        self.prs_tick = max(0, int(prs_tick))
-        self.map_interval = max(0, int(map_interval))
+        self.intervals: Dict[str, int] = {"prs_tick": max(0, int(prs_tick)), "map_interval": max(0, int(map_interval))}
+        self.intervals.update({k: max(0, int(v)) for k, v in (intervals or {}).items()})
         self.once = once
         self.map_port = max(0, int(map_port))
         self.map_dir = Path(map_dir)
         self.job_poll = max(0.0, float(job_poll))
+        self.captains_poll = max(1.0, float(captains_poll))
         self._stop = threading.Event()
-        self._consumers: List[Any] = []
+        self._services: Dict[str, _Running] = {}
         self._threads: List[threading.Thread] = []
         self._httpd: Any = None
         self.ticks = 0
+        self.started: List[str] = []
 
     def stop(self, *_args: Any) -> None:
         self._stop.set()
-        for consumer in self._consumers:
-            consumer.stop()
+        for running in list(self._services.values()):
+            running.stop.set()
         if self._httpd is not None:
             threading.Thread(target=self._httpd.shutdown, daemon=True).start()
 
@@ -104,29 +128,83 @@ class Server:
         thread.start()
         self._threads.append(thread)
         logger.info("map viewer on http://localhost:%d/", self.map_port)
+        # the page follows the re-scan cadence, when there is one
+        refresh = int(self.intervals.get("map_interval") or 0)
+        if refresh > 0:
+            def _refresh() -> None:
+                while not self._stop.wait(refresh + 15):
+                    self._write_map_page()
+            t = threading.Thread(target=_refresh, name="map-viewer-refresh", daemon=True)
+            t.start()
+            self._threads.append(t)
 
-    def _start_consumers(self) -> None:
-        from captains.honeypot.alert_consumer import AlertConsumer
+    # ── the captains' services ──────────────────────────────────────────────
 
-        urls = queue_urls(self.config)
-        if not urls:
-            logger.warning("no decoy alert queue configured (honeypot.alert_queue_url); alerts will not be consumed")
-        for url in urls:
-            consumer = AlertConsumer(queue_url=url)
-            thread = threading.Thread(target=consumer.run, kwargs={"install_signals": False}, name=f"alerts:{url.rsplit('/', 1)[-1]}", daemon=True)
-            thread.start()
-            self._consumers.append(consumer)
-            self._threads.append(thread)
-            logger.info("consuming decoy alerts from %s", url)
+    def _interval_for(self, spec: ServiceSpec) -> Optional[int]:
+        if spec.interval_setting and spec.interval_setting in self.intervals:
+            return self.intervals[spec.interval_setting]
+        if spec.interval_setting:
+            from_env = interval_from_env(spec.interval_setting)
+            if from_env is not None:
+                return from_env
+        return spec.interval
 
-    def _tick_prs(self) -> None:
-        from captains.prs.scheduler import tick
-
+    def _wanted_services(self) -> List[tuple]:
         try:
-            enqueued = tick([self.workspace_id])
-            logger.info("prs tick: %d sync(s) ran", enqueued)
+            config = workspace_config(self.workspace_id)
+        except LookupError:
+            config = self.config
+        wanted = []
+        for name in registry.active(config):
+            manifest = registry.manifest(name)
+            if manifest is None:
+                continue
+            for spec in manifest.services:
+                interval = self._interval_for(spec)
+                if spec.interval_setting is not None and not interval:
+                    continue  # an interval service with no interval is off
+                wanted.append((manifest, spec, interval))
+        return wanted
+
+    def _run_service(self, manifest: CaptainManifest, spec: ServiceSpec, interval: Optional[int], stop: threading.Event) -> None:
+        try:
+            start = registry.load_reference(spec.start)
         except Exception as exc:  # noqa: BLE001
-            logger.warning("prs tick failed: %s", exc)
+            logger.warning("service %s:%s cannot start: %s", manifest.name, spec.name, exc)
+            return
+        try:
+            start(self.workspace_id, self.config, stop, interval=interval)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("service %s:%s failed: %s", manifest.name, spec.name, exc)
+
+    def _reconcile_services(self) -> None:
+        """Start services of captains that became active; stop those of captains turned off."""
+        wanted = {f"{m.name}:{s.name}": (m, s, i) for m, s, i in self._wanted_services()}
+        for key, running in list(self._services.items()):
+            if key not in wanted:
+                running.stop.set()
+                del self._services[key]
+                logger.info("stopped %s (%s is off)", key, running.manifest.label)
+        for key, (manifest, spec, interval) in wanted.items():
+            if key in self._services and self._services[key].thread.is_alive():
+                continue
+            stop = threading.Event()
+            thread = threading.Thread(target=self._run_service, args=(manifest, spec, interval, stop), name=key, daemon=True)
+            thread.start()
+            self._services[key] = _Running(manifest, spec, stop, thread)
+            if key not in self.started:
+                self.started.append(key)
+            logger.info("started %s", key)
+
+    def _run_services_once(self) -> None:
+        """Each service once, inline: a pre-set stop event makes a loop tick once and return."""
+        done = threading.Event()
+        done.set()
+        for manifest, spec, interval in self._wanted_services():
+            self._run_service(manifest, spec, interval, done)
+            self.started.append(f"{manifest.name}:{spec.name}")
+            if spec.interval_setting is not None:
+                self.ticks += 1
 
     # ── jobs the API queued ─────────────────────────────────────────────────
 
@@ -172,61 +250,63 @@ class Server:
                 logger.exception("job worker loop failed; backing off")
             self._stop.wait(self.job_poll)
 
-    def _rescan(self) -> None:
-        try:
-            dispatch.dispatch("mapper", "run", {"workspace_id": self.workspace_id})
-            logger.info("map re-scan completed")
-            if self.map_port:
-                self._write_map_page()
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("map re-scan failed: %s", exc)
+    # ── run ─────────────────────────────────────────────────────────────────
 
     def run(self) -> Dict[str, Any]:
-        for captain in COMMAND_MODULES:
-            load_commands(captain)
+        registry.load_all_commands()
         dispatch.use_inline_queue()
-        self._start_consumers()
         if self.map_port:
             self._start_map_viewer()
-        if self.job_poll and not self.once:
+        if self.once:
+            self._run_services_once()
+            self.stop()
+            return self._result()
+        self._reconcile_services()
+        if self.job_poll:
             worker = threading.Thread(target=self._job_worker, name="jobs", daemon=True)
             worker.start()
             self._threads.append(worker)
             logger.info("running jobs queued by the API (every %ss)", self.job_poll)
-        logger.info("compass serving workspace %s (prs tick %ss, map re-scan %ss)", self.workspace_id, self.prs_tick, self.map_interval)
+        logger.info("compass serving workspace %s: %s", self.workspace_id, ", ".join(self._services) or "no services")
 
-        next_prs = time.monotonic() if self.prs_tick else None
-        next_map = (time.monotonic() + self.map_interval) if self.map_interval else None
-        while not self._stop.is_set():
-            now = time.monotonic()
-            if next_prs is not None and now >= next_prs:
-                self._tick_prs()
-                self.ticks += 1
-                next_prs = now + self.prs_tick
-            if next_map is not None and now >= next_map:
-                self._rescan()
-                next_map = now + self.map_interval
-            if self.once:
-                break
-            self._stop.wait(1.0)
+        while not self._stop.wait(self.captains_poll):
+            try:
+                self._reconcile_services()
+            except Exception:  # noqa: BLE001
+                logger.exception("service check failed")
         self.stop()
+        for running in list(self._services.values()):
+            running.thread.join(timeout=5)
         for thread in self._threads:
             thread.join(timeout=5)
-        return {"workspace_id": self.workspace_id, "ticks": self.ticks, "queues": queue_urls(self.config)}
+        return self._result()
+
+    def _result(self) -> Dict[str, Any]:
+        return {"workspace_id": self.workspace_id, "ticks": self.ticks, "services": list(self.started)}
 
 
 def serve(payload: Dict[str, Any]) -> Dict[str, Any]:
     workspace = resolve(payload)
     config = captain_config(payload, workspace)
+    intervals: Dict[str, int] = {}
+    for manifest in registry.manifests():
+        for spec in manifest.services:
+            if spec.interval_setting and spec.interval_setting not in intervals:
+                value = payload.get(spec.interval_setting, interval_from_env(spec.interval_setting))
+                if value is None:
+                    value = spec.interval
+                intervals[spec.interval_setting] = int(value or 0)
     server = Server(
         workspace.workspace_id,
         config,
-        prs_tick=int(payload.get("prs_tick", os.getenv("PRS_TICK_SECONDS", 300)) or 0),
-        map_interval=int(payload.get("map_interval", os.getenv("COMPASS_MAP_INTERVAL", 0)) or 0),
+        prs_tick=intervals.pop("prs_tick", 300),
+        map_interval=intervals.pop("map_interval", 0),
         once=payload.get("once") in (True, "true", "1", 1),
         map_port=int(payload.get("map_port", os.getenv("COMPASS_MAP_PORT", 0)) or 0),
         map_dir=str(payload.get("map_dir") or os.getenv("COMPASS_MAP_DIR") or "map"),
         job_poll=float(payload.get("job_poll", os.getenv("COMPASS_JOB_POLL_SECONDS", 2.0)) or 0),
+        intervals=intervals,
+        captains_poll=float(payload.get("captains_poll", os.getenv("COMPASS_CAPTAINS_POLL_SECONDS", 30)) or 30),
     )
     if threading.current_thread() is threading.main_thread():
         signal.signal(signal.SIGINT, server.stop)

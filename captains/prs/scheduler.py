@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
-from typing import Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 logger = logging.getLogger("prs.scheduler")
 
@@ -92,3 +92,19 @@ def start_ticker() -> Optional[threading.Thread]:
 
 def stop_ticker() -> None:
     _stop.set()
+
+
+def run_service(workspace_id: str, config: Dict[str, Any], stop: threading.Event, *, interval: Optional[int] = None) -> None:
+    """The tick as a `compass serve` service: tick first, then wait ``interval``
+    seconds, until ``stop`` is set (compass_core.captains.ServiceSpec)."""
+    seconds = int(interval if interval is not None else tick_seconds())
+    if seconds <= 0:
+        return
+    while True:
+        try:
+            ran = tick([workspace_id])
+            logger.info("prs tick: %d sync(s) ran", ran)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("prs tick failed: %s", exc)
+        if stop.wait(seconds):
+            return

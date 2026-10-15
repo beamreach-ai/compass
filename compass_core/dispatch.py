@@ -32,6 +32,10 @@ def dispatch(captain: str, command: str, payload: Dict[str, Any]) -> Dict[str, A
     except KeyError:
         known = ", ".join(f"{c}.{m}" for c, m in commands()) or "none registered"
         raise KeyError(f"unknown command {captain}.{command}; known: {known}") from None
+    # a job that reaches a worker for a captain turned off after it was queued fails here, with the reason
+    from compass_core import captains as _captains
+
+    _captains.ensure_active_for_payload(captain, payload)
     return handler(dict(payload))
 
 

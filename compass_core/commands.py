@@ -322,6 +322,76 @@ def api(payload: Dict[str, Any]) -> Dict[str, Any]:
     return {"stopped": True, "host": host, "port": port}
 
 
-COMMANDS = {"init_config": init_config, "init_tables": init_tables, "init_alerts": init_alerts, "serve": serve, "api": api, "login": login}
+# ── captains: list, on, off, configure ──────────────────────────────────────
+
+def _save(workspace, config: Dict[str, Any]) -> None:
+    core_config.save_workspace_config(workspace.workspace_id, config)
+
+
+def captains(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Every installed captain and its state for the workspace."""
+    from compass_core import captain_admin, captains as registry
+
+    workspace = resolve(payload)
+    return {
+        "workspace_id": workspace.workspace_id,
+        "core_version": registry.core_version(),
+        "captains": captain_admin.summary(workspace.config),
+        "incompatible": registry.incompatible(),
+        "broken": registry.broken(),
+    }
+
+
+def _toggle(payload: Dict[str, Any], enabled: bool) -> Dict[str, Any]:
+    from compass_core import captain_admin
+
+    name = str(payload.get("captain") or payload.get("name") or "")
+    if not name:
+        raise ValueError("captain=<name> is required")
+    workspace = resolve(payload)
+    config = dict(workspace.config)
+    changed = captain_admin.set_enabled(
+        config, name, enabled,
+        with_dependencies=payload.get("with_dependencies") in (True, "true", "1", 1),
+        cascade=payload.get("cascade") in (True, "true", "1", 1),
+        actor=str(payload.get("user_id") or payload.get("actor") or "") or None,
+    )
+    _save(workspace, config)
+    return {"workspace_id": workspace.workspace_id, "changed": changed, "captain": captain_admin.state_dict(config, name)}
+
+
+def enable(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """captain=<name> [with_dependencies=true]: turn a captain on for the workspace."""
+    return _toggle(payload, True)
+
+
+def disable(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """captain=<name> [cascade=true]: turn a captain off; its work is refused, nothing is deleted."""
+    return _toggle(payload, False)
+
+
+def configure(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """captain=<name> [set='{...}'] [replace=true]: show or edit the captain's config section."""
+    from compass_core import captain_admin, captains as registry
+
+    name = str(payload.get("captain") or payload.get("name") or "")
+    manifest = registry.manifest(name)
+    if manifest is None:
+        raise LookupError(f"no captain named {name!r} is installed")
+    workspace = resolve(payload)
+    config = dict(workspace.config)
+    incoming = payload.get("set")
+    if isinstance(incoming, str):
+        incoming = json.loads(incoming)
+    if isinstance(incoming, dict):
+        captain_admin.apply_section_update(config, manifest, incoming, replace=payload.get("replace") in (True, "true", "1", 1))
+        _save(workspace, config)
+    return captain_admin.describe_config(config, manifest)
+
+
+COMMANDS = {
+    "init_config": init_config, "init_tables": init_tables, "init_alerts": init_alerts, "serve": serve, "api": api, "login": login,
+    "captains": captains, "enable": enable, "disable": disable, "configure": configure,
+}
 
 dispatch.register("core", COMMANDS)

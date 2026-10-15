@@ -17,9 +17,11 @@ _FEATURE_ALIASES = {
     "policies": "policies",
 }
 
-# The open tabs and the feature flag that hides each; a deployment passes the tabs it adds
-# as `tab_features` (compass_api.routes._app_config does, from compass_api.extensions).
-_TAB_FEATURES = {
+# tab → the feature flag that hides it. The manifests declare their tabs
+# (compass_core.captains.tab_features); this static table keeps the legacy keys
+# answering when no manifest is loaded. A deployment passes the tabs it adds as
+# `tab_features` (compass_api.routes._app_config does, from compass_api.extensions).
+_LEGACY_TAB_FEATURES = {
     "honeypots": "honeypots",
     "queue": "queue",
     "maps": "maps",
@@ -27,6 +29,15 @@ _TAB_FEATURES = {
     "prs": "prs",
     "settings": "settings",
 }
+
+
+def _tab_features() -> Dict[str, str]:
+    try:
+        from compass_core import captains as _captains
+
+        return {**_LEGACY_TAB_FEATURES, **_captains.tab_features()}
+    except Exception:  # noqa: BLE001 - the flags answer even when discovery cannot run
+        return dict(_LEGACY_TAB_FEATURES)
 
 _DOMAIN_FEATURES = {
     "security": "security",
@@ -64,7 +75,7 @@ def is_feature_enabled(feature: Optional[str], disabled_features: Optional[Set[s
 def feature_for_tab(tab: Optional[str], tab_features: Optional[Dict[str, str]] = None) -> Optional[str]:
     if tab is None:
         return None
-    return {**_TAB_FEATURES, **(tab_features or {})}.get(str(tab).strip().lower())
+    return {**_tab_features(), **(tab_features or {})}.get(str(tab).strip().lower())
 
 
 def is_tab_enabled(tab: Optional[str], disabled_features: Optional[Set[str]] = None, tab_features: Optional[Dict[str, str]] = None) -> bool:

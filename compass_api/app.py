@@ -14,12 +14,25 @@ import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 logger = logging.getLogger("compass.api")
 
 # The dashboard's tabs for features the open edition does not have. (The Queue tab
 # stays: it is the jobs list — scans, plants, imports, PR syncs.)
 OPEN_DISABLED_FEATURES = "security,finops,compliance,policies"
+
+
+def routers() -> list:
+    """Every router the installed captains declare, the core's first, each captain's
+    in its manifest's order (compass_core.captains)."""
+    from compass_core import captains
+
+    found = []
+    for manifest in captains.manifests():
+        for ref in manifest.routers:
+            found.append(captains.load_reference(ref))
+    return found
 
 
 def _configure_environment() -> None:
@@ -78,27 +91,16 @@ def create_app() -> FastAPI:
     _configure_environment()
     _configure_queue()
 
+    from compass_api.captain_gate import CaptainGateMiddleware, refusal
     from compass_api.middleware.bearer_auth import BearerAuthMiddleware
     from compass_api.middleware.simple_auth import SimpleAuthMiddleware
     from compass_api.middleware.workspace import WorkspaceContextMiddleware
-    from compass_api.routes import auth as auth_routes
-    from compass_api.routes import (
-        honeypot_actions,
-        honeypot_incidents,
-        honeypots,
-        jobs,
-        librarian,
-        maps,
-        notifications,
-        settings,
-        slack_connect,
-        status,
-    )
-    from compass_api.routes import prs as pr_routes
-    from compass_api.routes import target as target_routes
-    from compass_api.routes import tokens as token_routes
+    from compass_api.routes import settings
+    from compass_core import captain_admin, captains
 
     app = FastAPI(title="Compass")
+    # innermost: runs after the workspace middleware, so the gate sees the workspace config
+    app.add_middleware(CaptainGateMiddleware)
     app.add_middleware(SimpleAuthMiddleware)
     app.add_middleware(WorkspaceContextMiddleware, header_name="X-Workspace-Id", optional=False)
     # Added after the workspace middleware so it runs first: an API token decides the workspace.
@@ -113,25 +115,16 @@ def create_app() -> FastAPI:
             settings.invalidate_bootstrap_sections(getattr(workspace_ctx, "workspace_id", None))
         return response
 
-    for router in (
-        auth_routes.router,
-        token_routes.router,
-        status.router,
-        pr_routes.router,
-        jobs.router,
-        target_routes.router,
-        settings.router,
-        maps.router,
-        librarian.router,
-        # Fixed /api/honeypots/<segment> routers go before honeypots.router: its
-        # legacy /api/honeypots/{id} catch-all would otherwise swallow them.
-        honeypot_incidents.router,
-        honeypot_actions.router,
-        honeypots.router,
-        notifications.router,
-        slack_connect.router,
-    ):
+    for router in routers():
         app.include_router(router)
+
+    @app.exception_handler(captains.CaptainUnavailable)
+    async def _captain_unavailable(request, exc):  # noqa: ANN001
+        return refusal(exc)
+
+    @app.exception_handler(captain_admin.CaptainAdminError)
+    async def _captain_admin_error(request, exc):  # noqa: ANN001
+        return JSONResponse(status_code=exc.status, content={"detail": str(exc), **exc.to_dict()})
 
     @app.get("/health")
     def health() -> dict:

@@ -2,15 +2,17 @@ import json
 
 import pytest
 
-from compass_core import cli, dispatch, queue
+from compass_core import captains, cli, dispatch, queue
+from compass_core.captains import CaptainManifest
 
 
 @pytest.fixture
 def fake_captain(monkeypatch):
     monkeypatch.setattr(dispatch, "_registry", {})
-    monkeypatch.setitem(cli.COMMAND_MODULES, "fake", "tests.compass_core.fake_commands")
+    captains.register(CaptainManifest(name="fake", label="Fake", summary="a test captain", tier="open", feature="fake", commands="tests.compass_core.fake_commands"))
     previous = queue._factory
     yield
+    captains.unregister("fake")
     queue.set_job_queue(previous)
 
 
@@ -43,7 +45,7 @@ def test_unknown_command_is_an_error_not_a_traceback(fake_captain, capsys):
 
 
 def test_unknown_captain_exits_with_the_known_ones():
-    with pytest.raises(SystemExit, match="unknown captain 'zzz'"):
+    with pytest.raises(SystemExit, match="unknown captain 'zzz'; known: .*honeypot"):
         cli.load_commands("zzz")
 
 

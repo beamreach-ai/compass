@@ -4,20 +4,24 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import React, { useEffect, useState } from "react";
 
-import { HONEYPOT_VIEWS, asHoneypotView, honeypotViewHref } from "./honeypotViews";
-import { PR_VIEWS, asPRView, prViewHref } from "./prViews";
 import { COMPANY_NAME, LOGO_URL, SUPPORT_EMAIL, SUPPORT_WHATSAPP, isOpenEdition } from "../lib/edition";
+import { ALL_WORKSPACE_TABS, TAB_GROUPS, asWorkspaceTab, viewHref, viewLabel } from "../lib/tabs";
+import type { TabDetail, WorkspaceTab } from "../lib/tabs";
 
-type WorkspaceTab = "finops" | "audits" | "compliance" | "queue" | "maps" | "iac" | "prs" | "policies" | "settings" | "honeypots";
-const ALL_WORKSPACE_TABS: WorkspaceTab[] = ["finops", "audits", "compliance", "queue", "maps", "iac", "prs", "policies", "settings", "honeypots"];
-
-const asWorkspaceTab = (value: string | null): WorkspaceTab | null => {
-  if (!value) return null;
-  if ((ALL_WORKSPACE_TABS as string[]).includes(value)) {
-    return value as WorkspaceTab;
-  }
-  return null;
-};
+// The groups before the bootstrap has answered (or from an API that lists no
+// tab details): the first-party tabs as they have always been grouped.
+const LEGACY_TABS: TabDetail[] = [
+  { key: "finops", label: "FinOps", group: "cost" },
+  { key: "iac", label: "IAC", group: "cost" },
+  { key: "audits", label: "DevSecOps", group: "security" },
+  { key: "compliance", label: "Compliance", group: "security" },
+  { key: "honeypots", label: "Honeypots", group: "security", views: ["overview", "honeytokens", "history", "settings"] },
+  { key: "prs", label: "Pull requests", group: "platform", views: ["open", "needs_you", "history"] },
+  { key: "maps", label: "Maps", group: "platform" },
+  { key: "queue", label: "Queue", group: "platform" },
+  { key: "policies", label: "Policies", group: "platform" },
+  { key: "settings", label: "Settings", group: "platform" },
+];
 
 type AccountInfo = {
   name: string | null;
@@ -32,6 +36,7 @@ type SettingsBootstrapSummary = {
     production_url?: string | null;
     default_tab?: WorkspaceTab | null;
     enabled_tabs?: WorkspaceTab[] | null;
+    tabs?: TabDetail[] | null;
     disabled_features?: string[] | null;
     auth_enabled?: boolean;
   } | null;
@@ -79,8 +84,7 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void } = {}
   const searchParams = useSearchParams();
   const tabParam = searchParams.get("tab");
   const requestedTab = tabParam === "radio" ? "audits" : asWorkspaceTab(tabParam);
-  const honeypotView = asHoneypotView(searchParams.get("view"));
-  const prView = asPRView(searchParams.get("view"));
+  const viewParam = searchParams.get("view");
 
   const linkBase = "block px-3 py-2 rounded transition";
   const activeCls = "bg-blue-100 text-blue-700 font-semibold";
@@ -102,6 +106,7 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void } = {}
   const [upgradeRequired, setUpgradeRequired] = useState(false);
   const [defaultTab, setDefaultTab] = useState<WorkspaceTab>("finops");
   const [enabledTabs, setEnabledTabs] = useState<WorkspaceTab[]>([]);
+  const [tabDetails, setTabDetails] = useState<TabDetail[] | null>(null);
   const [simpleAuthEnabled, setSimpleAuthEnabled] = useState(false);
   const [accountLoading, setAccountLoading] = useState(true);
 
@@ -173,6 +178,7 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void } = {}
           ? bootstrap.app.enabled_tabs.map((tab) => asWorkspaceTab(tab)).filter((tab): tab is WorkspaceTab => Boolean(tab))
           : [];
         setEnabledTabs(enabledFromBootstrap.length > 0 ? enabledFromBootstrap : ALL_WORKSPACE_TABS);
+        setTabDetails(Array.isArray(bootstrap?.app?.tabs) && bootstrap.app.tabs.length > 0 ? bootstrap.app.tabs : null);
       } catch (error) {
         if (!cancelled) {
           console.error("Failed to load sidebar metadata", error);
@@ -191,6 +197,7 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void } = {}
           setUpgradeRequired(false);
           setDefaultTab("finops");
           setEnabledTabs(ALL_WORKSPACE_TABS);
+          setTabDetails(null);
         }
       } finally {
         if (!cancelled) {
@@ -223,30 +230,23 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void } = {}
   const workspaceSetupTab: WorkspaceTab = settingsEnabled && enabledTabSet.has("settings") ? "settings" : fallbackTab;
   const currentTabCandidate: WorkspaceTab = requiresWorkspaceSetup ? workspaceSetupTab : requestedOrDefault;
   const currentTab: WorkspaceTab = enabledTabSet.has(currentTabCandidate) ? currentTabCandidate : fallbackTab;
-  type NavItem = { key: WorkspaceTab; label: string; href: string; disabled?: boolean };
-  const item = (key: WorkspaceTab, label: string): NavItem => ({
-    key,
-    label,
-    href: `/workspace?tab=${key}`,
-    disabled: requiresWorkspaceSetup,
+  type NavItem = { key: WorkspaceTab; label: string; href: string; disabled?: boolean; views: string[] };
+  const item = (tab: TabDetail): NavItem => ({
+    key: tab.key,
+    label: tab.label,
+    href: `/workspace?tab=${tab.key}`,
+    disabled: requiresWorkspaceSetup && tab.key !== "settings",
+    views: Array.isArray(tab.views) ? tab.views : [],
   });
 
-  const SECURITY_TABS = new Set<WorkspaceTab>(["audits", "compliance", "honeypots"]);
-
-  const rawGroups: NavItem[][] = [
-    [item("finops", "FinOps"), item("iac", "IAC")],
-    [item("audits", "DevSecOps"), item("compliance", "Compliance"), item("honeypots", "Honeypots")],
-    [item("prs", "Pull requests"), item("maps", "Maps"), item("queue", "Queue")],
-    [item("policies", "Policies")],
-  ];
-
-  if (settingsEnabled && enabledTabSet.has("settings")) {
-    rawGroups[rawGroups.length - 1].push({ key: "settings", label: "Settings", href: "/workspace?tab=settings" });
-  }
-
-  const navGroups = rawGroups
-    .map((group) => group.filter((i) => enabledTabSet.has(i.key)))
-    .filter((group) => group.length > 0);
+  // The groups: cost, security, platform, in the order the API lists the tabs;
+  // the tab details come from the bootstrap (the manifests), else the legacy list.
+  const details = tabDetails || LEGACY_TABS;
+  const SECURITY_TABS = new Set<WorkspaceTab>(details.filter((t) => t.group === "security").map((t) => t.key));
+  const visible = (t: TabDetail) => enabledTabSet.has(t.key) && (t.key !== "settings" || settingsEnabled);
+  const navGroups: NavItem[][] = TAB_GROUPS.map((group) => details.filter((t) => t.group === group && visible(t)).map(item)).filter((group) => group.length > 0);
+  const ungrouped = details.filter((t) => !TAB_GROUPS.includes(t.group as (typeof TAB_GROUPS)[number]) && visible(t)).map(item);
+  if (ungrouped.length > 0) navGroups.push(ungrouped);
 
   return (
     <>
@@ -289,13 +289,17 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void } = {}
                         ? disabledCls
                         : inactiveCls
                   }`;
-                  // Honeypots and Pull requests are split into sub-pages; they show only while that tab is active.
+                  // A tab split into sub-pages (the manifest's views) lists them only while it is active;
+                  // the first view is the tab itself.
                   const subItems: Array<{ key: string; label: string; href: string; active: boolean }> =
-                    isActive && !navItem.disabled && navItem.key === "honeypots"
-                      ? HONEYPOT_VIEWS.map((v) => ({ key: v.key, label: v.label, href: honeypotViewHref(v.key), active: honeypotView === v.key }))
-                      : isActive && !navItem.disabled && navItem.key === "prs"
-                        ? PR_VIEWS.map((v) => ({ key: v.key, label: v.label, href: prViewHref(v.key), active: prView === v.key }))
-                        : [];
+                    isActive && !navItem.disabled && navItem.views.length > 0
+                      ? navItem.views.map((v, index) => ({
+                          key: v,
+                          label: viewLabel(v),
+                          href: viewHref(navItem.key, v, index === 0),
+                          active: viewParam ? viewParam === v : index === 0,
+                        }))
+                      : [];
                   return (
                     <li key={navItem.key}>
                       {navItem.disabled ? (

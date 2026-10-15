@@ -4,9 +4,6 @@ before it. This builds the app in the production order and checks."""
 
 from __future__ import annotations
 
-import re
-from pathlib import Path
-
 import boto3
 import pytest
 from fastapi import FastAPI
@@ -16,12 +13,11 @@ from moto import mock_aws
 from compass_api.routes import honeypot_actions, honeypot_incidents, honeypots
 from compass_core.keys import workspace_pk
 
-APP = Path(__file__).resolve().parents[2] / "compass_api" / "app.py"
-
-
 def _include_order():
-    text = APP.read_text()
-    return [m.group(1) for m in re.finditer(r"^\s+(\w+)\.router,$", text, re.MULTILINE)]
+    """The order the app includes routers in: the honeypot manifest's (compass_core.captains)."""
+    from compass_core import captains
+
+    return [ref.rsplit(".", 1)[-1].split(":")[0] for ref in captains.manifest("honeypot").routers]
 
 
 def test_fixed_segment_routers_are_included_before_the_catch_all():

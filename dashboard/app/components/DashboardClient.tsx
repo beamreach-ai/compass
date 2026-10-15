@@ -6,55 +6,18 @@
 // with useShell() (app/lib/shell.tsx).
 import React, { useCallback, useEffect, useMemo, useState, useRef } from "react";
 import { useSearchParams } from "next/navigation";
-import dynamic from "next/dynamic";
 import axios from "axios";
 import { COMPANY_NAME, isOpenEdition } from "../lib/edition";
+import { openTabs } from "../lib/captains";
 import { productBanners, productProviders, productSettingsSections, productTabs } from "../lib/extensions";
 import type { SettingsSlot } from "../lib/extensions";
-import { formatTimestamp } from "../lib/format";
 import { ShellProvider } from "../lib/shell";
+import CaptainsSection from "./CaptainsSection";
+import GenericCaptainTab from "./GenericCaptainTab";
 import type { QueueEvent, QueueJob, SettingsBootstrap, SettingsSaveParticipant, Shell } from "../lib/shell";
 import { ALL_WORKSPACE_TABS, TAB_ALIASES, asWorkspaceTab, resolveEnabledTabs } from "../lib/tabs";
 import type { DashboardTab, WorkspaceTab } from "../lib/tabs";
 import SlackIntegrationCard from "./SlackIntegrationCard";
-
-const MapsTabView = dynamic(() => import("./MapsTab"), {
-  ssr: false,
-  loading: () => (
-    <div className="p-6 text-sm text-gray-500">
-      Loading maps…
-    </div>
-  ),
-});
-
-const IACTabView = dynamic(() => import("./IACTab"), {
-  ssr: false,
-  loading: () => (
-    <div className="p-6 text-sm text-gray-500">
-      Loading IAC coverage…
-    </div>
-  ),
-});
-
-const PRWatcherSettingsView = dynamic(() => import("./PRWatcherSettings"), { ssr: false });
-
-const PRsTabView = dynamic(() => import("./PRsTab"), {
-  ssr: false,
-  loading: () => (
-    <div className="p-6 text-sm text-gray-500">
-      Loading PRs…
-    </div>
-  ),
-});
-
-const HoneypotsTab = dynamic(() => import("./HoneypotsTab"), {
-  ssr: false,
-  loading: () => (
-    <div className="p-6 text-sm text-gray-500">
-      Loading honeypots…
-    </div>
-  ),
-});
 
 const SCAN_PHASES: Array<{ prefix: string; pct: number }> = [
   { prefix: "Initializing infra scan", pct: 1 },
@@ -88,22 +51,6 @@ function scanProgressFromMessage(message: string | null | undefined): number {
   }
   return 1;
 }
-
-const normalizeQueueStatus = (status: string) => (status || "").toLowerCase();
-
-const getQueueStatusBadge = (status: string) => {
-  const normalized = normalizeQueueStatus(status);
-  if (normalized === "completed") return "bg-green-100 text-green-800 border border-green-200";
-  if (normalized === "failed" || normalized === "error") return "bg-red-100 text-red-800 border border-red-200";
-  if (normalized === "running" || normalized === "in_progress") return "bg-blue-100 text-blue-800 border border-blue-200";
-  if (normalized === "queued" || normalized === "pending") return "bg-yellow-100 text-yellow-800 border border-yellow-200";
-  return "bg-gray-100 text-gray-700 border border-gray-200";
-};
-
-const isQueueJobRestartable = (status: string) => {
-  const normalized = normalizeQueueStatus(status);
-  return ["completed", "failed", "error", "skipped", "cancelled", "canceled"].includes(normalized);
-};
 
 const resolveTab = (
   params: ReturnType<typeof useSearchParams>,
@@ -173,7 +120,6 @@ export default function DashboardClient() {
   const [saveParticipants, setSaveParticipants] = useState<Record<string, SettingsSaveParticipant>>({});
   const [queueJobs, setQueueJobs] = useState<QueueJob[]>([]);
   const [queueError, setQueueError] = useState<string | null>(null);
-  const [restartPending, setRestartPending] = useState<string | null>(null);
 
   const [activeTab, setActiveTab] = useState<DashboardTab>(resolveTab(searchParams, null));
 
@@ -553,24 +499,6 @@ resource "aws_iam_role_policy_attachment" "beamreach_compass_readonly" {
     }
   }, [queueEnabled, refreshSettingsBootstrap]);
 
-  const restartQueueJob = useCallback(
-    async (jobId: string) => {
-      if (!jobId) return;
-      setRestartPending(jobId);
-      try {
-        await axios.post(`/api/jobs/${encodeURIComponent(jobId)}/restart`);
-        await fetchQueueJobs();
-        setQueueError(null);
-      } catch (error: any) {
-        console.error("Failed to restart job", error);
-        setQueueError(error?.response?.data?.detail || "Failed to restart job");
-      } finally {
-        setRestartPending(null);
-      }
-    },
-    [fetchQueueJobs],
-  );
-
   useEffect(() => {
     fetchQueueJobs();
   }, [fetchQueueJobs]);
@@ -656,16 +584,19 @@ resource "aws_iam_role_policy_attachment" "beamreach_compass_readonly" {
     infraScanned,
     infraScanBlocked,
     queueJobs,
+    queueError,
     fetchQueueJobs,
+    activeMapperJob,
     registerSettingsSaveParticipant,
     unregisterSettingsSaveParticipant,
     clearSettingsSaveSuccess,
   };
 
-  // The product tab for the active key, if the product registered one and the
-  // API did not hide it (enabled_tabs already applies the feature flags; the
-  // feature check mirrors it for a bootstrap that lists tabs but not features).
-  const productTab = productTabs.find(
+  // The component for the active key, from the open captains' registry and the
+  // product's, if the API did not hide the tab (enabled_tabs already applies the
+  // feature flags and the captains' states; the feature check mirrors it for a
+  // bootstrap that lists tabs but not features).
+  const activeTabDef = [...openTabs, ...productTabs].find(
     (tab) =>
       tab.key === activeTab &&
       (tab.key === "radio" || enabledWorkspaceTabs.includes(tab.key)) &&
@@ -724,175 +655,6 @@ resource "aws_iam_role_policy_attachment" "beamreach_compass_readonly" {
         )}
         {!tabResolved ? (
           <div className="flex items-center justify-center py-20 text-gray-400 text-sm">Loading…</div>
-        ) : activeTab === "maps" ? (
-          <MapsTabView
-            infraScan={infraScan}
-            mapperJob={activeMapperJob}
-            onMapperTriggered={() => {
-              void fetchQueueJobs();
-              void refreshSettingsBootstrap();
-            }}
-          />
-        ) : activeTab === "iac" ? (
-          <IACTabView
-            onScanTriggered={() => {
-              void fetchQueueJobs();
-              void refreshSettingsBootstrap();
-            }}
-          />
-        ) : activeTab === "prs" ? (
-          <PRsTabView />
-        ) : activeTab === "honeypots" ? (
-          <HoneypotsTab />
-        ) : activeTab === "queue" ? (
-          <div>
-            <h1 className="text-2xl font-bold mb-4">Queue</h1>
-            <p className="text-sm text-gray-600">
-              Recent captain jobs across all workers. This view refreshes automatically every few seconds while open.
-            </p>
-            {queueError && (
-              <div className="mt-4 rounded border border-red-200 bg-red-50 text-red-700 px-4 py-2 text-sm">
-                {queueError}
-              </div>
-            )}
-            <div className="mt-6 overflow-x-auto rounded border border-gray-200">
-              <table className="min-w-full divide-y divide-gray-200 text-sm">
-                <thead className="bg-gray-100 text-left">
-                  <tr>
-                    <th className="px-4 py-3 font-semibold text-gray-700">Job</th>
-                    <th className="px-4 py-3 font-semibold text-gray-700">Captain</th>
-                    <th className="px-4 py-3 font-semibold text-gray-700">Command</th>
-                    <th className="px-4 py-3 font-semibold text-gray-700">Status</th>
-                    <th className="px-4 py-3 font-semibold text-gray-700">Queue</th>
-                    <th className="px-4 py-3 font-semibold text-gray-700">Timestamps</th>
-                    <th className="px-4 py-3 font-semibold text-gray-700 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200 bg-white">
-                  {queueJobs.length === 0 ? (
-                    <tr>
-                      <td colSpan={7} className="px-4 py-6 text-center text-gray-500">
-                        No jobs found yet.
-                      </td>
-                    </tr>
-                  ) : (
-                    queueJobs.map((job) => {
-                      const statusLabel = job.status || "queued";
-                      const scanBlockedJobRestart =
-                        infraScanBlocked && ["engine", "finops_engine", "triage", "finops_triage"].includes(job.captain || "");
-                      const canRestart = isQueueJobRestartable(statusLabel) && !scanBlockedJobRestart;
-                      const isRestarting = restartPending === job.job_id;
-                      return (
-                        <React.Fragment key={job.job_id}>
-                          <tr className="align-top">
-                            <td className="px-4 py-3">
-                              <div className="font-mono text-xs break-all">{job.job_id}</div>
-                              {job.session_id && (
-                                <div className="mt-1 text-xs text-gray-500 break-all">
-                                  Session: {job.session_id}
-                                </div>
-                              )}
-                            </td>
-                            <td className="px-4 py-3 capitalize">{job.captain}</td>
-                            <td className="px-4 py-3 break-words">{job.command}</td>
-                            <td className="px-4 py-3">
-                              <span className={`inline-flex items-center rounded px-2 py-1 text-xs font-semibold ${getQueueStatusBadge(statusLabel)}`}>
-                                {statusLabel}
-                              </span>
-                              {job.error && (
-                                <div className="mt-2 text-xs text-red-600 break-words">
-                                  {job.error}
-                                </div>
-                              )}
-                            </td>
-                            <td className="px-4 py-3 text-xs text-gray-600 break-words">{job.queue}</td>
-                            <td className="px-4 py-3 text-xs text-gray-600">
-                              <div>
-                                Updated: <span className="font-semibold text-gray-800">{formatTimestamp(job.updated_at)}</span>
-                              </div>
-                              <div className="mt-1">
-                                Created: <span className="text-gray-700">{formatTimestamp(job.created_at)}</span>
-                              </div>
-                            </td>
-                            <td className="px-4 py-3 text-right">
-                              <button
-                                onClick={() => restartQueueJob(job.job_id)}
-                                disabled={!canRestart || isRestarting}
-                                className={`inline-flex items-center justify-center rounded border px-3 py-1 text-xs font-semibold transition ${
-                                  canRestart
-                                    ? "border-gray-900 text-gray-900 hover:bg-gray-900 hover:text-white"
-                                    : "border-gray-200 text-gray-400 cursor-not-allowed"
-                                } ${isRestarting ? "opacity-60 cursor-wait" : ""}`}
-                                title={
-                                  canRestart
-                                    ? "Re-enqueue this job"
-                                    : scanBlockedJobRestart
-                                      ? infraScan?.disabled_reason || "Complete the infra scan before restarting triage or fix jobs."
-                                      : "Restart available when job is finished"
-                                }
-                              >
-                                {isRestarting ? "Restarting…" : "Restart"}
-                              </button>
-                            </td>
-                          </tr>
-                          {job.events.length > 0 && (
-                            <tr>
-                              <td colSpan={7} className="bg-gray-50 px-4 py-3 text-xs text-gray-700">
-                                <details open={statusLabel === "running"}>
-                                  <summary className="cursor-pointer select-none text-gray-600">
-                                    Timeline ({job.events.length})
-                                  </summary>
-                                  <ul className="mt-2 space-y-2">
-                                    {job.events.map((event, index) => (
-                                      <li
-                                        key={`${event.timestamp}-${index}`}
-                                        className="rounded border border-gray-200 bg-white px-3 py-2 shadow-sm"
-                                      >
-                                        <div className="flex flex-wrap items-center justify-between gap-3">
-                                          <span className="font-semibold text-gray-900">
-                                            {formatTimestamp(event.timestamp)}
-                                          </span>
-                                          <span className="flex items-center gap-2 text-xs uppercase tracking-wide text-gray-500">
-                                            {event.status && (
-                                              <span
-                                                className={`inline-flex items-center rounded px-2 py-0.5 font-semibold ${getQueueStatusBadge(event.status)}`}
-                                              >
-                                                {event.status}
-                                              </span>
-                                            )}
-                                            {event.type && (!event.status || normalizeQueueStatus(event.status) !== normalizeQueueStatus(event.type)) && (
-                                              <span>{event.type}</span>
-                                            )}
-                                          </span>
-                                        </div>
-                                        <div className="mt-1 text-gray-700">{event.message}</div>
-                                      </li>
-                                    ))}
-                                  </ul>
-                                </details>
-                              </td>
-                            </tr>
-                          )}
-                          {job.result_summary && (
-                            <tr>
-                              <td colSpan={7} className="bg-gray-50 px-4 py-3 text-xs text-gray-700">
-                                <details>
-                                  <summary className="cursor-pointer select-none text-gray-600">Result summary</summary>
-                                  <pre className="mt-2 overflow-x-auto whitespace-pre-wrap break-words rounded border border-gray-200 bg-white p-3">
-                                    {JSON.stringify(job.result_summary, null, 2)}
-                                  </pre>
-                                </details>
-                              </td>
-                            </tr>
-                          )}
-                        </React.Fragment>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
         ) : activeTab === "settings" ? (
           settingsEnabled ? (
           <div className="space-y-6">
@@ -1236,7 +998,7 @@ resource "aws_iam_role_policy_attachment" "beamreach_compass_readonly" {
 
             <SettingsSections slot="after_integrations" />
 
-            <PRWatcherSettingsView readOnly={isReadOnly} />
+            <CaptainsSection readOnly={isReadOnly} />
 
             <SettingsSections slot="bottom" />
 
@@ -1268,8 +1030,11 @@ resource "aws_iam_role_policy_attachment" "beamreach_compass_readonly" {
             Settings are disabled in this environment.
           </div>
           )
-        ) : productTab ? (
-          <productTab.Component />
+        ) : activeTabDef ? (
+          <activeTabDef.Component />
+        ) : enabledWorkspaceTabs.includes(activeTab) ? (
+          // a tab the API lists but this build has no component for: a captain installed as an extension
+          <GenericCaptainTab tabKey={activeTab} />
         ) : (
           <div className="rounded-lg border border-gray-200 bg-white p-6 text-sm text-gray-600 shadow-sm">
             This tab is not available in this edition.

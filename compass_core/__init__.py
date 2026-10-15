@@ -13,3 +13,10 @@ git_metadata  remote/branch probing and slug sanitising
 The old import paths under workspace/, utils/ and nodes/triage/ re-export
 these until the private side has moved over.
 """
+
+from importlib import metadata as _metadata
+
+try:
+    __version__ = _metadata.version("compass-open")
+except _metadata.PackageNotFoundError:  # a checkout that is not installed
+    __version__ = "0.1.0"

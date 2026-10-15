@@ -16,23 +16,14 @@ without it the commands run model-free. The result is printed as JSON.
 from __future__ import annotations
 
 import argparse
-import importlib
 import json
 import logging
 import sys
 from typing import Any, Dict, List, Optional
 
-from compass_core import anthropic_model, dispatch, llm
+from compass_core import anthropic_model, captains, dispatch, llm
 
-# captain -> the module whose import registers its commands
-COMMAND_MODULES = {
-    "honeypot": "captains.honeypot.commands",
-    "iac": "captains.iac.commands",
-    "prs": "captains.prs.commands",
-    "mapper": "captains.mapper.commands",
-    "core": "compass_core.commands",
-}
-CORE_SHORTHAND = {"init_config", "init_tables", "init_alerts", "serve", "api", "login"}
+CORE_SHORTHAND = {"init_config", "init_tables", "init_alerts", "serve", "api", "login", "captains", "enable", "disable", "configure"}
 
 
 def parse_pairs(pairs: List[str]) -> Dict[str, Any]:
@@ -63,14 +54,13 @@ def build_payload(args: argparse.Namespace) -> Dict[str, Any]:
 
 
 def load_commands(captain: str) -> None:
-    """Import the captain's command module and register its COMMANDS (idempotent)."""
-    name = COMMAND_MODULES.get(captain)
-    if name is None:
-        raise SystemExit(f"unknown captain {captain!r}; known: {', '.join(sorted(COMMAND_MODULES))}")
-    module = importlib.import_module(name)
-    table = getattr(module, "COMMANDS", None)
-    if table:
-        dispatch.register(captain, table)
+    """Import the captain's commands module, which registers its COMMANDS (idempotent).
+
+    The captains come from the registry (compass_core.captains.discover)."""
+    try:
+        captains.load_commands(captain)
+    except LookupError as exc:
+        raise SystemExit(str(exc)) from None
 
 
 def main(argv: Optional[List[str]] = None, *, captain: Optional[str] = None) -> int:
@@ -80,7 +70,7 @@ def main(argv: Optional[List[str]] = None, *, captain: Optional[str] = None) -> 
         argv.insert(0, "core")
     parser = argparse.ArgumentParser(prog=f"python -m {captain}" if captain else "compass", description=__doc__.split("\n\n")[0])
     if captain is None:
-        parser.add_argument("captain", choices=sorted(COMMAND_MODULES))
+        parser.add_argument("captain", choices=sorted(captains.commands_modules()))
     parser.add_argument("command")
     parser.add_argument("pairs", nargs="*", metavar="key=value")
     parser.add_argument("--workspace", "-w", default=None, help="workspace id (default: DEFAULT_WORKSPACE or TARGET)")
@@ -97,7 +87,7 @@ def main(argv: Optional[List[str]] = None, *, captain: Optional[str] = None) -> 
 
     try:
         result = dispatch.dispatch(chosen, args.command, build_payload(args))
-    except (LookupError, ValueError) as exc:  # unknown command, no config for the workspace, or a bad argument
+    except (LookupError, ValueError, captains.CaptainUnavailable) as exc:  # unknown command, no config, a bad argument, a captain that is off
         print(str(exc.args[0] if exc.args else exc), file=sys.stderr)
         return 2
     json.dump(result, sys.stdout, indent=2, default=str)

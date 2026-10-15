@@ -24,6 +24,8 @@ from pydantic import BaseModel, Field
 
 from compass_api import extensions
 from compass_api.infra_scan import mark_infra_scan_pending
+from compass_core import captain_admin
+from compass_core import captains as _captains
 from compass_api.routes._app_config import ensure_settings_enabled, get_app_config
 from compass_api.routes._infra_scan import current_infra_scan_summary, enqueue_full_infra_scan
 from compass_api.routes._workspace import get_workspace_config, get_workspace_context, save_config
@@ -331,7 +333,7 @@ def get_settings_bootstrap(request: Request) -> Dict[str, Any]:
     from compass_api.routes.auth import _auth_enabled
     ctx = get_workspace_context(request)
     config = get_workspace_config(request)
-    app = get_app_config()
+    app = get_app_config(config)
     before_external_id = _strip_or_none(((config.get("aws") or {}).get("generated_external_id")))
     if app["settings_enabled"]:
         generated_external_id = _ensure_generated_external_id(config)
@@ -350,6 +352,8 @@ def get_settings_bootstrap(request: Request) -> Dict[str, Any]:
             "user_id": ctx.user_id,
         },
         "app": {**app, "auth_enabled": _auth_enabled()},
+        "core_version": _captains.core_version(),
+        "captains": captain_admin.summary(config),
         "aws": _aws_summary(config),
         "github": _github_summary(config),
         # triage and billing come from the product; the open edition reports None

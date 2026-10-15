@@ -251,3 +251,37 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+def queue_urls(config: Dict[str, Any]) -> List[str]:
+    """The alert queues a workspace consumes: ``honeypot.alert_queue_urls`` or
+    ``honeypot.alert_queue_url``, else ``HONEYPOT_ALERT_QUEUE_URL(S)``."""
+    hp = config.get("honeypot") if isinstance(config.get("honeypot"), dict) else {}
+    urls = hp.get("alert_queue_urls") or ([hp["alert_queue_url"]] if hp.get("alert_queue_url") else [])
+    if not urls:
+        raw = os.getenv("HONEYPOT_ALERT_QUEUE_URLS") or os.getenv("HONEYPOT_ALERT_QUEUE_URL") or ""
+        urls = [u.strip() for u in raw.split(",") if u.strip()]
+    return [str(u) for u in urls]
+
+
+def run_service(workspace_id: str, config: Dict[str, Any], stop: threading.Event, *, interval: Optional[int] = None) -> None:
+    """Consume every configured alert queue until ``stop`` is set
+    (a `compass serve` service, compass_core.captains.ServiceSpec)."""
+    urls = queue_urls(config)
+    if not urls:
+        logger.warning("no decoy alert queue configured (honeypot.alert_queue_url); alerts will not be consumed")
+        return
+    consumers = []
+    threads = []
+    for url in urls:
+        consumer = AlertConsumer(queue_url=url)
+        thread = threading.Thread(target=consumer.run, kwargs={"install_signals": False}, name=f"alerts:{url.rsplit('/', 1)[-1]}", daemon=True)
+        thread.start()
+        consumers.append(consumer)
+        threads.append(thread)
+        logger.info("consuming decoy alerts from %s", url)
+    stop.wait()
+    for consumer in consumers:
+        consumer.stop()
+    for thread in threads:
+        thread.join(timeout=5)

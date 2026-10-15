@@ -7,8 +7,7 @@ import boto3
 import pytest
 from moto import mock_aws
 
-from compass_core import commands, dispatch, queue, serve
-from compass_core import config as core_config
+from compass_core import commands, config as core_config, dispatch, queue, serve
 
 
 def test_init_config_writes_a_complete_workspace_file(tmp_path, monkeypatch):
@@ -52,7 +51,7 @@ def test_init_alerts_creates_the_queue_with_a_policy_and_records_it(tmp_path, mo
     assert saved["honeypot"]["alert_queue_arn"] == out["queue_arn"] and saved["honeypot"]["alert_queue_url"] == out["queue_url"]
 
 
-def test_serve_once_runs_one_prs_tick_and_reports_queues(monkeypatch):
+def test_serve_once_runs_one_prs_tick_and_the_alert_consumer(monkeypatch):
     monkeypatch.setattr(core_config, "_loader", lambda ws: {"workspace_id": ws, "honeypot": {"alert_queue_url": "https://sqs.us-east-1.amazonaws.com/1/q"}})
     ticks = []
     monkeypatch.setattr("captains.prs.scheduler.tick", lambda workspaces, client=None: ticks.append(list(workspaces)) or 1)
@@ -78,7 +77,9 @@ def test_serve_once_runs_one_prs_tick_and_reports_queues(monkeypatch):
     finally:
         queue.set_job_queue(previous)
     assert ticks == [["ws-1"]] and result["ticks"] == 1
-    assert result["queues"] == ["https://sqs.us-east-1.amazonaws.com/1/q"]
+    assert "honeypot:alert-consumer" in result["services"] and "prs:prs-tick" in result["services"]
+    assert "mapper:map-rescan" not in result["services"], "no re-scan without an interval"
+    assert FakeConsumer.instances[0].queue_url == "https://sqs.us-east-1.amazonaws.com/1/q"
     assert FakeConsumer.instances[0].stopped.is_set(), "serve stops its consumers on exit"
     assert ("honeypot", "investigate") in dispatch.commands(), "serve loads every open command table"
 
@@ -102,9 +103,11 @@ def test_workspace_id_comes_from_the_config_file_when_nothing_else_names_it(tmp_
 
 
 def test_queue_urls_fall_back_to_the_environment(monkeypatch):
+    from captains.honeypot.alert_consumer import queue_urls
+
     monkeypatch.setenv("HONEYPOT_ALERT_QUEUE_URLS", "https://a/q1, https://a/q2")
-    assert serve.queue_urls({}) == ["https://a/q1", "https://a/q2"]
-    assert serve.queue_urls({"honeypot": {"alert_queue_urls": ["https://c/q"]}}) == ["https://c/q"]
+    assert queue_urls({}) == ["https://a/q1", "https://a/q2"]
+    assert queue_urls({"honeypot": {"alert_queue_urls": ["https://c/q"]}}) == ["https://c/q"]
 
 
 def test_env_password_wins_and_no_password_is_a_warning(monkeypatch):

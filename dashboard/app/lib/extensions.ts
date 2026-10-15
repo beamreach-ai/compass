@@ -8,14 +8,22 @@
 import type React from "react";
 import type { DashboardTab } from "./tabs";
 
-// A tab the product adds: `key` is its URL/tab key, `feature` the flag in
-// `disabled_features` that hides it (the API's register_tabs mapping).
+// A tab a captain adds: `key` is its URL/tab key, `feature` the flag in
+// `disabled_features` that hides it (the manifest's TabSpec; the product's
+// register_tabs mapping). The open tabs use the same type (app/lib/captains.ts).
 export type ProductTab = {
   key: DashboardTab;
   label: string;
   feature: string;
   Component: React.ComponentType;
+  group?: "cost" | "security" | "platform";
+  views?: string[];
 };
+export type CaptainTab = ProductTab;
+
+// A captain's own settings UI, mounted on the Captains page under its row in
+// place of the generic schema form (the manifest's `settings_component`).
+export type CaptainSettingsComponent = React.ComponentType<{ readOnly: boolean }>;
 
 // Where a product section sits among the open Settings sections:
 //   top                 - before AWS access
@@ -36,5 +44,8 @@ export type ProductProvider = React.ComponentType<{ children: React.ReactNode }>
 export const productProviders: ProductProvider[] = [];
 export const productTabs: ProductTab[] = [];
 export const productSettingsSections: ProductSettingsSection[] = [];
+// A product captain's own settings UI, by the manifest's `settings_component` key
+// (mounted on the Captains page under that captain's row).
+export const productSettingsComponents: Record<string, CaptainSettingsComponent> = {};
 // The header banners, rendered after the read-only notice and before the infra-scan banner.
 export const productBanners: React.ComponentType[] = [];

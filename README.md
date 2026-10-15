@@ -87,6 +87,26 @@ Claude is optional: set `ANTHROPIC_API_KEY` in `.env` for incident summaries,
 drift-fix HCL, PR replies and PR revisions. Without it Compass runs model-free
 and says so.
 
+## Captains and extensions
+
+Everything Compass does is a *captain*: the map, the decoys, code-as-cloud, the
+PR watcher. Settings → Captains (or `compass captains`) lists what this install
+carries and turns each one on or off per workspace; a captain that is off loses
+its tab and refuses its work, and nothing is deleted.
+
+A captain is a Python package with one manifest, found by the
+`compass.captains` entry point. To add one to a running Compass, name it in
+`.env` and restart:
+
+```
+COMPASS_EXTENSIONS=some-captain==0.1.0
+```
+
+It is installed into `./extensions` on start. A captain with no dashboard
+component of its own gets a generic page: its commands, a run form, its jobs.
+`docs/writing_a_captain.md` is the guide, with a toy captain under
+`tests/fixtures/captain_hello/`.
+
 ## Compass and Beamreach
 
 This is the open edition of [Beamreach Compass](https://beamreach.ai/compass/),

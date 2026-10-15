@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Optional
 
 from compass_api import extensions
+from compass_core import captains as _captains
 
 _PUBLIC_PATHS = frozenset({
     "/health",
@@ -61,6 +62,10 @@ def required_scope(method: str, path: str) -> Optional[str]:
         if path.endswith(_OPERATE_READ_SUFFIXES):
             return "operate"
         return "read"
-    if path.startswith(_ADMIN_WRITE_PREFIXES + extensions.admin_write_prefixes()):
+    if path.startswith(_ADMIN_WRITE_PREFIXES + extensions.admin_write_prefixes() + _manifest_admin_prefixes()):
         return "admin"
     return "operate"
+
+
+def _manifest_admin_prefixes() -> tuple:
+    return tuple(prefix for m in _captains.manifests() for prefix in m.admin_write_prefixes)

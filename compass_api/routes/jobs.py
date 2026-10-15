@@ -39,6 +39,47 @@ class JobSummary(BaseModel):
     events: List[JobEvent] = Field(default_factory=list)
 
 
+def _summary(job: Dict[str, Any]) -> JobSummary:
+    """A job record as the API shows it; an inline run (no jobs table) lacks the
+    timestamps a stored record has."""
+    import time
+
+    now = int(time.time() * 1000)
+    record = {"queue": "inline", "created_at": now, "updated_at": now, "events": [], **{k: v for k, v in job.items() if v is not None or k in ("error",)}}
+    return JobSummary(**record)
+
+
+class StartJobPayload(BaseModel):
+    captain: str
+    command: str
+    payload: Dict[str, Any] = Field(default_factory=dict)
+    session_id: Optional[str] = None
+
+
+@router.post("/api/jobs", response_model=JobSummary)
+def start_job(body: StartJobPayload, request: Request) -> JobSummary:
+    """Start one of a captain's commands: the generic way to drive a captain that has
+    no routes of its own (a third-party captain, the Captains page's Run button).
+    The queue refuses a captain that is off, with the reason."""
+    ensure_feature_enabled("queue", detail="Queue is disabled in this environment.")
+    ensure_not_read_only()
+    from compass_core import captains as registry
+
+    known = registry.manifest(body.captain)
+    if known is None:
+        raise HTTPException(status_code=404, detail=f"no captain named {body.captain!r} is installed")
+    if body.command not in registry.commands_of(body.captain):
+        raise HTTPException(status_code=404, detail=f"{known.label} has no command {body.command!r}")
+    actor_ids = get_actor_ids(request)
+    job = queue_client.enqueue(
+        captain=body.captain,
+        command=body.command,
+        payload={**body.payload, **{k: v for k, v in actor_ids.items() if v}},
+        session_id=body.session_id,
+    )
+    return _summary(job)
+
+
 @router.get("/api/jobs", response_model=List[JobSummary])
 def list_jobs(request: Request, limit: int = Query(default=50, ge=1, le=500)) -> List[JobSummary]:
     ensure_feature_enabled("queue", detail="Queue is disabled in this environment.")
@@ -86,4 +127,4 @@ def restart_job(job_id: str, request: Request) -> JobSummary:
         session_id=session_id,
         queue=queue_name,
     )
-    return JobSummary(**new_job)
+    return _summary(new_job)
