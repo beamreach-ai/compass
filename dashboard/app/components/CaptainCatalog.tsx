@@ -21,7 +21,84 @@ type CatalogEntry = {
   installed_version?: string | null;
   licensed: boolean;
   env_line?: string | null;
+  installable_from_page?: boolean;
+  requested?: boolean;
+  pending_restart?: boolean;
+  removable?: boolean;
 };
+
+export type ExtensionsState = {
+  managed: boolean;
+  self_restart: boolean;
+  requested: Array<{ name: string; pip: string; version?: string | null }>;
+  from_env: string[];
+  installed: string[];
+  pending_restart: boolean;
+  last_error?: { error: string; at: number } | null;
+};
+
+// Changes wait for a restart: the API and the daemon reload the extension set on start.
+export function RestartBanner({ state, readOnly, onRestarted }: { state: ExtensionsState | null; readOnly: boolean; onRestarted: () => void }) {
+  const [phase, setPhase] = useState<"idle" | "restarting" | "error">("idle");
+  const [message, setMessage] = useState<string | null>(null);
+  if (!state) return null;
+  const failed = state.last_error && !state.pending_restart ? null : state.last_error;
+
+  const restart = async () => {
+    setPhase("restarting");
+    setMessage(null);
+    try {
+      await axios.post("/api/captains/restart");
+    } catch (e: any) {
+      setPhase("error");
+      setMessage(e?.response?.data?.detail || e?.message || "Restart failed");
+      return;
+    }
+    // wait for the API to go away and come back with the new set
+    const deadline = Date.now() + 5 * 60 * 1000;
+    await new Promise((r) => window.setTimeout(r, 3000));
+    while (Date.now() < deadline) {
+      try {
+        const res = await axios.get("/api/captains/extensions", { timeout: 4000 });
+        if (!res.data?.pending_restart) {
+          setPhase("idle");
+          onRestarted();
+          window.location.reload();
+          return;
+        }
+      } catch {
+        // still restarting
+      }
+      await new Promise((r) => window.setTimeout(r, 3000));
+    }
+    setPhase("error");
+    setMessage("Compass did not come back within five minutes. Check `docker compose logs api`.");
+  };
+
+  if (!state.pending_restart && !failed) return null;
+  return (
+    <div className="rounded border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+      {failed ? (
+        <div className="mb-2 text-xs text-red-700">The last install failed and the previous set is still running: {failed.error}</div>
+      ) : null}
+      {state.pending_restart && (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <span>
+            {phase === "restarting" ? "Restarting Compass and installing… this page reloads when it is back." : "Captain changes are waiting for a restart."}
+          </span>
+          {state.self_restart && !readOnly ? (
+            <button type="button" onClick={restart} disabled={phase === "restarting"} className="rounded bg-gray-900 px-3 py-1 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50">
+              {phase === "restarting" ? "Restarting…" : "Restart Compass"}
+            </button>
+          ) : (
+            <span className="text-xs">Run <code className="font-mono">docker compose up -d --force-recreate api compass</code> to apply.</span>
+          )}
+        </div>
+      )}
+      {message && <div className="mt-2 text-xs text-red-700">{message}</div>}
+    </div>
+  );
+}
 
 type CatalogListing = {
   enabled: boolean;
@@ -76,12 +153,27 @@ function InstallSteps({ entry }: { entry: CatalogEntry }) {
   );
 }
 
-export default function CaptainCatalog() {
+export default function CaptainCatalog({ readOnly = false, onChanged }: { readOnly?: boolean; onChanged?: () => void }) {
   const [listing, setListing] = useState<CatalogListing | null>(null);
   const [query, setQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const act = async (entry: CatalogEntry, verb: "install" | "uninstall") => {
+    setBusy(entry.name);
+    setError(null);
+    try {
+      await axios.post(`/api/captains/${verb}`, { name: entry.name });
+      await load(query);
+      onChanged?.();
+    } catch (e: any) {
+      setError(e?.response?.data?.detail || e?.message || `Failed to ${verb} ${entry.label}`);
+    } finally {
+      setBusy(null);
+    }
+  };
 
   const load = useCallback(async (q: string, refresh = false) => {
     setLoading(true);
@@ -142,6 +234,7 @@ export default function CaptainCatalog() {
                       {entry.installed_version && entry.installed_version !== entry.version ? ` (installed v${entry.installed_version})` : ""}
                     </span>
                     <span className={`inline-flex items-center rounded px-2 py-0.5 text-[11px] font-semibold ${status.cls}`}>{status.label}</span>
+                    {entry.pending_restart && <span className="inline-flex items-center rounded px-2 py-0.5 text-[11px] font-semibold bg-amber-100 text-amber-800">Waiting for restart</span>}
                   </div>
                   <p className="mt-1 text-sm text-gray-600">{entry.summary}</p>
                   <p className="mt-1 text-xs text-gray-400">
@@ -161,7 +254,16 @@ export default function CaptainCatalog() {
                       {entry.status === "vendor" ? "Get it" : "Details"}
                     </a>
                   )}
-                  {(entry.status === "install" || entry.status === "update") && (
+                  {entry.removable && !readOnly && (
+                    <button type="button" onClick={() => act(entry, "uninstall")} disabled={busy === entry.name} className="rounded border border-gray-300 px-3 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50">
+                      {entry.pending_restart && !entry.installed_version ? "Cancel" : "Uninstall"}
+                    </button>
+                  )}
+                  {entry.installable_from_page && !entry.pending_restart && !readOnly ? (
+                    <button type="button" onClick={() => act(entry, "install")} disabled={busy === entry.name} className="rounded bg-gray-900 px-3 py-1 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50">
+                      {busy === entry.name ? "…" : entry.status === "update" ? "Update" : "Install"}
+                    </button>
+                  ) : (entry.status === "install" || entry.status === "update") && !entry.installable_from_page && (
                     <button type="button" onClick={() => setOpen(isOpen ? null : entry.name)} className="rounded bg-gray-900 px-3 py-1 text-xs font-semibold text-white hover:opacity-90">
                       {isOpen ? "Close" : entry.status === "update" ? "Update" : "Install"}
                     </button>

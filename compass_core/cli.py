@@ -23,7 +23,7 @@ from typing import Any, Dict, List, Optional
 
 from compass_core import anthropic_model, captains, dispatch, llm
 
-CORE_SHORTHAND = {"init_config", "init_tables", "init_alerts", "serve", "api", "login", "captains", "enable", "disable", "configure", "catalog"}
+CORE_SHORTHAND = {"init_config", "init_tables", "init_alerts", "serve", "api", "login", "captains", "enable", "disable", "configure", "catalog", "install", "uninstall", "validate"}
 
 
 def parse_pairs(pairs: List[str]) -> Dict[str, Any]:
@@ -87,7 +87,7 @@ def main(argv: Optional[List[str]] = None, *, captain: Optional[str] = None) -> 
 
     try:
         result = dispatch.dispatch(chosen, args.command, build_payload(args))
-    except (LookupError, ValueError, captains.CaptainUnavailable) as exc:  # unknown command, no config, a bad argument, a captain that is off
+    except (LookupError, ValueError, RuntimeError, captains.CaptainUnavailable) as exc:  # unknown command, no config, a bad argument, a captain that is off
         print(str(exc.args[0] if exc.args else exc), file=sys.stderr)
         return 2
     json.dump(result, sys.stdout, indent=2, default=str)

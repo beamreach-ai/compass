@@ -22,6 +22,7 @@ import logging
 import os
 import signal
 import threading
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -88,6 +89,7 @@ class Server:
         self._httpd: Any = None
         self.ticks = 0
         self.started: List[str] = []
+        self.restarting = False
 
     def stop(self, *_args: Any) -> None:
         self._stop.set()
@@ -268,7 +270,16 @@ class Server:
             logger.info("running jobs queued by the API (every %ss)", self.job_poll)
         logger.info("compass serving workspace %s: %s", self.workspace_id, ", ".join(self._services) or "no services")
 
+        started_at = time.time()
         while not self._stop.wait(self.captains_poll):
+            from compass_core import extensions
+
+            if extensions.self_restart() and extensions.restart_requested_after(started_at):
+                # the Captains page installed or removed an extension: exit, and the
+                # container's restart policy brings serve back with the new set
+                logger.info("restart requested from the Captains page; exiting to load the new extensions")
+                self.restarting = True
+                break
             try:
                 self._reconcile_services()
             except Exception:  # noqa: BLE001
@@ -281,7 +292,7 @@ class Server:
         return self._result()
 
     def _result(self) -> Dict[str, Any]:
-        return {"workspace_id": self.workspace_id, "ticks": self.ticks, "services": list(self.started)}
+        return {"workspace_id": self.workspace_id, "ticks": self.ticks, "services": list(self.started), "restarting": self.restarting}
 
 
 def serve(payload: Dict[str, Any]) -> Dict[str, Any]:

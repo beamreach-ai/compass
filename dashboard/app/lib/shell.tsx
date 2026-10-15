@@ -144,6 +144,7 @@ export type CaptainSummary = {
   active: boolean;
   reason?: string | null;
   install_hint?: string | null;
+  installed_from?: "page" | "env" | null;
 };
 
 export type SettingsBootstrap = {
