@@ -8,7 +8,7 @@ build-backend = "setuptools.build_meta"
 # repository will publish, and what lets this repository depend on it later.
 [project]
 name = "compass-open"
-version = "0.3.0"
+version = "0.4.0"
 description = "Beamreach Compass, the open edition: the infra map, decoys, code-as-cloud, the PR watcher, and the API behind the dashboard"
 readme = "README.md"
 requires-python = ">=3.12"

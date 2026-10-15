@@ -403,9 +403,56 @@ def catalog(payload: Dict[str, Any]) -> Dict[str, Any]:
     return _catalog.listing(query=payload.get("q"), config=config, refresh=payload.get("refresh") in (True, "true", "1", 1))
 
 
+def _catalog_entry(name: str):
+    from compass_core import catalog as _catalog
+
+    loaded = _catalog.load()
+    entry = next((e for e in (loaded.entries if loaded else []) if e.name == name), None)
+    if entry is None:
+        raise LookupError(f"{name!r} is not in the catalog")
+    return entry
+
+
+def install(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """captain=<name>: install a catalog captain (or update it); applies at the next restart."""
+    from compass_core import catalog as _catalog
+    from compass_core import extensions
+
+    name = str(payload.get("captain") or payload.get("name") or "")
+    entry = _catalog_entry(name)
+    if not extensions.allowed(entry.name):
+        raise ValueError(f"{entry.label} is not on this install's allow-list (COMPASS_CATALOG_ALLOW)")
+    status = _catalog.annotate(entry)["status"]
+    if status not in ("install", "update") or not entry.pip:
+        raise ValueError(f"{entry.label} is {status} here; nothing to install")
+    extensions.request_install(entry.name, entry.pip, version=entry.version, by="cli")
+    return {"captain": entry.name, "version": entry.version, "restart_required": True, "next": "docker compose up -d --force-recreate api compass"}
+
+
+def uninstall(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """captain=<name>: remove a captain installed from the catalog; applies at the next restart."""
+    from compass_core import extensions
+
+    name = str(payload.get("captain") or payload.get("name") or "")
+    extensions.request_uninstall(name)
+    return {"captain": name, "restart_required": True, "next": "docker compose up -d --force-recreate api compass"}
+
+
+def validate(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """path=<project dir>: run the checks CI runs on a captain (exit 2 when one fails)."""
+    from compass_core.captain_validate import validate as _validate
+
+    report = _validate(str(payload.get("path") or "."))
+    if not report["ok"]:
+        failed = [f"{r['check']}: {r['detail']}" for r in report["checks"] if not r["ok"]]
+        raise ValueError("captain validation failed:\n  " + "\n  ".join(failed))
+    return report
+
+
 COMMANDS = {
     "init_config": init_config, "init_tables": init_tables, "init_alerts": init_alerts, "serve": serve, "api": api, "login": login,
     "captains": captains, "enable": enable, "disable": disable, "configure": configure, "catalog": catalog,
+    "install": install, "uninstall": uninstall, "validate": validate,
 }
 
 dispatch.register("core", COMMANDS)

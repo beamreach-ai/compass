@@ -12,7 +12,7 @@
       "tags": ["example", "template"],
       "version": "0.1.0",
       "requires_core": ">=0.2,<1",
-      "pip": "compass-captain-hello @ git+https://github.com/beamreach-ai/compass.git@v0.3.0#subdirectory=examples/captain-hello"
+      "pip": "compass-captain-hello@git+https://github.com/beamreach-ai/compass.git@v0.3.0#subdirectory=examples/captain-hello"
     },
     {
       "name": "engine",

@@ -17,6 +17,9 @@ x-compass: &compass
     # Extra captains: pip requirements (PyPI name, git URL, or a wheel dropped in
     # ./extensions/wheels), installed on start and kept in ./extensions.
     COMPASS_EXTENSIONS: ${COMPASS_EXTENSIONS:-}
+    # The Captains page may restart these services after an install: they run
+    # with restart: unless-stopped, so an exit brings them back with the new set.
+    COMPASS_SELF_RESTART: "1"
   volumes:
     - ./config:/compass/config
     - ./map:/compass/map

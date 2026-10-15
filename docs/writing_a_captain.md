@@ -1,5 +1,9 @@
 # Writing a captain
 
+The step-by-step path, from an empty directory to the catalog, is the
+[captain development guide](captain_development.md). This page is the
+reference for the manifest and what each part does.
+
 A captain is the unit people install, turn on or off, and configure
 (`docs/captain_extensions_spec.md`). It is a Python package with one manifest;
 the manifest is the only place the rest of Compass learns about it from. The
@@ -118,17 +122,32 @@ serve payload key or `COMPASS_<SETTING>` variable that overrides the interval;
 
 ## 7. Installing it into the open Compass
 
-The open image installs extensions on start. In the compose file's `.env`:
+From the catalog: Settings → Captains → Available → Install, then Restart
+Compass. The API and the daemon exit, compose starts them again, and the
+image's entrypoint installs the new set before Compass starts. Uninstall and
+update work the same way. `compass install captain=<name>` and
+`compass uninstall captain=<name>` do the same from a shell in the container.
+
+Outside the catalog, name it in `.env`:
 
 ```
-COMPASS_EXTENSIONS=mycaptain==0.1.0
+COMPASS_EXTENSIONS=mycaptain==0.1.0 other@git+https://github.com/you/other.git@v1.0.0
 ```
 
-Any pip requirement works: a name on PyPI, `git+https://…`, or a wheel you
-drop into `./extensions/wheels/`. The entrypoint installs the list into
-`./extensions` (a volume, so a restart keeps it and only a changed list
-installs again), and your `compass.captains` entry point is found from there.
-`compass captains` (or Settings → Captains) then lists you, on by default.
+Requirements have no spaces (`name@url`, not `name @ url`) and are separated
+by spaces or commas. A wheel you drop into `./extensions/wheels/` can be named
+too. Both lists are installed into `./extensions/site`, rebuilt only when the
+set changes; a failed install keeps the previous set and the Captains page
+shows the error.
+
+Operator settings:
+
+| Variable | Effect |
+|---|---|
+| `COMPASS_CATALOG_URL` | Where the catalog is read from; `off` hides the Available tab |
+| `COMPASS_CATALOG_INSTALL=off` | The page lists the catalog but does not install; `.env` still works |
+| `COMPASS_CATALOG_ALLOW` | Only these captain names may be installed from the page |
+| `COMPASS_SELF_RESTART=1` | Set by the shipped compose file: the page may restart Compass |
 
 ## 8. A page without a dashboard build
 
@@ -168,11 +187,12 @@ To list your captain, open a pull request adding an entry:
   "tags": ["example"],
   "version": "0.1.0",
   "requires_core": ">=0.2,<1",
-  "pip": "your-distribution @ git+https://github.com/you/repo.git@v0.1.0"
+  "pip": "your-distribution@git+https://github.com/you/repo.git@v0.1.0"
 }
 ```
 
-`name`, `version` and `requires_core` must match your manifest. Pin `pip` to an
-exact version or tag, never a branch: what someone installs from the catalog
-must be what was reviewed. `tests/compass_core/test_core_catalog.py` validates
+`name`, `version` and `requires_core` must match your manifest. `pip` is one
+requirement without spaces, pinned: `name==1.2.3`, a git tag or commit
+(`name@git+https://…@v1.2.3`), or a wheel URL with `#sha256=`. A branch is
+rejected: what someone installs from the catalog must be what was reviewed. `tests/compass_core/test_core_catalog.py` validates
 every entry, so the pull request's CI says whether it is well formed.

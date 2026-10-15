@@ -9,7 +9,8 @@ import { openSettingsComponents } from "../lib/captains";
 import { productSettingsComponents } from "../lib/extensions";
 import { useShell } from "../lib/shell";
 import type { CaptainSummary } from "../lib/shell";
-import CaptainCatalog from "./CaptainCatalog";
+import CaptainCatalog, { RestartBanner } from "./CaptainCatalog";
+import type { ExtensionsState } from "./CaptainCatalog";
 import SchemaForm from "./SchemaForm";
 
 type Listing = {
@@ -18,6 +19,7 @@ type Listing = {
   captains: CaptainSummary[];
   incompatible?: Record<string, string>;
   broken?: Record<string, string>;
+  extensions?: ExtensionsState;
 };
 
 const TIER_BADGE: Record<string, string> = {
@@ -104,6 +106,23 @@ export default function CaptainsSection({ readOnly }: { readOnly: boolean }) {
     [afterChange],
   );
 
+  const uninstall = useCallback(
+    async (c: CaptainSummary) => {
+      if (!window.confirm(`Uninstall ${c.label}? It goes at the next restart; its data and settings stay.`)) return;
+      setPending(c.name);
+      setError(null);
+      try {
+        await axios.post("/api/captains/uninstall", { name: c.name });
+        await load();
+      } catch (e: any) {
+        setError(e?.response?.data?.detail || e?.message || `Failed to uninstall ${c.label}`);
+      } finally {
+        setPending(null);
+      }
+    },
+    [load],
+  );
+
   const settingsComponents = useMemo(() => ({ ...openSettingsComponents, ...productSettingsComponents }), []);
   const rows = (listing?.captains || []).filter((c) => !c.core);
   const upgradeUrl = settingsBootstrap?.billing?.upgrade_url || null;
@@ -118,6 +137,7 @@ export default function CaptainsSection({ readOnly }: { readOnly: boolean }) {
         </div>
         {listing && <div className="text-xs text-gray-500">Compass {listing.core_version}{listing.licence ? ` · ${listing.licence.plan} plan` : ""}</div>}
       </div>
+      <RestartBanner state={listing?.extensions || null} readOnly={readOnly} onRestarted={() => void load()} />
       <div className="flex gap-1 border-b border-gray-200 text-sm" role="tablist">
         {(["installed", "available"] as const).map((key) => (
           <button
@@ -133,7 +153,7 @@ export default function CaptainsSection({ readOnly }: { readOnly: boolean }) {
         ))}
       </div>
       {view === "available" ? (
-        <CaptainCatalog />
+        <CaptainCatalog readOnly={readOnly} onChanged={() => void load()} />
       ) : (
       <>
       {error && <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
@@ -165,6 +185,11 @@ export default function CaptainsSection({ readOnly }: { readOnly: boolean }) {
                   )}
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
+                  {c.installed_from === "page" && !readOnly && (
+                    <button type="button" onClick={() => uninstall(c)} disabled={pending === c.name} className="rounded border border-gray-300 px-3 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50">
+                      Uninstall
+                    </button>
+                  )}
                   {configurable && (
                     <button type="button" onClick={() => setOpen(isOpen ? null : c.name)} className="rounded border border-gray-300 px-3 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-50">
                       {isOpen ? "Close" : "Configure"}

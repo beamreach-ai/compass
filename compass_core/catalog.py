@@ -43,6 +43,20 @@ SCHEMA = 1
 DEFAULT_URL = "https://raw.githubusercontent.com/beamreach-ai/compass/main/compass_core/catalog.json"
 TTL_SECONDS = 600
 _NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+# What counts as a pinned requirement (M6): name==version; name@git+…@<tag or commit>;
+# name@https://….whl#sha256=…. A branch is not a pin: what is installed must be what was reviewed.
+_PIN_EXACT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*(\[[A-Za-z0-9,._-]+\])?===?[A-Za-z0-9.+!_-]+$")
+_PIN_GIT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*@git\+https://[^@\s]+@(v?\d+(\.\d+)*([a-z0-9.+-]*)|[0-9a-f]{40})(#\S*)?$")
+_PIN_WHEEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*@https://\S+\.whl#sha256=[0-9a-f]{64}$")
+
+
+def pin_problem(pip: str) -> Optional[str]:
+    """Why a catalog pip line is not an acceptable pin, or None."""
+    if re.search(r"\s", pip):
+        return "pip must be one requirement without spaces (name@url, not name @ url)"
+    if _PIN_EXACT.match(pip) or _PIN_GIT.match(pip) or _PIN_WHEEL.match(pip):
+        return None
+    return "pip must pin an exact version (name==1.2.3), a git tag or commit (name@git+https://…@v1.2.3), or a wheel with its sha256"
 _TIERS = ("open", "cloud", "enterprise")
 
 
@@ -96,6 +110,10 @@ def _entry_errors(raw: Dict[str, Any]) -> List[str]:
     pip = raw.get("pip")
     if pip is not None and (not isinstance(pip, str) or not pip.strip()):
         problems.append("pip must be a requirement string or null")
+    elif isinstance(pip, str):
+        problem = pin_problem(pip)
+        if problem:
+            problems.append(problem)
     if pip is None and not raw.get("homepage"):
         problems.append("an entry without a pip line needs a homepage")
     try:
@@ -227,6 +245,11 @@ def annotate(entry: Entry, *, config: Optional[Dict[str, Any]] = None) -> Dict[s
         status = "vendor"
     else:
         status = "install"
+    from compass_core import extensions
+
+    requested = next((r for r in extensions.requested() if r.get("name") == entry.name), None)
+    awaiting = bool(requested) and (installed is None or (requested.get("version") and requested.get("version") != installed.version))
+    managed = extensions.managed()
     return {
         **entry.to_dict(),
         "status": status,
@@ -234,6 +257,13 @@ def annotate(entry: Entry, *, config: Optional[Dict[str, Any]] = None) -> Dict[s
         "compatible": compatible,
         "licensed": licensed,
         "env_line": env_line(entry),
+        # what the page can do here: install from the page (or only hand over the line),
+        # whether it waits for a restart, whether it can be removed from the page
+        "installable_from_page": managed and status in ("install", "update") and bool(entry.pip) and extensions.allowed(entry.name),
+        "allowed": extensions.allowed(entry.name),
+        "requested": bool(requested),
+        "pending_restart": awaiting,
+        "removable": managed and bool(requested),
     }
 
 
