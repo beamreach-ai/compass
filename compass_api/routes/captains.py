@@ -60,7 +60,8 @@ class ExtensionPayload(BaseModel):
 
 
 def _ext_error(exc: _extensions.ExtensionsError) -> JSONResponse:
-    return JSONResponse(status_code=exc.status, content={"detail": str(exc), **exc.to_dict()})
+    # only the error's own public fields, never str(exc): nothing from a traceback reaches the client
+    return JSONResponse(status_code=exc.status, content={"code": exc.code, "detail": exc.public_detail})
 
 
 @router.get("/api/captains/extensions")

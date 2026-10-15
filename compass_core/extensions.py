@@ -43,13 +43,17 @@ _SPLIT_RE = re.compile(r"[\s,]+")
 
 
 class ExtensionsError(RuntimeError):
+    """A refusal the API passes to the client. ``public_detail`` is the only text
+    that leaves the process: written here, never derived from another exception."""
+
     def __init__(self, code: str, detail: str, *, status: int = 409):
         self.code = code
         self.status = status
+        self.public_detail = detail
         super().__init__(detail)
 
     def to_dict(self) -> Dict[str, Any]:
-        return {"code": self.code, "detail": str(self)}
+        return {"code": self.code, "detail": self.public_detail}
 
 
 # ── where ───────────────────────────────────────────────────────────────────
