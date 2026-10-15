@@ -1,4 +1,4 @@
-"""The toy captain's API: one read, one write, under its route prefix."""
+"""The example captain's API: one read, one write, under its route prefix."""
 
 from __future__ import annotations
 

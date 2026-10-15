@@ -391,9 +391,21 @@ def configure(payload: Dict[str, Any]) -> Dict[str, Any]:
     return captain_admin.describe_config(config, manifest)
 
 
+def catalog(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """[q=<words>] [refresh=true]: the captains the catalog offers and their status here."""
+    from compass_core import catalog as _catalog
+
+    config: Dict[str, Any] = {}
+    try:
+        config = resolve(payload).config
+    except LookupError:
+        pass  # no workspace yet: statuses are still right, licences read as the free plan
+    return _catalog.listing(query=payload.get("q"), config=config, refresh=payload.get("refresh") in (True, "true", "1", 1))
+
+
 COMMANDS = {
     "init_config": init_config, "init_tables": init_tables, "init_alerts": init_alerts, "serve": serve, "api": api, "login": login,
-    "captains": captains, "enable": enable, "disable": disable, "configure": configure,
+    "captains": captains, "enable": enable, "disable": disable, "configure": configure, "catalog": catalog,
 }
 
 dispatch.register("core", COMMANDS)

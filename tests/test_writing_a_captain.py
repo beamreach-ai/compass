@@ -1,10 +1,11 @@
-"""The toy captain in tests/fixtures/captain_hello goes through everything a real
+"""The example captain in examples/captain-hello goes through everything a real
 one does: discovery by reference, its command, its route, its tab in the
 bootstrap, its config form, and the toggle (docs/writing_a_captain.md)."""
 
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -12,11 +13,14 @@ from fastapi.testclient import TestClient
 from compass_core import captains, dispatch, queue
 from compass_core import config as core_config
 
-HELLO = "tests.fixtures.captain_hello.manifest:MANIFEST"
+HELLO = "captains.hello.manifest:MANIFEST"
+EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "captain-hello"
 
 
 @pytest.fixture
 def hello_app(tmp_path, monkeypatch):
+    # the example as if pip-installed: its directory on sys.path joins the captains namespace
+    monkeypatch.syspath_prepend(str(EXAMPLE))
     monkeypatch.setenv("COMPASS_CAPTAINS", HELLO)
     captains.reset_for_tests()
     cfg = {"workspace_id": "local", "aws": {"auth_mode": "local_iam", "region": "us-east-1"}, "github": {},
@@ -72,7 +76,7 @@ def test_the_toy_captain_is_a_whole_captain(hello_app):
     assert run.json()["status"] == "completed" and run.json()["result_summary"]["greeting"] == "hi, Compass"
 
     # and without any route of its own: the generic job start the Captains page uses
-    assert client.get("/api/captains/hello").json()["commands"] == {"greet": ""}
+    assert client.get("/api/captains/hello").json()["commands"] == {"greet": "Say hello to name= with the configured greeting."}
     generic = client.post("/api/jobs", json={"captain": "hello", "command": "greet", "payload": {"name": "anyone"}})
     assert generic.status_code == 200, generic.text
     assert generic.json()["result_summary"]["greeting"] == "hi, anyone"

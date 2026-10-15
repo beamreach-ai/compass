@@ -104,8 +104,9 @@ COMPASS_EXTENSIONS=some-captain==0.1.0
 
 It is installed into `./extensions` on start. A captain with no dashboard
 component of its own gets a generic page: its commands, a run form, its jobs.
-`docs/writing_a_captain.md` is the guide, with a toy captain under
-`tests/fixtures/captain_hello/`.
+Settings → Captains → Available lists the captain catalog with the line to
+add for each one. `docs/writing_a_captain.md` is the guide, with an example
+captain to copy under `examples/captain-hello/`.
 
 ## Compass and Beamreach
 

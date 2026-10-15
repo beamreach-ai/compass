@@ -9,6 +9,7 @@ import { openSettingsComponents } from "../lib/captains";
 import { productSettingsComponents } from "../lib/extensions";
 import { useShell } from "../lib/shell";
 import type { CaptainSummary } from "../lib/shell";
+import CaptainCatalog from "./CaptainCatalog";
 import SchemaForm from "./SchemaForm";
 
 type Listing = {
@@ -48,6 +49,7 @@ export default function CaptainsSection({ readOnly }: { readOnly: boolean }) {
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
+  const [view, setView] = useState<"installed" | "available">("installed");
 
   const load = useCallback(async () => {
     try {
@@ -116,6 +118,24 @@ export default function CaptainsSection({ readOnly }: { readOnly: boolean }) {
         </div>
         {listing && <div className="text-xs text-gray-500">Compass {listing.core_version}{listing.licence ? ` · ${listing.licence.plan} plan` : ""}</div>}
       </div>
+      <div className="flex gap-1 border-b border-gray-200 text-sm" role="tablist">
+        {(["installed", "available"] as const).map((key) => (
+          <button
+            key={key}
+            type="button"
+            role="tab"
+            aria-selected={view === key}
+            onClick={() => setView(key)}
+            className={`-mb-px border-b-2 px-3 py-1.5 font-medium ${view === key ? "border-gray-900 text-gray-900" : "border-transparent text-gray-500 hover:text-gray-700"}`}
+          >
+            {key === "installed" ? `Installed${listing ? ` (${rows.length})` : ""}` : "Available"}
+          </button>
+        ))}
+      </div>
+      {view === "available" ? (
+        <CaptainCatalog />
+      ) : (
+      <>
       {error && <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
       {!listing && !error && <div className="text-sm text-gray-500">Loading captains…</div>}
       <ul className="divide-y divide-gray-200 rounded border border-gray-200">
@@ -174,6 +194,8 @@ export default function CaptainsSection({ readOnly }: { readOnly: boolean }) {
         <div className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
           Failed to load: {Object.entries(listing.broken || {}).map(([ref, why]) => `${ref} (${why})`).join("; ")}
         </div>
+      )}
+      </>
       )}
     </section>
   );
