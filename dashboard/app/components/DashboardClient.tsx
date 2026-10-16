@@ -13,6 +13,7 @@ import { productBanners, productProviders, productSettingsSections, productTabs 
 import type { SettingsSlot } from "../lib/extensions";
 import { ShellProvider } from "../lib/shell";
 import CaptainsSection from "./CaptainsSection";
+import CompassSection, { UpdateBanner } from "./CompassUpdates";
 import GenericCaptainTab from "./GenericCaptainTab";
 import type { QueueEvent, QueueJob, SettingsBootstrap, SettingsSaveParticipant, Shell } from "../lib/shell";
 import { ALL_WORKSPACE_TABS, TAB_ALIASES, asWorkspaceTab, resolveEnabledTabs } from "../lib/tabs";
@@ -623,6 +624,9 @@ resource "aws_iam_role_policy_attachment" "beamreach_compass_readonly" {
         {productBanners.map((Banner, index) => (
           <Banner key={index} />
         ))}
+        {isOpenEdition && (
+          <UpdateBanner update={settingsBootstrap?.update} settingsHref="/workspace?tab=settings#compass" />
+        )}
         {infraScanBannerVisible && (
           <div
             className={`mb-6 rounded-lg px-4 py-3 text-sm ${
@@ -997,6 +1001,12 @@ resource "aws_iam_role_policy_attachment" "beamreach_compass_readonly" {
             <SlackIntegrationCard readOnly={isReadOnly} />
 
             <SettingsSections slot="after_integrations" />
+
+            {isOpenEdition && (
+              <div id="compass">
+                <CompassSection readOnly={isReadOnly} />
+              </div>
+            )}
 
             <CaptainsSection readOnly={isReadOnly} />
 

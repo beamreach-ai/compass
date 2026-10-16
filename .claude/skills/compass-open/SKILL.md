@@ -6,7 +6,7 @@ description: Install and run Compass (infra map, decoys, code-as-cloud, PR watch
 # Deploying Compass locally
 
 Follow `docs/quickstart.md` step by step; do not improvise commands. The
-stack is five containers: `dynamodb`, `compass` (the daemon), `api`,
+stack is five containers (six with the opt-in `updater`): `dynamodb`, `compass` (the daemon), `api`,
 `dashboard`, `nginx` on port 8080. Commands are `docker compose run --rm
 compass <captain> <command> key=value …` and print JSON; an unknown command, a
 missing config or a bad argument is one line on stderr with exit 2.
@@ -40,6 +40,14 @@ Order, and what to check after each step:
 7. Code-as-cloud: the IaC tab, or `iac import …` — a pull request URL;
    `verified: false` with a warning means the plan could not run with the
    given credentials.
+
+8. Updates (only when asked): `update check` shows the running version, the
+   compose file's `COMPASS_VERSION`, and the latest release. Without the
+   updater, apply with the two commands it prints. Do not start the updater
+   (`--profile updater`) unless the user agrees: it mounts the Docker socket,
+   which is root on their machine. `update apply` then answers `requested`.
+   Check `update check` until `result.status` is `updated`, or `failed` with
+   the previous version still running.
 
 Credentials never go into a repository: `config/local.json` holds the GitHub
 token, `.env` the dashboard password. `ANTHROPIC_API_KEY` in `.env` enables

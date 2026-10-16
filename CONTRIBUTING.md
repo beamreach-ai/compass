@@ -108,6 +108,15 @@ for the first time and will not open a second one.
 - Copy in the UI is plain English, sentence case, no exclamation marks, no
   product vocabulary the sidebar does not already use.
 
+### Releases
+
+A release is a tag `v<version>` matching `pyproject.toml`, and a
+`## <version>` section in `CHANGELOG.md`. The workflow refuses a tag without
+the section. Its first paragraph is the summary the dashboard shows. Bullets
+under `### After the update` are the notes beside the Update button. The
+workflow publishes the three images, the GitHub Release and `releases.json`. It
+then bumps the `COMPASS_VERSION` defaults on `main`.
+
 ### Commits and pull requests
 
 - Subject: `<area>: what changed`, lower case, under 72 characters —
@@ -115,7 +124,7 @@ for the first time and will not open a second one.
   why and what a reader of `git log` needs to know; it is prose, not a list
   of files.
 - One change per pull request. Refactors travel alone.
-- CI must be green: `pytest`, `ruff`, `tsc`, the two image builds.
+- CI must be green: `pytest`, `ruff`, `tsc`, the three image builds.
 - Nothing from your account in the diff: no account ids, no ARNs with real
   ids, no tokens, no screenshots with real names. Test fixtures use
   `123456789012` and `example.com`.

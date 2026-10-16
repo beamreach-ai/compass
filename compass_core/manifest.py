@@ -26,8 +26,9 @@ MANIFEST = CaptainManifest(
         "compass_api.routes.notifications:router",
         "compass_api.routes.slack_connect:router",
         "compass_api.routes.captains:router",
+        "compass_api.routes.updates:router",
     ),
-    admin_write_prefixes=("/api/captains/",),
+    admin_write_prefixes=("/api/captains/", "/api/updates/"),
     tabs=(
         TabSpec(key="queue", label="Queue", group="platform", feature="queue"),
         TabSpec(key="settings", label="Settings", group="platform", feature="settings"),

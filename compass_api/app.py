@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -83,9 +84,36 @@ def _configure_queue() -> None:
         anthropic_model.install_if_available()
 
 
+def _start_status_writer() -> None:
+    """``status.json`` on the extensions volume every 30 s: the version and how many jobs
+    are active, so the updater never recreates the containers under a running job."""
+    import threading
+
+    from compass_core import extensions, updates
+    from compass_core.config import workspace_config
+    from compass_core.workspace import default_workspace_id
+
+    if extensions.directory() is None:
+        return
+    workspace_id = default_workspace_id() or "local"
+
+    def _loop() -> None:
+        while True:
+            try:
+                config = workspace_config(workspace_id)
+                updates.write_status(updates.count_active_jobs(config, workspace_id), by="api")
+                updates.mirror_policy(config)
+            except Exception as exc:  # noqa: BLE001 - a missed write is the next loop's problem
+                logger.debug("status.json not written: %s", exc)
+            time.sleep(30)
+
+    threading.Thread(target=_loop, name="status-writer", daemon=True).start()
+
+
 def create_app() -> FastAPI:
     _configure_environment()
     _configure_queue()
+    _start_status_writer()
 
     from compass_api.captain_gate import CaptainGateMiddleware, refusal
     from compass_api.middleware.bearer_auth import BearerAuthMiddleware

@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-import os
+from compass_core import updates
 
 # Bump when the HTTP API changes in a way the CLI must know about.
-API_VERSION = "2026.10.1"
+API_VERSION = "2026.10.2"
 
 
 def compass_version() -> str:
-    """Image/build version of this Compass install (set by the stack from the image tag)."""
-    return (os.getenv("COMPASS_VERSION") or os.getenv("IMAGE_TAG") or "dev").strip() or "dev"
+    """The version that runs: the distribution's, not the environment's. ``COMPASS_VERSION``
+    is what compose was asked to pull (``compass_core.updates.pinned_version``); the two can disagree."""
+    return updates.running_version()

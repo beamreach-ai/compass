@@ -4,6 +4,9 @@
     compass init_tables
     compass init_alerts
     compass serve
+
+and what an install does over its life: ``compass migrate`` on a new version,
+``compass update check | apply | rollback`` for the next one.
 """
 
 from __future__ import annotations
@@ -248,6 +251,18 @@ def init_tables(payload: Dict[str, Any]) -> Dict[str, Any]:
     return {"workspace_id": workspace.workspace_id, **result}
 
 
+def migrate(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """What a new version does on first start: create missing tables, run the migration steps not yet recorded."""
+    from compass_core import extensions, migrations
+
+    workspace = resolve(payload)
+    root = extensions.directory()
+    if root is None:
+        return migrations.run(workspace.config, workspace_id=workspace.workspace_id)
+    with extensions.lock(root):  # the API and the daemon start together
+        return migrations.run(workspace.config, workspace_id=workspace.workspace_id)
+
+
 # ── init_alerts ──────────────────────────────────────────────────────────────
 
 def queue_policy(queue_arn: str, account_id: str) -> Dict[str, Any]:
@@ -449,10 +464,39 @@ def validate(payload: Dict[str, Any]) -> Dict[str, Any]:
     return report
 
 
+# ── update: check, apply, rollback ──────────────────────────────────────────
+
+def update(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """verb=check|apply|rollback [version=…] [force=true]: is a release out; ask the updater for it; go back one."""
+    from compass_core import updates
+
+    verb = str(payload.get("verb") or "check")
+    config: Dict[str, Any] = {}
+    try:
+        config = resolve(payload).config
+    except LookupError:
+        pass  # no workspace yet: the check still works, the policy reads from the environment
+    force = payload.get("force") in (True, "true", "1", 1)
+    try:
+        if verb == "check":
+            return updates.status(refresh=True, config=config)
+        if verb == "apply":
+            record = updates.request_apply(payload.get("version"), force=force, by="cli", config=config,
+                                           wait_minutes=int(payload.get("wait_minutes") or updates.DEFAULT_WAIT_MINUTES))
+            return {"requested": record, "next": "the updater applies it within a minute; `compass update check` shows the result"}
+        if verb == "rollback":
+            record = updates.request_rollback(by="cli")
+            return {"requested": record, "next": "the updater applies it within a minute; `compass update check` shows the result"}
+    except updates.UpdatesError as exc:
+        lines = [str(exc)] + [f"  {c}" for c in exc.extra.get("commands") or []]
+        raise ValueError("\n".join(lines)) from None
+    raise ValueError("verb must be check, apply or rollback: `compass update check`")
+
+
 COMMANDS = {
     "init_config": init_config, "init_tables": init_tables, "init_alerts": init_alerts, "serve": serve, "api": api, "login": login,
     "captains": captains, "enable": enable, "disable": disable, "configure": configure, "catalog": catalog,
-    "install": install, "uninstall": uninstall, "validate": validate,
+    "install": install, "uninstall": uninstall, "validate": validate, "migrate": migrate, "update": update,
 }
 
 dispatch.register("core", COMMANDS)

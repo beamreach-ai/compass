@@ -34,3 +34,6 @@ __pycache__/
 # build output of the example captains (pip install .)
 examples/*/build/
 examples/*/*.egg-info/
+
+# the end-to-end update test (tests/e2e/update_compose.sh)
+/dist-e2e/

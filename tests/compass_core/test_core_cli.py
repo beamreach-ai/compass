@@ -57,3 +57,10 @@ def test_missing_workspace_config_is_a_message_not_a_traceback(fake_captain, cap
     dispatch.register("fake", {"needs_ws": lambda p: {"ws": config.workspace_config(p["workspace_id"])}})
     assert cli.main(["fake", "needs_ws", "--workspace", "does-not-exist"]) == 2
     assert "no configuration for workspace 'does-not-exist'" in capsys.readouterr().err
+
+
+def test_the_core_commands_are_shorthand_and_update_takes_a_bare_verb():
+    from compass_core import commands
+
+    assert set(commands.COMMANDS) == cli.CORE_SHORTHAND
+    assert {"migrate", "update"} <= cli.CORE_SHORTHAND and cli.VERB_COMMANDS == {"update": ("check", "apply", "rollback")}

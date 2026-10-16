@@ -23,7 +23,13 @@ from typing import Any, Dict, List, Optional
 
 from compass_core import anthropic_model, captains, dispatch, llm
 
-CORE_SHORTHAND = {"init_config", "init_tables", "init_alerts", "serve", "api", "login", "captains", "enable", "disable", "configure", "catalog", "install", "uninstall", "validate"}
+CORE_SHORTHAND = {
+    "init_config", "init_tables", "init_alerts", "serve", "api", "login", "captains", "enable", "disable", "configure", "catalog",
+    "install", "uninstall", "validate", "migrate", "update",
+}
+# `compass update check` reads better than `compass update verb=check`: the bare word after
+# these commands becomes their `verb`.
+VERB_COMMANDS = {"update": ("check", "apply", "rollback")}
 
 
 def parse_pairs(pairs: List[str]) -> Dict[str, Any]:
@@ -68,6 +74,9 @@ def main(argv: Optional[List[str]] = None, *, captain: Optional[str] = None) -> 
     # `compass serve` / `compass init_tables` read better than `compass core serve`.
     if captain is None and argv and argv[0] in CORE_SHORTHAND:
         argv.insert(0, "core")
+    at = 1 if captain is None else 0  # where the command sits
+    if len(argv) > at + 1 and argv[at] in VERB_COMMANDS and argv[at + 1] in VERB_COMMANDS[argv[at]]:
+        argv[at + 1] = f"verb={argv[at + 1]}"
     parser = argparse.ArgumentParser(prog=f"python -m {captain}" if captain else "compass", description=__doc__.split("\n\n")[0])
     if captain is None:
         parser.add_argument("captain", choices=sorted(captains.commands_modules()))

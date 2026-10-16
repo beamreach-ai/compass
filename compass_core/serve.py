@@ -90,6 +90,7 @@ class Server:
         self.ticks = 0
         self.started: List[str] = []
         self.restarting = False
+        self._announced_update: Optional[str] = None
 
     def stop(self, *_args: Any) -> None:
         self._stop.set()
@@ -251,6 +252,30 @@ class Server:
                 logger.exception("job worker loop failed; backing off")
             self._stop.wait(self.job_poll)
 
+    # ── updates ─────────────────────────────────────────────────────────────
+
+    def _update_tick(self) -> None:
+        """Every check: status.json for the updater, the policy mirror, the release check
+        (one fetch every few hours), one log line when a release appears, and the
+        request when the policy lets the updater apply it on its own."""
+        from compass_core import extensions, updates
+
+        if extensions.directory() is None:
+            return
+        try:
+            config = workspace_config(self.workspace_id)
+        except LookupError:
+            config = self.config
+        updates.write_status(updates.count_active_jobs(config, self.workspace_id), by="serve")
+        updates.mirror_policy(config)
+        state = updates.check(config=config)
+        if state.available and state.latest != self._announced_update:
+            self._announced_update = state.latest
+            logger.info("compass %s is available (this is %s): %s", state.latest, state.running, state.release.get("notes_url") if state.release else "")
+        requested, why = updates.auto_request(config)
+        if requested:
+            logger.info("automatic update to %s requested (%s)", requested["target"], why)
+
     # ── run ─────────────────────────────────────────────────────────────────
 
     def run(self) -> Dict[str, Any]:
@@ -284,6 +309,10 @@ class Server:
                 self._reconcile_services()
             except Exception:  # noqa: BLE001
                 logger.exception("service check failed")
+            try:
+                self._update_tick()
+            except Exception:  # noqa: BLE001
+                logger.exception("update check failed")
         self.stop()
         for running in list(self._services.values()):
             running.thread.join(timeout=5)
