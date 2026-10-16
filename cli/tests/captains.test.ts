@@ -112,3 +112,16 @@ describe("compass captains", () => {
     expect(names).toContain("compass_captains");
   });
 });
+
+describe("status", () => {
+  it("says when a Compass release is out and when the compose file asks for another version", async () => {
+    const base = { compass_version: "0.5.2", api_version: "2026.10.1", workspace: { workspace_id: "local" }, app: { mode: "production" }, errors: {} };
+    const out = await run(["status"], {
+      "GET /api/status": { ...base, update: { available: true, latest: "0.6.0", running: "0.5.2", apply: "manual", pinned: "0.5.1", pinned_differs: true } },
+    });
+    expect(out.stdout).toContain("Update: Compass 0.6.0 is available (this is 0.5.2); Settings → Updates shows the two commands");
+    expect(out.stdout).toContain("the compose file asks for 0.5.1 but 0.5.2 is running");
+    const quiet = await run(["status"], { "GET /api/status": { ...base, update: { available: false, running: "0.5.2" } } });
+    expect(quiet.stdout).not.toContain("Update:");
+  });
+});

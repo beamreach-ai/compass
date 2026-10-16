@@ -2,6 +2,8 @@
 // image is built) has no licence, billing, founder contact or Beamreach logo;
 // the product build is unchanged.
 export const isOpenEdition = process.env.NEXT_PUBLIC_EDITION === "open";
+// The release this dashboard build is (the image's COMPASS_VERSION build arg); "dev" from a checkout.
+export const DASHBOARD_VERSION: string = process.env.NEXT_PUBLIC_COMPASS_VERSION || "dev";
 export const PRODUCT_NAME = isOpenEdition ? "Compass" : "Beamreach Compass";
 export const COMPANY_NAME = isOpenEdition ? "Compass" : "Beamreach";
 export const LOGO_URL: string | null = isOpenEdition

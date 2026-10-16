@@ -18,7 +18,8 @@ from typing import Any, Dict, List, Optional, Tuple
 from compass_core.keys import pr_prefix, pr_sort_key, workspace_from_config, workspace_pk
 from compass_core.tables import tables
 
-_PR_URL_RE = re.compile(r"https?://github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)")
+# any host: github.com, a GitHub Enterprise Server (GITHUB_API_URL), the end-to-end suite's fake
+_PR_URL_RE = re.compile(r"https?://[^/\s]+/([\w.-]+/[\w.-]+)/pull/(\d+)")
 
 _MEMORY: Dict[str, Dict[str, Dict[str, Any]]] = {}
 _MEMORY_LOCK = threading.Lock()

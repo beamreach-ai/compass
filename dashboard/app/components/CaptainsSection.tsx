@@ -45,6 +45,33 @@ const reasonText = (c: CaptainSummary, incompatible?: Record<string, string>): s
   }
 };
 
+// An on/off switch: role="switch" so a screen reader says what it is and whether it is on.
+function Toggle({ on, busy, disabled, label, title, onChange }: {
+  on: boolean;
+  busy: boolean;
+  disabled: boolean;
+  label: string;
+  title?: string;
+  onChange: (next: boolean) => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      aria-label={label}
+      title={title}
+      disabled={disabled || busy}
+      onClick={() => onChange(!on)}
+      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full p-0 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 ${
+        on ? "bg-green-600" : "bg-gray-300"
+      } ${busy ? "animate-pulse" : ""}`}
+    >
+      <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${on ? "translate-x-5" : "translate-x-0.5"}`} />
+    </button>
+  );
+}
+
 export default function CaptainsSection({ readOnly }: { readOnly: boolean }) {
   const { refreshSettingsBootstrap, settingsBootstrap } = useShell();
   const [listing, setListing] = useState<Listing | null>(null);
@@ -131,14 +158,11 @@ export default function CaptainsSection({ readOnly }: { readOnly: boolean }) {
   return (
     <section className="bg-white border rounded-lg shadow-sm p-6 space-y-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <div className="space-y-1">
-          <h2 className="text-lg font-semibold">Captains</h2>
-          <p className="text-sm text-gray-600">What this Compass can do. Turn a captain off and its tab goes, its work is refused, nothing is deleted.</p>
-        </div>
+        <p className="text-sm text-gray-600">Turn a captain off and its tab goes, its work is refused, nothing is deleted. Click a captain to configure it.</p>
         {listing && <div className="text-xs text-gray-500">Compass {listing.core_version}{listing.licence ? ` · ${listing.licence.plan} plan` : ""}</div>}
       </div>
       <RestartBanner state={listing?.extensions || null} readOnly={readOnly} onRestarted={() => void load()} />
-      <div className="flex gap-1 border-b border-gray-200 text-sm" role="tablist">
+      <div className="flex gap-1 text-sm" role="tablist">
         {(["installed", "available"] as const).map((key) => (
           <button
             key={key}
@@ -146,7 +170,7 @@ export default function CaptainsSection({ readOnly }: { readOnly: boolean }) {
             role="tab"
             aria-selected={view === key}
             onClick={() => setView(key)}
-            className={`-mb-px border-b-2 px-3 py-1.5 font-medium ${view === key ? "border-gray-900 text-gray-900" : "border-transparent text-gray-500 hover:text-gray-700"}`}
+            className={`rounded px-3 py-1.5 font-medium ${view === key ? "bg-blue-600 text-white" : "bg-transparent text-gray-600 hover:bg-gray-100 hover:text-gray-900"}`}
           >
             {key === "installed" ? `Installed${listing ? ` (${rows.length})` : ""}` : "Available"}
           </button>
@@ -165,15 +189,18 @@ export default function CaptainsSection({ readOnly }: { readOnly: boolean }) {
           const Custom = c.settings_component ? settingsComponents[c.settings_component] : undefined;
           const configurable = Boolean(Custom) || c.has_config;
           const isOpen = open === c.name;
+          const expand = () => configurable && setOpen(isOpen ? null : c.name);
           return (
-            <li key={c.name} className="px-4 py-3">
-              <div className="flex flex-wrap items-start justify-between gap-3">
+            <li key={c.name} className={isOpen ? "bg-gray-50/60" : undefined}>
+              <div
+                className={`flex flex-wrap items-start justify-between gap-3 px-4 py-3 ${configurable ? "cursor-pointer hover:bg-gray-50" : ""}`}
+                onClick={expand}
+              >
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="font-semibold text-gray-900">{c.label}</span>
                     <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${TIER_BADGE[c.tier] || TIER_BADGE.open}`}>{c.tier}</span>
                     <span className="text-[11px] text-gray-400">v{c.version}</span>
-                    <span className={`inline-flex items-center rounded px-2 py-0.5 text-[11px] font-semibold ${c.active ? "bg-green-100 text-green-800" : "bg-gray-100 text-gray-600"}`}>{c.active ? "On" : "Off"}</span>
                   </div>
                   <p className="mt-1 text-sm text-gray-600">{c.summary}</p>
                   {reason && <p className="mt-1 text-xs text-amber-700">{reason}</p>}
@@ -184,30 +211,39 @@ export default function CaptainsSection({ readOnly }: { readOnly: boolean }) {
                     </p>
                   )}
                 </div>
-                <div className="flex shrink-0 items-center gap-2">
+                {/* the controls act on their own; a click on them does not open the row */}
+                <div className="flex shrink-0 items-center gap-3" onClick={(e) => e.stopPropagation()}>
                   {c.installed_from === "page" && !readOnly && (
                     <button type="button" onClick={() => uninstall(c)} disabled={pending === c.name} className="rounded border border-gray-300 px-3 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50">
                       Uninstall
                     </button>
                   )}
+                  <Toggle
+                    on={c.enabled}
+                    busy={pending === c.name}
+                    disabled={!canToggle}
+                    label={`${c.label} ${c.enabled ? "on" : "off"}`}
+                    title={!c.licensed && !c.enabled ? "Needs a licence" : reason || undefined}
+                    onChange={(next) => toggle(c, next)}
+                  />
                   {configurable && (
-                    <button type="button" onClick={() => setOpen(isOpen ? null : c.name)} className="rounded border border-gray-300 px-3 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-50">
-                      {isOpen ? "Close" : "Configure"}
+                    // the keyboard's way in; the mouse can click anywhere on the row
+                    <button
+                      type="button"
+                      onClick={expand}
+                      aria-expanded={isOpen}
+                      aria-label={`${isOpen ? "Close" : "Configure"} ${c.label}`}
+                      className="rounded bg-transparent p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                    >
+                      <svg className={`h-4 w-4 transition-transform ${isOpen ? "rotate-180" : ""}`} viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                        <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.17l3.71-3.94a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clipRule="evenodd" />
+                      </svg>
                     </button>
                   )}
-                  <button
-                    type="button"
-                    disabled={!canToggle || pending === c.name}
-                    onClick={() => toggle(c, !c.enabled)}
-                    className={`rounded px-3 py-1 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${c.enabled ? "border border-gray-300 text-gray-700 hover:bg-gray-50" : "bg-gray-900 text-white hover:opacity-90"}`}
-                    title={!c.licensed && !c.enabled ? "Needs a licence" : undefined}
-                  >
-                    {pending === c.name ? "…" : c.enabled ? "Turn off" : "Turn on"}
-                  </button>
                 </div>
               </div>
               {isOpen && (
-                <div className="mt-4 rounded border border-gray-100 bg-gray-50 p-4">
+                <div className="mx-4 mb-4 rounded border border-gray-100 bg-gray-50 p-4">
                   {Custom ? <Custom readOnly={readOnly} /> : <SchemaForm captain={c.name} readOnly={readOnly} onSaved={() => void refreshSettingsBootstrap()} />}
                 </div>
               )}

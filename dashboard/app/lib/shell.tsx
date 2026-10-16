@@ -147,9 +147,38 @@ export type CaptainSummary = {
   installed_from?: "page" | "env" | null;
 };
 
+// The bootstrap's `update`: compass_core.updates.UpdateState.to_dict()
+export type ReleaseEntry = {
+  version: string;
+  published_at?: string | null;
+  notes_url?: string | null;
+  summary: string;
+  images: Record<string, string>;
+  min_from?: string | null;
+  requires_restart: string[];
+  notes: string[];
+};
+
+export type UpdateState = {
+  running: string;
+  pinned?: string | null;
+  channel: string;
+  latest?: string | null;
+  available: boolean;
+  direct: boolean;
+  release?: ReleaseEntry | null;
+  checked_at?: number | null;
+  error?: string | null;
+  apply: "updater" | "manual" | "off";
+  pinned_differs: boolean;
+  via?: string | null;
+  releases: ReleaseEntry[];
+};
+
 export type SettingsBootstrap = {
   app?: AppConfigSummary;
   core_version?: string;
+  update?: UpdateState | null;
   captains?: CaptainSummary[];
   workspace: SessionSummary;
   aws: AwsSettingsSummary;

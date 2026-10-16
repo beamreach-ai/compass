@@ -87,7 +87,7 @@ def gh_repo():
 @pytest.fixture
 def writer(gh_repo):
     with patch("captains.iac.github_pr_writer.resolve_github_token", return_value="tok"), patch(
-        "captains.iac.github_pr_writer.Github"
+        "captains.iac.github_pr_writer.github_client"
     ) as gh:
         gh.return_value.get_repo.return_value = gh_repo
         yield GitHubPRWriter(config={})

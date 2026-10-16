@@ -453,6 +453,11 @@ def create_honeytoken(request: Request, body: CreateHoneytokenPayload) -> Dict[s
         if not action_cfg.runbook:
             action_cfg.runbook = CLASS_DEFAULT_RUNBOOKS.get(honeytoken_class, "")
 
+    if honeytoken_class == "s3_object" and not (body.resource_path or "").strip("/ "):
+        from captains.honeypot.terraform_generator import S3_OBJECT_NEEDS_A_BUCKET
+
+        raise HTTPException(status_code=400, detail=S3_OBJECT_NEEDS_A_BUCKET)
+
     # An empty name means "pick a realistic cover name for me" (the UI's
     # suggestion flow sends none).
     name = body.name.strip() or default_cover_name(honeytoken_id)

@@ -10,7 +10,16 @@ from typing import Any, Dict, Iterable, List, Optional
 
 import requests
 
-GITHUB_API = "https://api.github.com"
+from compass_core.github import api_url
+
+
+def graphql_url() -> str:
+    """github.com serves GraphQL at /graphql beside the REST API; GitHub Enterprise
+    Server at /api/graphql where REST is /api/v3."""
+    base = api_url()
+    return base[: -len("/v3")] + "/graphql" if base.endswith("/api/v3") else f"{base}/graphql"
+
+
 COMPASS_MARKER = "<!-- compass:pr-watcher -->"
 TRUSTED_ASSOCIATIONS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
 
@@ -28,7 +37,7 @@ class GitHubPRClient:
     # ── transport ──────────────────────────────────────────────────────────
 
     def _request(self, method: str, path: str, *, json_body: Optional[Dict[str, Any]] = None, params: Optional[Dict[str, Any]] = None) -> Any:
-        response = requests.request(method, f"{GITHUB_API}{path}", headers=self._headers, json=json_body, params=params, timeout=self._timeout)
+        response = requests.request(method, f"{api_url()}{path}", headers=self._headers, json=json_body, params=params, timeout=self._timeout)
         if response.status_code >= 400:
             raise RuntimeError(f"GitHub {method} {path} failed ({response.status_code}): {response.text[:300]}")
         if response.status_code == 204 or not response.content:
@@ -82,7 +91,7 @@ class GitHubPRClient:
     # ── state (one GraphQL query per PR) ───────────────────────────────────
 
     def graphql(self, query: str, variables: Dict[str, Any]) -> Dict[str, Any]:
-        response = requests.post(f"{GITHUB_API}/graphql", headers=self._headers, json={"query": query, "variables": variables}, timeout=self._timeout)
+        response = requests.post(f"{graphql_url()}", headers=self._headers, json={"query": query, "variables": variables}, timeout=self._timeout)
         if response.status_code >= 400:
             raise RuntimeError(f"GitHub GraphQL failed ({response.status_code}): {response.text[:300]}")
         payload = response.json()

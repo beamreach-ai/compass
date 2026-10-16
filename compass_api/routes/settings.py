@@ -29,7 +29,11 @@ from compass_api.routes._infra_scan import current_infra_scan_summary, enqueue_f
 from compass_api.routes._workspace import get_workspace_config, get_workspace_context, save_config
 from compass_core import captain_admin
 from compass_core import captains as _captains
+from compass_core import updates as _updates
 from compass_core.aws import build_target_session, resolve_target_account_id, resolve_target_region
+from compass_core.github import (
+    api_url as github_api_url,
+)
 from compass_core.github import (
     build_github_app_manifest,
     exchange_manifest_code,
@@ -353,6 +357,8 @@ def get_settings_bootstrap(request: Request) -> Dict[str, Any]:
         },
         "app": {**app, "auth_enabled": _auth_enabled()},
         "core_version": _captains.core_version(),
+        # is a release out (cached; one fetch every few hours), for the banner and the Compass card
+        "update": _updates.check(config=config).to_dict(),
         "captains": captain_admin.summary(config),
         "aws": _aws_summary(config),
         "github": _github_summary(config),
@@ -463,7 +469,7 @@ def set_github_token(payload: GithubTokenPayload, request: Request) -> Dict[str,
     try:
         import requests as _requests
 
-        who = _requests.get("https://api.github.com/user", headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"}, timeout=10)
+        who = _requests.get(f"{github_api_url()}/user", headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"}, timeout=10)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Could not reach GitHub to validate the token: {exc}") from exc
     if who.status_code != 200:

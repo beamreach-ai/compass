@@ -465,10 +465,13 @@ class AWSGraphCollector:
                 continue
 
             logger.info("🔁 Scanning AWS region %s for infra map", region)
+            # the dashboard's progress bar reads data: which region of how many, and how
+            # many resources were found before it (the regions before it are done)
             emit_job_event(
                 f"Scanning region {region} ({i}/{total})",
                 event_type="progress",
                 status="running",
+                data={"region": region, "index": i, "total": total, "resources": len(self.nodes)},
             )
             self._collect_region(session, region)
 

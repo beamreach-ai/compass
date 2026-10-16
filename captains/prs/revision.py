@@ -105,13 +105,15 @@ def prepare_checkout(dest: Path, *, repo: str, branch: str, base_branch: str, to
     if dest.exists():
         shutil.rmtree(dest, ignore_errors=True)
     dest.parent.mkdir(parents=True, exist_ok=True)
-    url = f"https://x-access-token:{token}@github.com/{repo}.git"
+    from compass_core.github import git_url
+
+    url = git_url(repo, token)
     subprocess.run(
         ["git", "clone", "--depth", "50", "--branch", branch, "--single-branch", url, str(dest)],
         check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=300,
     )
     _git(dest, ["fetch", "--depth", "50", "origin", f"+refs/heads/{base_branch}:refs/remotes/origin/{base_branch}"], timeout=300)
-    _git(dest, ["remote", "set-url", "origin", f"https://github.com/{repo}.git"], check=False)
+    _git(dest, ["remote", "set-url", "origin", git_url(repo)], check=False)
     return dest
 
 

@@ -96,10 +96,69 @@ docker compose logs -f compass api               # the daemon and the API
 docker compose run --rm compass prs sync          # sync pull requests now, not on the tick
 docker compose run --rm compass honeypot endpoint_add type=webhook name=ops webhook_url=https://…
 docker compose run --rm compass mapper export format=json out=/compass/map/map.json
-docker compose pull && docker compose up -d       # upgrade to the release in COMPASS_VERSION
 docker compose run --rm compass mapper export format=html out=/compass/map/index.html   # the map as one HTML page
 docker compose down                               # stop; data stays in the volume (down -v wipes it)
 ```
+
+## 6. Updates
+
+Compass checks for a new release every six hours: one anonymous request for
+`releases.json` on the repository's `releases` branch, with the running version
+in the user agent and nothing else. `COMPASS_UPDATE_CHECK=off` in `.env` stops
+it. When a release is out, a banner says so and **Settings → Compass** shows
+what changed. Nothing changes version without you.
+
+Without the updater, the card shows the two commands. Run them next to your
+`docker-compose.yml`:
+
+```sh
+sed -i.bak 's/^COMPASS_VERSION=.*/COMPASS_VERSION=0.5.0/' .env   # or edit the line
+docker compose pull && docker compose up -d
+```
+
+With the updater, the card has an **Update** button:
+
+```sh
+docker compose --profile updater up -d
+```
+
+The updater is a small container: the Docker CLI and one shell script. It
+mounts the Docker socket, and whoever controls the socket controls this
+machine as root. Turn it on only where that is acceptable. It pulls the
+release's images and refuses any whose digest differs from the release's. It
+waits for running jobs and keeps the old `.env` as `.env.bak.<version>`. Then
+it recreates the services and checks health. When they do not come up within
+five minutes, it puts the previous version back. **Roll back** stays on the card
+for seven days after an update.
+
+From a shell:
+
+```sh
+docker compose run --rm compass update check                  # what runs, what is out, what the updater did last
+docker compose run --rm compass update apply [version=0.5.0]   # needs the updater; prints the commands without it
+docker compose run --rm compass update rollback
+```
+
+`apply` refuses a downgrade, a version that cannot be reached directly, and a
+version an installed captain does not support. `force=true` overrides each.
+
+Policy: `COMPASS_AUTO_UPDATE` in `.env`, or the select on the Compass card.
+
+| Value | What happens |
+|---|---|
+| `notify` (default) | The banner and the card. Nothing applies without a click. |
+| `patch` | The updater applies `x.y.Z` releases on its own when no job runs. |
+| `minor` | The same for `x.Y.z` releases too. |
+| `off` | No checks at all. |
+
+`COMPASS_UPDATE_WINDOW=03:00-05:00` limits automatic updates to those hours in
+the machine's `TZ`. An automatic update never skips a version it cannot reach
+directly and never installs a prerelease. One that fails is rolled back and not
+retried. `COMPASS_UPDATE_CHANNEL=prerelease` follows release candidates.
+
+A new version runs `compass migrate` on start: missing tables, then the
+migration steps it ships, once each. Captains are reinstalled against the new
+core. A captain whose `requires_core` excludes it shows as incompatible.
 
 ## From source
 
@@ -113,6 +172,7 @@ that builds the two images from a checkout.
 | Config | `./config/local.json` (container: `/compass/config/local.json`) |
 | Dashboard and API | http://localhost:8080 (`COMPASS_PORT`); the API under `/api/` |
 | Map viewer files | `./map/` (also at `/map/` on the dashboard's port) |
+| Updates | `./extensions/update*.json`, `status.json`, `rollback.json`: what the API and the updater exchange |
 | Tables | `compass_{map,items,aws_inventory,tf_inventory,tf_state,progress}_<workspace>` in the `dynamodb-data` volume |
 | Branches | `beamreach/honeypot/<name>`, `beamreach/iac-import/<hash>` |
 | Resource tags | `beamreach:honeytoken-id`, `beamreach:managed` on everything Compass plants |

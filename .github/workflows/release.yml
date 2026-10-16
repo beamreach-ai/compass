@@ -1,61 +1,89 @@
 name: release
 
-# A tag v<version> publishes the two images to GHCR under this organisation:
+# A tag v<version> publishes the three images to GHCR under this organisation:
 #   ghcr.io/beamreach-ai/compass:<version>            (the daemon, API and CLI)
 #   ghcr.io/beamreach-ai/compass-dashboard:<version>
-# plus :latest. docker-compose.yml pulls them by COMPASS_VERSION.
+#   ghcr.io/beamreach-ai/compass-updater:<version>    (docker/updater: applies updates when turned on)
+# plus :latest; then the GitHub Release with the CHANGELOG.md section as its notes,
+# releases.json on the `releases` branch (what every install's update check reads:
+# docs/open_updates_spec.md §2), and, for a stable release, the COMPASS_VERSION
+# defaults on main. A tag without a changelog section is refused, and nothing is published
+# until the whole end-to-end suite has passed on the tagged commit.
 on:
   push:
     tags: ["v*"]
 
 permissions:
-  contents: read
+  contents: write
   packages: write
 
 env:
   REGISTRY: ghcr.io
   IMAGE: ghcr.io/${{ github.repository_owner }}/compass
   DASHBOARD_IMAGE: ghcr.io/${{ github.repository_owner }}/compass-dashboard
+  UPDATER_IMAGE: ghcr.io/${{ github.repository_owner }}/compass-updater
+  FEED_URL: https://raw.githubusercontent.com/${{ github.repository }}/releases/releases.json
 
 jobs:
+  e2e:
+    # the whole end-to-end suite on the tagged commit, before anything is published
+    uses: ./.github/workflows/e2e.yml
+    with:
+      full: true
+
   images:
+    needs: e2e
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - id: version
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          case "$version" in *rc*|*a*|*b*) echo "prerelease=true" >> "$GITHUB_OUTPUT" ;; *) echo "prerelease=false" >> "$GITHUB_OUTPUT" ;; esac
+          echo "tag_message=$(git tag -l --format='%(contents:subject)' "$GITHUB_REF_NAME")" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - run: pip install build packaging
       - name: Check the tag matches pyproject.toml
         run: |
           pkg=$(python -c 'import tomllib;print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')
           [ "$pkg" = "${{ steps.version.outputs.version }}" ] || { echo "tag ${GITHUB_REF_NAME} but pyproject says $pkg"; exit 1; }
-      - run: pip install build && python -m build --wheel
+      - name: The changelog section is part of the release
+        run: python .github/scripts/release_feed.py notes "${{ steps.version.outputs.version }}" > notes.md && cat notes.md
+      - run: python -m build --wheel
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/build-push-action@v6
+      - id: compass
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: docker/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
+          build-args: COMPASS_VERSION=${{ steps.version.outputs.version }}
           tags: |
             ${{ env.IMAGE }}:${{ steps.version.outputs.version }}
             ${{ env.IMAGE }}:latest
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.licenses=Apache-2.0
-      - uses: docker/build-push-action@v6
+      - id: dashboard
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: dashboard/Dockerfile.dashboard
           platforms: linux/amd64,linux/arm64
-          build-args: NEXT_PUBLIC_EDITION=open
+          build-args: |
+            NEXT_PUBLIC_EDITION=open
+            COMPASS_VERSION=${{ steps.version.outputs.version }}
           push: true
           tags: |
             ${{ env.DASHBOARD_IMAGE }}:${{ steps.version.outputs.version }}
@@ -63,3 +91,53 @@ jobs:
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.licenses=Apache-2.0
+      - id: updater
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/updater/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.UPDATER_IMAGE }}:${{ steps.version.outputs.version }}
+            ${{ env.UPDATER_IMAGE }}:latest
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.licenses=Apache-2.0
+      - name: GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          flags=""
+          [ "${{ steps.version.outputs.prerelease }}" = "true" ] && flags="--prerelease"
+          gh release create "$GITHUB_REF_NAME" --title "Compass ${{ steps.version.outputs.version }}" --notes-file notes.md $flags
+      - name: releases.json on the releases branch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          url="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          if ! git clone --quiet --depth 1 --branch releases "$url" feed 2>/dev/null; then
+            git init --quiet -b releases feed && git -C feed remote add origin "$url"
+          fi
+          python .github/scripts/release_feed.py feed "${{ steps.version.outputs.version }}" \
+            --feed feed/releases.json --notes-file notes.md \
+            --notes-url "${{ github.server_url }}/${{ github.repository }}/releases/tag/${GITHUB_REF_NAME}" \
+            --tag-message "${{ steps.version.outputs.tag_message }}" \
+            --image "compass=${{ steps.compass.outputs.digest }}" \
+            --image "compass-dashboard=${{ steps.dashboard.outputs.digest }}" \
+            --image "compass-updater=${{ steps.updater.outputs.digest }}"
+          cd feed
+          git add releases.json
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -s -q -m "release: ${{ steps.version.outputs.version }}"
+          git push --quiet origin HEAD:releases
+      - name: The compose defaults on main follow the latest stable release
+        # D29. Fails without stopping the release when main is protected against pushes; bump by hand then.
+        if: steps.version.outputs.prerelease == 'false'
+        continue-on-error: true
+        run: |
+          git fetch --quiet origin main && git checkout --quiet -B main origin/main
+          python .github/scripts/release_feed.py bump-defaults "${{ steps.version.outputs.version }}"
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -s -q -m "release: COMPASS_VERSION defaults to ${{ steps.version.outputs.version }}" docker-compose.yml .env.example
+          git push --quiet origin main

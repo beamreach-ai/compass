@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import axios from "axios";
 import Graphin, { Behaviors, Components as GraphinComponents } from "@antv/graphin";
 import "@antv/graphin/dist/index.css";
+import MappingProgressBar from "./MappingProgressBar";
 
 type InfraNode = {
   org_id: string;
@@ -1394,7 +1395,9 @@ const toggleCategoryFilter = useCallback(
         {infraScan?.integrations_ready && (
           <div
             className={`rounded-lg border px-4 py-3 text-sm ${
-              infraScan?.scanned
+              mapperBusy
+                ? "border-sky-200 bg-sky-50 text-sky-900"
+                : infraScan?.scanned
                 ? "border-emerald-200 bg-emerald-50 text-emerald-900"
                 : effectiveMapperStatus === "failed" || infraScan?.status === "failed"
                   ? "border-red-200 bg-red-50 text-red-900"
@@ -1403,7 +1406,11 @@ const toggleCategoryFilter = useCallback(
           >
             <div className="flex flex-wrap items-center gap-3">
               <span className="font-semibold">
-                {!infraScan?.scanned
+                {/* `scanned` is reset while any scan runs (it gates features on a current map); a scan
+                    that has completed before makes this one a re-scan */}
+                {mapperBusy && (infraScan?.scanned || infraScan?.last_completed_at)
+                  ? "Re-scan in progress"
+                  : !infraScan?.scanned
                   ? mapperBusy
                     ? "Full infra scan in progress"
                     : infraScan?.status === "failed"
@@ -1422,6 +1429,7 @@ const toggleCategoryFilter = useCallback(
                 </span>
               )}
             </div>
+            {mapperBusy && mapperJob && <MappingProgressBar job={mapperJob} />}
             {(latestMapperMessage || infraScan?.last_error || infraScan?.disabled_reason) && (
               <div className="mt-2 text-xs opacity-85">
                 {latestMapperMessage || infraScan?.last_error || infraScan?.disabled_reason}

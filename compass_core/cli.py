@@ -23,7 +23,13 @@ from typing import Any, Dict, List, Optional
 
 from compass_core import anthropic_model, captains, dispatch, llm
 
-CORE_SHORTHAND = {"init_config", "init_tables", "init_alerts", "serve", "api", "login", "captains", "enable", "disable", "configure", "catalog", "install", "uninstall", "validate"}
+CORE_SHORTHAND = {
+    "init_config", "init_tables", "init_alerts", "serve", "api", "login", "captains", "enable", "disable", "configure", "catalog",
+    "install", "uninstall", "validate", "migrate", "update",
+}
+# `compass update check` reads better than `compass update verb=check`: the bare word after
+# these commands becomes their `verb`.
+VERB_COMMANDS = {"update": ("check", "apply", "rollback")}
 
 
 def parse_pairs(pairs: List[str]) -> Dict[str, Any]:
@@ -71,6 +77,9 @@ def main(argv: Optional[List[str]] = None, *, captain: Optional[str] = None) -> 
     # `compass serve` / `compass init_tables` read better than `compass core serve`.
     if captain is None and argv and argv[0] in CORE_SHORTHAND:
         argv.insert(0, "core")
+    at = 1 if captain is None else 0  # where the command sits
+    if len(argv) > at + 1 and argv[at] in VERB_COMMANDS and argv[at + 1] in VERB_COMMANDS[argv[at]]:
+        argv[at + 1] = f"verb={argv[at + 1]}"
     parser = argparse.ArgumentParser(prog=f"python -m {captain}" if captain else "compass", description=__doc__.split("\n\n")[0])
     if captain is None:
         parser.add_argument("captain", choices=sorted(captains.commands_modules()))
@@ -90,7 +99,8 @@ def main(argv: Optional[List[str]] = None, *, captain: Optional[str] = None) -> 
 
     try:
         result = dispatch.dispatch(chosen, args.command, build_payload(args))
-    except (LookupError, ValueError, RuntimeError, captains.CaptainUnavailable) as exc:  # unknown command, no config, a bad argument, a captain that is off
+    # unknown command, no config, a bad argument, a captain that is off, a file that exists or cannot be written
+    except (LookupError, ValueError, RuntimeError, OSError, captains.CaptainUnavailable) as exc:
         print(str(exc.args[0] if exc.args else exc), file=sys.stderr)
         return 2
     json.dump(result, sys.stdout, indent=2, default=str)

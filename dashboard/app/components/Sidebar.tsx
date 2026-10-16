@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation";
 import React, { useEffect, useState } from "react";
 
 import { COMPANY_NAME, LOGO_URL, SUPPORT_EMAIL, SUPPORT_WHATSAPP, isOpenEdition } from "../lib/edition";
-import { ALL_WORKSPACE_TABS, TAB_GROUPS, asWorkspaceTab, viewHref, viewLabel } from "../lib/tabs";
+import { ALL_WORKSPACE_TABS, SETTINGS_VIEWS, TAB_GROUPS, asWorkspaceTab, viewHref, viewLabel } from "../lib/tabs";
 import type { TabDetail, WorkspaceTab } from "../lib/tabs";
 
 // The groups before the bootstrap has answered (or from an API that lists no
@@ -244,9 +244,55 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void } = {}
   const details = tabDetails || LEGACY_TABS;
   const SECURITY_TABS = new Set<WorkspaceTab>(details.filter((t) => t.group === "security").map((t) => t.key));
   const visible = (t: TabDetail) => enabledTabSet.has(t.key) && (t.key !== "settings" || settingsEnabled);
-  const navGroups: NavItem[][] = TAB_GROUPS.map((group) => details.filter((t) => t.group === group && visible(t)).map(item)).filter((group) => group.length > 0);
-  const ungrouped = details.filter((t) => !TAB_GROUPS.includes(t.group as (typeof TAB_GROUPS)[number]) && visible(t)).map(item);
+  const inGroups = (t: TabDetail) => visible(t) && t.key !== "settings";
+  const navGroups: NavItem[][] = TAB_GROUPS.map((group) => details.filter((t) => t.group === group && inGroups(t)).map(item)).filter((group) => group.length > 0);
+  const ungrouped = details.filter((t) => !TAB_GROUPS.includes(t.group as (typeof TAB_GROUPS)[number]) && inGroups(t)).map(item);
   if (ungrouped.length > 0) navGroups.push(ungrouped);
+  const settingsDetail = details.find((t) => t.key === "settings" && visible(t));
+  const settingsItem: NavItem | null = settingsDetail ? { ...item(settingsDetail), views: SETTINGS_VIEWS(isOpenEdition) } : null;
+
+  const renderNavItem = (navItem: NavItem) => {
+    const isActive = currentTab === navItem.key;
+    const className = `${linkBase} ${isActive ? activeCls : navItem.disabled ? disabledCls : inactiveCls}`;
+    // A tab split into sub-pages (the manifest's views) lists them only while it is active;
+    // the first view is the tab itself.
+    const subItems: Array<{ key: string; label: string; href: string; active: boolean }> =
+      isActive && !navItem.disabled && navItem.views.length > 0
+        ? navItem.views.map((v, index) => ({
+            key: v,
+            label: viewLabel(v),
+            href: viewHref(navItem.key, v, index === 0),
+            active: viewParam ? viewParam === v : index === 0,
+          }))
+        : [];
+    return (
+      <li key={navItem.key}>
+        {navItem.disabled ? (
+          <span aria-disabled="true" className={className}>{navItem.label}</span>
+        ) : (
+          <Link href={navItem.href} className={className} onClick={onNavigate}>{navItem.label}</Link>
+        )}
+        {subItems.length > 0 && (
+          <ul className="ml-4 mt-1 space-y-0.5 border-l border-gray-200 pl-2" aria-label={`${navItem.label} sections`}>
+            {subItems.map((view) => (
+              <li key={view.key}>
+                <Link
+                  href={view.href}
+                  onClick={onNavigate}
+                  aria-current={view.active ? "page" : undefined}
+                  className={`block rounded px-2 py-1 text-[13px] transition ${
+                    view.active ? "bg-blue-50 font-semibold text-blue-700" : "text-gray-600 hover:bg-gray-100"
+                  }`}
+                >
+                  {view.label}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
+      </li>
+    );
+  };
 
   return (
     <>
@@ -260,7 +306,7 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void } = {}
         </Link>
       </div>
       {/* Nav */}
-      <nav className="flex-1 p-4">
+      <nav className="flex flex-1 flex-col p-4">
         <ul className="space-y-1 text-sm">
           {accountLoading ? (
             [60, 44, 52, 48].map((w, i) => (
@@ -280,61 +326,13 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void } = {}
                     <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Security</span>
                   </li>
                 )}
-                {group.map((navItem) => {
-                  const isActive = currentTab === navItem.key;
-                  const className = `${linkBase} ${
-                    isActive
-                      ? activeCls
-                      : navItem.disabled
-                        ? disabledCls
-                        : inactiveCls
-                  }`;
-                  // A tab split into sub-pages (the manifest's views) lists them only while it is active;
-                  // the first view is the tab itself.
-                  const subItems: Array<{ key: string; label: string; href: string; active: boolean }> =
-                    isActive && !navItem.disabled && navItem.views.length > 0
-                      ? navItem.views.map((v, index) => ({
-                          key: v,
-                          label: viewLabel(v),
-                          href: viewHref(navItem.key, v, index === 0),
-                          active: viewParam ? viewParam === v : index === 0,
-                        }))
-                      : [];
-                  return (
-                    <li key={navItem.key}>
-                      {navItem.disabled ? (
-                        <span aria-disabled="true" className={className}>{navItem.label}</span>
-                      ) : (
-                        <Link href={navItem.href} className={className} onClick={onNavigate}>{navItem.label}</Link>
-                      )}
-                      {subItems.length > 0 && (
-                        <ul className="ml-4 mt-1 space-y-0.5 border-l border-gray-200 pl-2" aria-label={`${navItem.label} sections`}>
-                          {subItems.map((view) => {
-                            const viewActive = view.active;
-                            return (
-                              <li key={view.key}>
-                                <Link
-                                  href={view.href}
-                                  onClick={onNavigate}
-                                  aria-current={viewActive ? "page" : undefined}
-                                  className={`block rounded px-2 py-1 text-[13px] transition ${
-                                    viewActive ? "bg-blue-50 font-semibold text-blue-700" : "text-gray-600 hover:bg-gray-100"
-                                  }`}
-                                >
-                                  {view.label}
-                                </Link>
-                              </li>
-                            );
-                          })}
-                        </ul>
-                      )}
-                    </li>
-                  );
-                })}
+                {group.map(renderNavItem)}
               </React.Fragment>
             );
           })}
         </ul>
+        {/* Settings sits at the bottom of the nav, above the account details */}
+        {!accountLoading && settingsItem && <ul className="mt-auto space-y-1 pt-4 text-sm">{renderNavItem(settingsItem)}</ul>}
       </nav>
 
       {/* Bottom actions */}

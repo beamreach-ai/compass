@@ -53,6 +53,7 @@ class IACFixDriftJob:
             logger.info("Skipped %d resources with no ownership info", len(skipped))
 
         pr_results: List[Dict[str, str]] = []
+        errors: Dict[str, str] = {}
         for repo, items in by_repo.items():
             emit_job_event(f"Creating drift fix PR for {repo}", event_type="progress", status="running")
             try:
@@ -61,12 +62,17 @@ class IACFixDriftJob:
                     pr_results.append({"repo": repo, "pr_url": pr_url})
             except Exception as exc:
                 logger.error("Failed to create drift fix PR for %s: %s", repo, exc)
+                errors[repo] = str(exc)
 
+        if errors and not pr_results:
+            # nothing was fixed: the job fails with the reason, rather than "completed" with no pull request
+            raise RuntimeError("; ".join(f"{repo}: {why}" for repo, why in errors.items()))
         return {
             "pr_urls": [r["pr_url"] for r in pr_results],
             "repos": [r["repo"] for r in pr_results],
             "resource_count": len(resource_ids) - len(skipped),
             "skipped_count": len(skipped),
+            "errors": errors,
         }
 
     def _load_store(self) -> InfraMapStore:

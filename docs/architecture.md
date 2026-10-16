@@ -32,6 +32,7 @@ never waits on work. That is the whole queue; there is no broker.
 | `captains/iac` | Code-as-cloud: import unmanaged resources into Terraform (generate HCL, rewire literals to references, verify with a plan, open the pull request) and fix drift. |
 | `captains/prs` | The PR watcher: syncs the pull requests Compass opened, reads reviews, answers, revises within a risk policy (`claude_runner.py`: Claude edits the checkout through four tools, the intent guard checks the diff, a plain push adds one commit), labels what needs a human. |
 | `compass_api` | The FastAPI app behind the dashboard: sign-in and API tokens, jobs, target, maps, honeypots, incidents, notifications, Slack, pull requests, settings. One workspace whose config is a file. |
+| `docker/updater` | The opt-in updater: `docker:cli` plus one shell script that applies a requested release and rolls it back when health fails. No Compass code. |
 | `dashboard` | Next.js 14. Tabs: Maps, Honeypots, IaC, Pull requests, Queue, Settings. `app/components/DashboardClient.tsx` is the shell; `app/lib/shell.tsx` is what it exposes to plugged-in modules; `app/lib/extensions.ts` is the registry (tabs, settings sections, banners, providers) a larger deployment fills — empty here. |
 
 ## Vocabulary
@@ -82,6 +83,26 @@ model. Each seam is a module-level default plus an `install`/`set_*` hook:
 
 If you are adding a feature, you almost never need a new seam; add a command
 and, if the dashboard needs it, a route.
+
+## Updates
+
+`compass_core.updates` reads `releases.json`, which the release workflow keeps
+on the `releases` branch, at most every six hours. It compares the feed with
+`compass_core.__version__`. The bootstrap, `/api/updates`, `/api/status`
+and `compass update check` all show the result. Applying a release is not
+something the Compass containers can do: they have no Docker socket. The
+opt-in `updater` service has one. The two sides talk through files on the
+`./extensions` volume. The API writes `update.json` and `status.json`, the
+latter with the active job count. The updater writes `update.result.json` and
+`rollback.json`. Those files work when the API is down. On the next start,
+the entrypoint runs `compass migrate` (`compass_core.migrations`) and rebuilds
+the extensions for the new core.
+
+```
+dashboard ─POST /api/updates/apply─► api ─► extensions/update.json
+updater (docker/updater/updater.sh, every 30s) ─► pull, verify digests, .env, compose up, /health
+                                               └► update.result.json, rollback.json
+```
 
 ## Running jobs
 

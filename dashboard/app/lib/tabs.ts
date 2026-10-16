@@ -8,6 +8,13 @@ export type WorkspaceTab = string;
 export type DashboardTab = string;
 export const ALL_WORKSPACE_TABS: WorkspaceTab[] = ["finops", "audits", "compliance", "queue", "maps", "iac", "prs", "policies", "settings", "honeypots"];
 
+// Settings is one page in sections; the sidebar lists them under Settings, the way a
+// captain's views are listed under its tab, and each link scrolls to its section
+// (id `settings-<key>`). Updates is the open edition's (the product deploys its own way).
+export const SETTINGS_VIEWS = (openEdition: boolean): string[] =>
+  openEdition ? ["integrations", "captains", "updates"] : ["integrations", "captains"];
+export const settingsSectionId = (view: string): string => `settings-${view}`;
+
 // Legacy URLs: `?tab=radio` has always opened the audits tab.
 export const TAB_ALIASES: Partial<Record<string, WorkspaceTab>> = { radio: "audits" };
 

@@ -3,8 +3,10 @@
 A captain calls ``emit_job_event`` as it works. Which job it is comes from a
 context variable that the runner sets with ``job_event_context``; where the
 event goes is the installed ``EventSink``. The open default logs one line per
-event. The product's worker installs a sink that appends to its job store
-(a larger deployment installs its own with ``set_event_sink``). Outside a job context, events are dropped.
+event; ``compass serve`` replaces it with ``StoreSink``, which also appends the
+event to the job in the jobs table, so the dashboard sees a job's progress. The
+product's worker installs a sink of its own (a larger deployment installs its
+own with ``set_event_sink``). Outside a job context, events are dropped.
 """
 
 from __future__ import annotations
@@ -36,6 +38,17 @@ class LogSink:
     def append_event(self, job_id, message, *, event_type, status, data, workspace_id) -> None:
         suffix = f" [{status}]" if status else ""
         logger.info("job %s: %s%s", job_id, message, suffix)
+
+
+class StoreSink(LogSink):
+    """The log line, and the event on the job in the job store (``CaptainJobStore.append_event``)."""
+
+    def __init__(self, store: Any) -> None:
+        self.store = store
+
+    def append_event(self, job_id, message, *, event_type, status, data, workspace_id) -> None:
+        super().append_event(job_id, message, event_type=event_type, status=status, data=data, workspace_id=workspace_id)
+        self.store.append_event(job_id, message, event_type=event_type, status=status, data=data, workspace_id=workspace_id)
 
 
 _sink: EventSink = LogSink()

@@ -439,3 +439,29 @@ def test_s3_and_rds_are_collected_as_names_and_arns():
     assert c.nodes["arn:aws:s3:::prod-uploads"].type == "s3_bucket"
     rds = c.nodes["arn:aws:rds:eu-central-1:123456789012:db:main"]
     assert rds.type == "rds_instance" and rds.attributes["engine"] == "postgres"
+
+
+def test_each_region_reports_where_the_scan_is_for_the_progress_bar(monkeypatch):
+    from captains.mapper.aws_mapper import AWSGraphCollector
+    from compass_core import events
+
+    seen = []
+
+    class Sink:
+        def append_event(self, job_id, message, *, event_type="info", status=None, data=None, workspace_id=None):
+            seen.append((message, data))
+
+    collector = AWSGraphCollector(org_id="org", account_id="123456789012", target_session=None, regions=["us-east-1", "eu-west-1"])
+    monkeypatch.setattr(collector, "_regional_session", lambda region: object())
+    monkeypatch.setattr(collector, "_collect_region", lambda session, region: collector.nodes.update({f"r-{region}": object()}))
+    previous = events.event_sink()
+    events.set_event_sink(Sink())
+    try:
+        with events.job_event_context("job-1", "ws"):
+            collector.collect()
+    finally:
+        events.set_event_sink(previous)
+    assert seen == [
+        ("Scanning region us-east-1 (1/2)", {"region": "us-east-1", "index": 1, "total": 2, "resources": 0}),
+        ("Scanning region eu-west-1 (2/2)", {"region": "eu-west-1", "index": 2, "total": 2, "resources": 1}),
+    ]

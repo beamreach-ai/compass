@@ -184,15 +184,22 @@ class CaptainJobStore:
     def _scan_jobs(self, limit: int, workspace_id: Optional[str] = None) -> List[Dict[str, Any]]:
         if self._table:
             try:
+                # Keys are JOB#<uuid>: key order is not time order, so every page is read
+                # and the newest are taken after sorting. One page of `limit` items lost the
+                # newest jobs once a workspace had more than `limit` of them.
                 if self._multi_tenant and workspace_id:
-                    response = self._table.query(
-                        KeyConditionExpression=Key(self._pk_name).eq(self._workspace_partition(workspace_id)),
-                        Limit=limit,
-                        ScanIndexForward=False,
-                    )
+                    kwargs: Dict[str, Any] = {"KeyConditionExpression": Key(self._pk_name).eq(self._workspace_partition(workspace_id))}
+                    read = self._table.query
                 else:
-                    response = self._table.scan(Limit=limit)
-                items = response.get("Items", [])
+                    kwargs = {}
+                    read = self._table.scan
+                items: List[Dict[str, Any]] = []
+                while True:
+                    response = read(**kwargs)
+                    items.extend(response.get("Items", []))
+                    if not response.get("LastEvaluatedKey"):
+                        break
+                    kwargs["ExclusiveStartKey"] = response["LastEvaluatedKey"]
                 items.sort(key=lambda entry: entry.get("updated_at", entry.get("created_at", 0)), reverse=True)
                 return items[:limit]
             except (BotoCoreError, ClientError) as exc:

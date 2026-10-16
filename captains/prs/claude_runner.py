@@ -60,7 +60,9 @@ def _terraform_bin() -> Optional[str]:
 
 
 def push_url(repo: str, token: str) -> str:
-    return f"https://x-access-token:{token}@github.com/{repo}.git"
+    from compass_core.github import git_url
+
+    return git_url(repo, token)
 
 
 def _is_scratch(path: str) -> bool:

@@ -106,3 +106,29 @@ def test_without_a_host_the_open_defaults_apply(tmp_path, monkeypatch):
     import os
 
     assert os.environ["DISABLED_FEATURES"] == "security,finops,compliance,policies"
+
+
+def test_the_api_started_by_the_cli_writes_jobs_to_the_jobs_table(tmp_path, monkeypatch):
+    """`compass api` runs through the CLI, which installs the inline queue for its own
+    commands first; the API must not take that for a host's queue (found by the e2e suite:
+    every job started from the dashboard ran inside the request and failed)."""
+    import json
+
+    from compass_api import app as api_app
+    from compass_core import config, dispatch, queue
+
+    path = tmp_path / "local.json"
+    path.write_text(json.dumps({"workspace_id": "local", "dynamodb_config": {"workspace_id": "local", "jobs": "compass_jobs_local"}}))
+    monkeypatch.setenv("COMPASS_CONFIG", str(path))
+    monkeypatch.setattr(config, "_loader", None)
+    previous = queue._factory
+    try:
+        dispatch.use_inline_queue()              # what cli.main does before dispatching core.api
+        api_app._configure_queue()
+        assert isinstance(queue._factory(), queue.StoreQueue)
+        host_queue = object()
+        queue.set_job_queue(lambda: host_queue)  # a host's own queue is kept
+        api_app._configure_queue()
+        assert queue._factory() is host_queue
+    finally:
+        queue.set_job_queue(previous)
