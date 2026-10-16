@@ -14,6 +14,13 @@ export const statusTool = defineTool({
     const s = result as any;
     const lines: string[] = [];
     lines.push(`Compass ${s.compass_version} (api ${s.api_version})  workspace ${s.workspace?.workspace_id}  mode ${s.app?.mode}${s.app?.read_only ? " (read-only)" : ""}`);
+    // compass_core.updates: is a release out, and does the compose file ask for what runs
+    const u = s.update || {};
+    if (u.available && u.latest) {
+      const how = u.apply === "updater" ? "one click on Settings → Updates" : "Settings → Updates shows the two commands";
+      lines.push(`Update: Compass ${u.latest} is available (this is ${u.running}); ${how}`);
+    }
+    if (u.pinned_differs) lines.push(`Update: the compose file asks for ${u.pinned} but ${u.running} is running; run \`docker compose up -d\``);
     const t = s.target || {};
     lines.push(`AWS: ${t.aws_connected ? `connected (${t.aws?.mode}, account ${t.aws?.account_id || "?"}, ${t.aws?.region || "?"})` : "not connected"}`);
     lines.push(`GitHub: ${t.github_connected ? `connected (${t.github?.login || "app"}, ${t.github?.repositories_count ?? "?"} repos)` : "not connected"}`);

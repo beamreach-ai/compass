@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from compass_core import updates
 
-# Bump when the HTTP API changes in a way the CLI must know about.
-API_VERSION = "2026.10.2"
+# Bump when the HTTP API changes in a way the CLI must know about (an addition, like
+# /api/updates or a new /api/status section, is not one: the CLI's version check would
+# call every newer install incompatible).
+API_VERSION = "2026.10.1"
 
 
 def compass_version() -> str:

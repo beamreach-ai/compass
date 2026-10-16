@@ -42,6 +42,10 @@ its first runs.
   the banner say "re-scan" for a scan after the first one.
 - The decoy settings describe `network` (VPC and subnets), which a
   `db_credential` decoy's listener needs.
+- `compass status` in the CLI says when a release is out and when the compose
+  file asks for another version than runs; the status skill mentions it.
+  The API version stays 2026.10.1: the additions do not need a CLI that
+  knows them, and a bump would have made every CLI call 0.5 incompatible.
 
 ## 0.5.1 — unreleased
 
