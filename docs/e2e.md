@@ -4,7 +4,8 @@
 shipped `docker-compose.yml`, and uses it the way a person does: through the
 dashboard in a real browser, through the API, and through the `compass` command.
 It runs against a fake AWS account and a fake GitHub, so it needs no account, no
-token and no model. CI runs it on every pull request, and a red run blocks the merge.
+token and no model. CI runs the part a pull request needs on every pull request,
+everything every night and before every release ("In CI" below).
 
 The unit tests (`pytest`) check functions in isolation in seconds. This suite
 checks that the pieces work together as shipped: the compose file, the images, the
@@ -42,6 +43,53 @@ planted before incidents are opened. Running a single file or `-k` works, becaus
 each test asks for what it needs, but a test that depends on an earlier one in its
 file says so in its body.
 
+## In CI
+
+`.github/workflows/e2e.yml` is the one definition, run three ways:
+
+| When | What runs |
+|---|---|
+| Every pull request (`ci.yml`) | The tests the change needs, decided by `.github/scripts/e2e_plan.py` |
+| Nightly on `main`, or by hand (Actions → e2e → Run workflow) | Everything |
+| A release tag (`release.yml`) | Everything, before any image is published |
+
+The images are built once into GitHub's build cache, then four shards run in
+parallel, each with its own stack:
+
+| Shard | Files |
+|---|---|
+| A | install, sign-in, shell, settings (`test_00`–`test_03`) |
+| B | captains, the map (`test_04`, `test_05`) |
+| C | decoys, code-as-cloud, pull requests (`test_06`–`test_08`) |
+| D | jobs, updates, release (`test_09`–`test_11`) |
+
+What a pull request runs:
+
+- **Nothing**, when only what does not run in the stack changed: docs, the
+  changelog, the CLI, unit tests. The check still reports, and passes.
+- **One captain's tests plus the install and shell smoke tests**, when only that
+  captain's folder changed (`captains/honeypot`, `iac`, `prs`, `librarian`, the
+  example captain).
+- **Those files**, when only end-to-end test files changed, with the files they
+  build on.
+- **Everything** for any other change: `compass_core`, `compass_api`, the
+  dashboard, `docker/`, the compose file, the harness and fakes, and the mapper,
+  which every other captain reads. A rule that is not sure runs everything.
+- **The real compose update** (UPD-2, about eight minutes) only when what an
+  update touches changed: the images, the compose file, the updater, the
+  entrypoint, the update and extension code.
+
+The nightly run catches what the shortcuts let through within a day. The check a
+branch rule requires is **`e2e / e2e`**. It passes when every planned shard
+passed, or when the plan ran nothing.
+
+To see what a change would run:
+
+```sh
+git diff --name-only origin/main...HEAD > /tmp/changed.txt
+python .github/scripts/e2e_plan.py --changed /tmp/changed.txt
+```
+
 ## Reading a failure
 
 A failed test leaves a directory under `e2e/.artifacts/<test id>/`:
@@ -53,7 +101,8 @@ A failed test leaves a directory under `e2e/.artifacts/<test id>/`:
 | `console.txt` | Errors the page logged |
 | `stack-logs.txt` | The last 300 lines of every service's log |
 
-In CI the directory is uploaded as the `e2e-artifacts` artifact of the run.
+In CI each shard uploads it as `e2e-artifacts-<shard>`, and the job log ends with the
+stack's errors.
 `E2E_KEEP=1` leaves the stack up after a local run; `cd e2e/.work/compass-e2e` and
 use `docker compose -f docker-compose.yml -f compose.e2e.yml logs` as on any install.
 

@@ -7,7 +7,8 @@ name: release
 # plus :latest; then the GitHub Release with the CHANGELOG.md section as its notes,
 # releases.json on the `releases` branch (what every install's update check reads:
 # docs/open_updates_spec.md §2), and, for a stable release, the COMPASS_VERSION
-# defaults on main. A tag without a changelog section is refused.
+# defaults on main. A tag without a changelog section is refused, and nothing is published
+# until the whole end-to-end suite has passed on the tagged commit.
 on:
   push:
     tags: ["v*"]
@@ -24,7 +25,14 @@ env:
   FEED_URL: https://raw.githubusercontent.com/${{ github.repository }}/releases/releases.json
 
 jobs:
+  e2e:
+    # the whole end-to-end suite on the tagged commit, before anything is published
+    uses: ./.github/workflows/e2e.yml
+    with:
+      full: true
+
   images:
+    needs: e2e
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

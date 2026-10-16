@@ -8,6 +8,11 @@ on:
 permissions:
   contents: read
 
+# a new push to a pull request cancels the run it replaces
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   python:
     runs-on: ubuntu-latest
@@ -79,41 +84,10 @@ jobs:
       - run: python .github/scripts/release_feed.py notes "$(python -c 'import tomllib;print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')"
 
   e2e:
-    # The end-to-end suite (docs/e2e.md): the stack built from this commit against a fake
-    # AWS (moto) and a fake GitHub, driven through the browser, the API and the CLI. Includes
-    # a real compose update from the last release to this tree (tests/e2e/update_compose.sh).
-    # Branch protection makes this check required, so a red run blocks the merge.
+    # The end-to-end suite, the tests this change needs (.github/workflows/e2e.yml); its
+    # last job, "e2e / e2e", is the check the branch rule requires.
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
     needs: [python, dashboard]
-    timeout-minutes: 75
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # the update test builds the previous release from its tag
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-      - run: pip install -e ".[dev,e2e]"
-      - run: python -m playwright install --with-deps chromium
-      - run: pytest e2e -p no:cacheprovider -rf
-        env:
-          PYTHON: python
-          E2E_KEEP: "1"  # the stack stays up for the next step's logs
-      - name: The stack's errors
-        if: failure()
-        working-directory: e2e/.work/compass-e2e
-        env:
-          E2E_FAKES_DIR: ${{ github.workspace }}/e2e/fakes
-        run: |
-          docker compose -f docker-compose.yml -f compose.e2e.yml --profile updater ps
-          docker compose -f docker-compose.yml -f compose.e2e.yml --profile updater logs --no-color api compass updater \
-            | grep -iE -B3 -A25 "Traceback|ERROR|Exception" | tail -400 || true
-      - if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: e2e-artifacts
-          path: e2e/.artifacts
-          include-hidden-files: true  # .artifacts starts with a dot
-          retention-days: 14
+    uses: ./.github/workflows/e2e.yml
+    with:
+      full: false

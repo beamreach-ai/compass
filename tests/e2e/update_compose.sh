@@ -50,11 +50,19 @@ docker rm -f compass-e2e-registry >/dev/null 2>&1 || true  # one an interrupted 
 docker run -d --rm --name compass-e2e-registry -p "$PORT:5000" registry:2 >/dev/null
 
 # ── the images ──────────────────────────────────────────────────────────────
-"$PY" -m build --wheel --outdir "$ROOT/dist-e2e/new" "$ROOT" >/dev/null
-docker build -q -f "$ROOT/docker/Dockerfile" --build-arg WHEEL=dist-e2e/new/*.whl -t "$REG/compass:$VERSION" "$ROOT" >/dev/null
-docker build -q -f "$ROOT/docker/updater/Dockerfile" -t "$REG/compass-updater:$VERSION" "$ROOT" >/dev/null
-docker build -q -f "$ROOT/dashboard/Dockerfile.dashboard" --build-arg NEXT_PUBLIC_EDITION=open --build-arg COMPASS_VERSION="$VERSION" \
-  -t "$REG/compass-dashboard:$VERSION" "$ROOT" >/dev/null
+# E2E_REUSE_IMAGES=1: this tree's images are the end-to-end suite's, already built
+# (compass-e2e/*:local); tag them rather than build them again.
+if [ "${E2E_REUSE_IMAGES:-0}" = "1" ] && docker image inspect compass-e2e/compass:local compass-e2e/dashboard:local compass-e2e/updater:local >/dev/null 2>&1; then
+  docker tag compass-e2e/compass:local "$REG/compass:$VERSION"
+  docker tag compass-e2e/updater:local "$REG/compass-updater:$VERSION"
+  docker tag compass-e2e/dashboard:local "$REG/compass-dashboard:$VERSION"
+else
+  "$PY" -m build --wheel --outdir "$ROOT/dist-e2e/new" "$ROOT" >/dev/null
+  docker build -q -f "$ROOT/docker/Dockerfile" --build-arg WHEEL=dist-e2e/new/*.whl -t "$REG/compass:$VERSION" "$ROOT" >/dev/null
+  docker build -q -f "$ROOT/docker/updater/Dockerfile" -t "$REG/compass-updater:$VERSION" "$ROOT" >/dev/null
+  docker build -q -f "$ROOT/dashboard/Dockerfile.dashboard" --build-arg NEXT_PUBLIC_EDITION=open --build-arg COMPASS_VERSION="$VERSION" \
+    -t "$REG/compass-dashboard:$VERSION" "$ROOT" >/dev/null
+fi
 
 git -C "$ROOT" worktree add --quiet --detach "$WORK/from" "v$FROM"
 "$PY" -m build --wheel --outdir "$WORK/from/dist-e2e" "$WORK/from" >/dev/null

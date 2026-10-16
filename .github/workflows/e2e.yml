@@ -1,0 +1,177 @@
+name: e2e
+
+# The end-to-end suite (docs/e2e.md). One definition, three callers:
+#   - ci.yml on every pull request: the tests the change needs (.github/scripts/e2e_plan.py)
+#   - this file's schedule, nightly on main: everything
+#   - release.yml before it publishes a tag: everything
+# The images are built once into GitHub's build cache; the shards run in parallel and
+# load them from it. The last job, `e2e`, is the one check a branch rule requires: it
+# fails when any shard failed and passes when the plan rightly ran nothing.
+on:
+  workflow_call:
+    inputs:
+      full:
+        description: run every shard and the compose update, whatever changed
+        type: boolean
+        default: false
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.plan.outputs.run }}
+      matrix: ${{ steps.plan.outputs.matrix }}
+      compose_update: ${{ steps.plan.outputs.compose_update }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - id: plan
+        env:
+          FULL: ${{ inputs.full || github.event_name != 'pull_request' }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ "$FULL" = "true" ] || [ -z "$BASE" ]; then
+            python .github/scripts/e2e_plan.py --full
+          else
+            git diff --name-only "$BASE"...HEAD > changed.txt
+            python .github/scripts/e2e_plan.py --changed changed.txt
+          fi
+
+  images:
+    needs: plan
+    if: needs.plan.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # the commit's time in the wheel: the shards' rebuild is then byte for byte the same, and cached
+      - run: echo "SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)" >> "$GITHUB_ENV"
+      - run: pip install build && python -m build --wheel --outdir dist-e2e/suite
+      - run: echo "wheel=$(ls dist-e2e/suite/*.whl)" >> "$GITHUB_ENV"
+      - run: echo "version=$(python -c 'import tomllib;print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')" >> "$GITHUB_ENV"
+      - uses: docker/setup-buildx-action@v3
+      # cache-to only: the shards build the same images from this cache in seconds
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          build-args: WHEEL=${{ env.wheel }}
+          cache-to: type=gha,mode=max,scope=e2e-compass
+          cache-from: type=gha,scope=e2e-compass
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: dashboard/Dockerfile.dashboard
+          build-args: |
+            NEXT_PUBLIC_EDITION=open
+            COMPASS_VERSION=${{ env.version }}
+          cache-to: type=gha,mode=max,scope=e2e-dashboard
+          cache-from: type=gha,scope=e2e-dashboard
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/updater/Dockerfile
+          cache-to: type=gha,mode=max,scope=e2e-updater
+          cache-from: type=gha,scope=e2e-updater
+
+  shard:
+    needs: [plan, images]
+    if: needs.plan.outputs.run == 'true'
+    name: shard ${{ matrix.shard }} (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # the compose update builds the previous release from its tag
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e ".[dev,e2e]"
+      - run: python -m playwright install --with-deps chromium
+      - run: echo "SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)" >> "$GITHUB_ENV"
+      - run: python -m build --wheel --outdir dist-e2e/suite
+      - run: echo "wheel=$(ls dist-e2e/suite/*.whl)" >> "$GITHUB_ENV"
+      - run: echo "version=$(python -c 'import tomllib;print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')" >> "$GITHUB_ENV"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          build-args: WHEEL=${{ env.wheel }}
+          cache-from: type=gha,scope=e2e-compass
+          load: true
+          tags: compass-e2e/compass:local
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: dashboard/Dockerfile.dashboard
+          build-args: |
+            NEXT_PUBLIC_EDITION=open
+            COMPASS_VERSION=${{ env.version }}
+          cache-from: type=gha,scope=e2e-dashboard
+          load: true
+          tags: compass-e2e/dashboard:local
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/updater/Dockerfile
+          cache-from: type=gha,scope=e2e-updater
+          load: true
+          tags: compass-e2e/updater:local
+      - run: rm -rf dist-e2e && pytest ${{ matrix.files }} -p no:cacheprovider -rf
+        env:
+          PYTHON: python
+          E2E_BUILD: "0"          # the images above
+          E2E_REUSE_IMAGES: "1"   # and the compose update reuses them
+          E2E_KEEP: "1"           # the stack stays up for the next step's logs
+          E2E_SKIP_COMPOSE_UPDATE: ${{ needs.plan.outputs.compose_update == 'true' && '0' || '1' }}
+      - name: The stack's errors
+        if: failure()
+        working-directory: e2e/.work/compass-e2e
+        env:
+          E2E_FAKES_DIR: ${{ github.workspace }}/e2e/fakes
+        run: |
+          docker compose -f docker-compose.yml -f compose.e2e.yml --profile updater ps
+          docker compose -f docker-compose.yml -f compose.e2e.yml --profile updater logs --no-color api compass updater \
+            | grep -iE -B3 -A25 "Traceback|ERROR|Exception" | tail -400 || true
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-artifacts-${{ matrix.shard }}
+          path: e2e/.artifacts
+          include-hidden-files: true  # .artifacts starts with a dot
+          retention-days: 14
+
+  e2e:
+    # the one check a branch rule requires
+    needs: [plan, images, shard]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          RUN: ${{ needs.plan.outputs.run }}
+          PLAN: ${{ needs.plan.result }}
+          IMAGES: ${{ needs.images.result }}
+          SHARDS: ${{ needs.shard.result }}
+        run: |
+          echo "plan: $PLAN (run: $RUN)  images: $IMAGES  shards: $SHARDS"
+          [ "$PLAN" = "success" ] || { echo "the plan failed"; exit 1; }
+          if [ "$RUN" != "true" ]; then echo "nothing that runs in the stack changed"; exit 0; fi
+          [ "$IMAGES" = "success" ] && [ "$SHARDS" = "success" ] || { echo "a shard failed: see its log and its e2e-artifacts"; exit 1; }

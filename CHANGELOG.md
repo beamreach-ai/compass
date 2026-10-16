@@ -15,8 +15,14 @@ its first runs.
   and a fake GitHub, driven through a real browser, the API and the `compass`
   command. 74 tests over install, sign-in and tokens, the dashboard, settings,
   captains, the map, decoys, code-as-cloud, the PR watcher, jobs, updates and the
-  release artefacts. Model-free; no account or token needed. CI runs it on every
-  pull request.
+  release artefacts. Model-free; no account or token needed.
+- In CI the suite runs in four parallel shards from images built once into
+  GitHub's build cache. A pull request runs what its change needs
+  (`.github/scripts/e2e_plan.py`): nothing for docs, the CLI or unit tests; one
+  captain's tests and the smoke tests for a change to that captain; everything
+  for shared code. The real compose update runs only when the images, the
+  compose file or the update code change. Everything runs nightly on `main` and
+  before a release is published. The required check is `e2e / e2e`.
 - `GITHUB_API_URL` and `GITHUB_GIT_URL`: where Compass talks to GitHub, for
   GitHub Enterprise Server (`https://<host>/api/v3`; the clone URL follows) and
   for the suite's fake. Unset, nothing changes.
@@ -42,6 +48,10 @@ its first runs.
   the banner say "re-scan" for a scan after the first one.
 - The decoy settings describe `network` (VPC and subnets), which a
   `db_credential` decoy's listener needs.
+- The API writes the jobs it starts to the jobs table again. Since 0.4.1 it
+  took the inline queue the CLI installs before `compass api` for a host's
+  queue, so every job started from the dashboard ran inside the request, and
+  those of other captains failed.
 - `compass status` in the CLI says when a release is out and when the compose
   file asks for another version than runs; the status skill mentions it.
   The API version stays 2026.10.1: the additions do not need a CLI that

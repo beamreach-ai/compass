@@ -74,8 +74,9 @@ def _configure_queue() -> None:
     from compass_core.queue import StoreQueue, set_job_queue
     from compass_core.workspace import default_workspace_id
 
-    if _queue._factory is not None:
-        # a host installed its own queue (compass_core.hosts): keep it
+    if _queue._factory is not None and not isinstance(_queue._factory(), _queue.InlineQueue):
+        # a host installed its own queue (compass_core.hosts): keep it. The inline queue is not a
+        # host's: `compass api` starts through the CLI, which installs it for its own commands
         if llm.model_for() is None:
             anthropic_model.install_if_available()
         return
