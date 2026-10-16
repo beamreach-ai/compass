@@ -107,8 +107,9 @@ def test_upd_2_the_updater_applies_a_release_refuses_a_wrong_digest_and_rolls_ba
     result = subprocess.run([str(ROOT / "tests" / "e2e" / "update_compose.sh")], capture_output=True, text=True, timeout=3600,
                             # E2E_KEEP is the suite's; the script cleans up after itself
                             env={**{k: v for k, v in os.environ.items() if k != "E2E_KEEP"}, "PYTHON": os.getenv("PYTHON", "python")})
-    tail = "\n".join(line for line in (result.stdout + result.stderr).splitlines() if line.startswith(("e2e:", "updater:")))
-    assert result.returncode == 0 and "e2e: passed" in result.stdout, tail or result.stderr[-3000:]
+    steps = "\n".join(line for line in (result.stdout + result.stderr).splitlines() if line.startswith(("e2e:", "updater:")))
+    # the script prints the updater's log on a failure: keep its end with the steps
+    assert result.returncode == 0 and "e2e: passed" in result.stdout, f"{steps}\n---\n{result.stderr[-4000:]}"
 
 
 def test_upd_3_roll_back_from_the_card_asks_the_updater_for_the_previous_version(stack, page, quiet_updater):

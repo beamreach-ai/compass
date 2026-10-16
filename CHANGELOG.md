@@ -52,6 +52,8 @@ its first runs.
   took the inline queue the CLI installs before `compass api` for a host's
   queue, so every job started from the dashboard ran inside the request, and
   those of other captains failed.
+- The updater tries `docker compose up` once more before it calls an update
+  failed: CI saw Compose itself crash once, which is no reason to roll back.
 - `compass status` in the CLI says when a release is out and when the compose
   file asks for another version than runs; the status skill mentions it.
   The API version stays 2026.10.1: the additions do not need a CLI that

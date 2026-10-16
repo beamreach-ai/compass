@@ -69,6 +69,15 @@ restore_env() {  # version
 }
 
 # version: the API and the daemon run that version's image, and the API and the dashboard answer
+# compose up, once more after a pause if it fails: a transient error from Compose or the
+# daemon is not a failed release, and rolling back for one would be wrong
+compose_up() {
+  compose up -d --remove-orphans $SERVICES >>"$EXT/updater.log" 2>&1 && return 0
+  log "docker compose up failed; trying once more"
+  sleep 5
+  compose up -d --remove-orphans $SERVICES >>"$EXT/updater.log" 2>&1
+}
+
 healthy() {
   for service in api compass; do
     id=$(compose ps -q "$service" 2>/dev/null | head -1)
@@ -122,7 +131,7 @@ finish_pending() {
   rm -f "$pend"
   restore_env "$from"
   result failed "$from" "$to" "$mode" "not healthy within ${HEALTH_SECONDS}s of the update (the API's /health and the dashboard); rolled back to $from"
-  compose up -d --remove-orphans $SERVICES >>"$EXT/updater.log" 2>&1 || log "rollback compose up failed; see $EXT/updater.log"
+  compose_up || log "rollback compose up failed; see $EXT/updater.log"
 }
 
 handle_request() {
@@ -169,12 +178,13 @@ handle_request() {
   write_file "$EXT/update.pending" "{\"from\": \"$from\", \"to\": \"$target\", \"mode\": \"$mode\", \"rollback\": $rollback, \"started_at\": $(now)}"
   rm -f "$req"
   result applying "$from" "$target" "$mode" ""
-  if ! compose up -d --remove-orphans $SERVICES >"$EXT/updater.log" 2>&1; then
+  : > "$EXT/updater.log"
+  if ! compose_up; then
     log "docker compose up failed; restoring $from"
     rm -f "$EXT/update.pending"
     restore_env "$from"
     result failed "$from" "$target" "$mode" "docker compose up: $(tail -1 "$EXT/updater.log")"
-    compose up -d --remove-orphans $SERVICES >>"$EXT/updater.log" 2>&1 || log "rollback compose up failed; see $EXT/updater.log"
+    compose_up || log "rollback compose up failed; see $EXT/updater.log"
     return
   fi
   finish_pending
