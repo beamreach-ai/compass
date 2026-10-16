@@ -34,3 +34,7 @@ __pycache__/
 # build output of the example captains (pip install .)
 examples/*/build/
 examples/*/*.egg-info/
+
+# the CLI
+/cli/node_modules/
+/cli/dist/
