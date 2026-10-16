@@ -64,17 +64,16 @@ def test_job_4_status_reports_every_section_and_degrades_one_at_a_time(stack):
         assert section in status, section
     assert status["errors"] == {}, status["errors"]
     assert status["target"]["aws_connected"] and status["target"]["github_connected"]
-    path = stack.project / "config" / "local.json"
-    original = path.read_text()
+    original = stack.read("config/local.json")
     config = json.loads(original)
     config["dynamodb_config"]["items"] = "compass_items_missing"  # honeypots and the PR registry read it
     config["dynamodb_config"]["audit"] = "compass_items_missing"
     try:
-        path.write_text(json.dumps(config))
+        stack.write("config/local.json", json.dumps(config))
         broken = stack.api.get("/api/status").json()
         assert broken["errors"], "a section fails"
         assert broken["target"]["aws_connected"] and "update" in broken, "the others still answer"
     finally:
-        path.write_text(original)
+        stack.write("config/local.json", original)
     time.sleep(1)
     assert stack.api.get("/api/status").json()["errors"] == {}

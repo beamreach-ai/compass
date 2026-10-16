@@ -101,6 +101,43 @@ class Stack:
         start = result.stdout.find("{")
         return json.loads(result.stdout[start:]) if start >= 0 else result.stdout
 
+    # The install's files. On Linux, what the containers write in the bind mounts (config/,
+    # extensions/, map/) belongs to root, so a test running as you cannot always read or
+    # rewrite it; then the operation goes through a throwaway container, as root. On Docker
+    # Desktop the direct path always works.
+    def _as_root(self, script: str, *args: str, stdin: Optional[str] = None) -> subprocess.CompletedProcess:
+        return subprocess.run(["docker", "run", "--rm", "-i", "-v", f"{self.project}:/w", "--entrypoint", "sh", IMAGES["COMPASS_IMAGE"],
+                               "-c", script, "sh", *args], input=stdin, capture_output=True, text=True, timeout=120)
+
+    def read(self, relative: str) -> Optional[str]:
+        """The text of a file in the install, or None when there is none."""
+        path = self.project / relative
+        try:
+            return path.read_text()
+        except FileNotFoundError:
+            return None
+        except PermissionError:
+            result = self._as_root('test -e "/w/$1" && cat "/w/$1"', relative)
+            return result.stdout if result.returncode == 0 else None
+
+    def write(self, relative: str, text: str) -> None:
+        path = self.project / relative
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text)
+        except PermissionError:
+            result = self._as_root('mkdir -p "$(dirname "/w/$1")" && cat > "/w/$1"', relative, stdin=text)
+            assert result.returncode == 0, result.stderr
+
+    def remove(self, relative: str) -> None:
+        try:
+            (self.project / relative).unlink(missing_ok=True)
+        except PermissionError:
+            self._as_root('rm -f "/w/$1"', relative)
+
+    def exists(self, relative: str) -> bool:
+        return self.read(relative) is not None
+
     def env(self, **values: Optional[str]) -> None:
         """Set (or, with None, remove) lines in the install's .env."""
         path = self.project / ".env"
@@ -184,9 +221,16 @@ class Stack:
         return self.compose("logs", "--no-color", "--tail", "300", check=False).stdout
 
 
+def _remove_tree(path: Path) -> None:
+    shutil.rmtree(path, ignore_errors=True)
+    if path.exists():  # root's files from an earlier run's containers (Linux)
+        subprocess.run(["docker", "run", "--rm", "-v", f"{path.parent}:/w", "--entrypoint", "rm", "busybox:1.36", "-rf", f"/w/{path.name}"],
+                       capture_output=True, timeout=120)
+
+
 def make_install(project: Path) -> Stack:
     """The quickstart's first step: an empty directory with the shipped files and an .env."""
-    shutil.rmtree(project, ignore_errors=True)
+    _remove_tree(project)
     (project / "aws").mkdir(parents=True)
     for name in ("docker-compose.yml", "nginx.conf"):
         shutil.copy(ROOT / name, project / name)

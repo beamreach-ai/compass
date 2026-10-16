@@ -134,7 +134,7 @@ def test_cap_7_uninstalling_from_the_page_removes_it_after_the_restart_and_keeps
     assert page.locator("aside nav").get_by_role("link", name="Hello", exact=True).count() == 0
     config = stack.cli("captains")
     assert "hello" not in {c["name"] for c in config["captains"]}
-    assert '"greeting": "ahoy"' in (stack.project / "config" / "local.json").read_text(), "its configuration stays"
+    assert '"greeting": "ahoy"' in stack.read("config/local.json"), "its configuration stays"
 
 
 def test_cap_8_a_failed_install_keeps_the_previous_set_and_says_why(stack, page):
@@ -185,12 +185,12 @@ def test_cap_10_the_commands_agree_with_the_page(stack):
 def test_cap_11_validate_passes_the_example_and_fails_a_broken_copy_with_the_reason(stack):
     report = stack.cli("validate", "path=/compass/extensions/captain-hello-src", timeout=600)
     assert report["ok"] is True
-    manifest = stack.project / "extensions" / "captain-hello-src" / "captains" / "hello" / "manifest.py"
-    original = manifest.read_text()
+    manifest = "extensions/captain-hello-src/captains/hello/manifest.py"
+    original = stack.read(manifest)
     try:
-        manifest.write_text(original.replace('name="hello"', 'name="Hello-Bad"'))
+        stack.write(manifest, original.replace('name="hello"', 'name="Hello-Bad"'))
         error = stack.cli("validate", "path=/compass/extensions/captain-hello-src", expect=2, timeout=600)
         assert "captain validation failed" in error and "Traceback" not in error
     finally:
-        manifest.write_text(original)
+        stack.write(manifest, original)
     time.sleep(0)

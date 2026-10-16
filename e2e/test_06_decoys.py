@@ -124,7 +124,7 @@ def test_dec_1_init_alerts_creates_the_queue_and_the_daemon_consumes_it_without_
     attributes = stack.aws_client("sqs").get_queue_attributes(QueueUrl=f"{stack.moto_url}/{fixture.ACCOUNT}/{QUEUE}", AttributeNames=["Policy"])
     policy = json.loads(attributes["Attributes"]["Policy"])
     assert {s["Sid"] for s in policy["Statement"]} == {"DecoyEventBridgeRules", "AccountPrincipals"}
-    config = json.loads((stack.project / "config" / "local.json").read_text())
+    config = json.loads(stack.read("config/local.json"))
     assert config["honeypot"]["alert_queue_arn"] == created["queue_arn"]
     # the quickstart runs init_alerts after `up -d`: the daemon must pick the queue up on its own
     deadline = time.time() + 90
@@ -187,11 +187,9 @@ def test_dec_3_planting_each_class_opens_a_pull_request_with_one_formatted_modul
     assert len(modules) == 1, files
     assert all(f.startswith(fixture.TERRAFORM_ROOT + "/") for f in files)
     owner, repo = fixture.REPO.split("/")
-    out = stack.project / "extensions" / "fmt-check" / honeytoken_class
     for path in changed:
         text = stack.fakes.get(f"/_control/repos/{owner}/{repo}/file", params={"path": path, "branch": planted["pull"]["head"]}).json()["text"]
-        (out / path).parent.mkdir(parents=True, exist_ok=True)
-        (out / path).write_text(text)
+        stack.write(f"extensions/fmt-check/{honeytoken_class}/{path}", text)
     fmt = stack.compose("run", "--rm", "-T", "--entrypoint", "terraform", "compass", "fmt", "-check", "-recursive", "-diff",
                         f"/compass/extensions/fmt-check/{honeytoken_class}", check=False)
     assert fmt.returncode == 0, f"terraform fmt would change:\n{fmt.stdout[-2000:]}"

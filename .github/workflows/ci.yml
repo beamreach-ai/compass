@@ -100,9 +100,20 @@ jobs:
       - run: pytest e2e -p no:cacheprovider -rf
         env:
           PYTHON: python
+          E2E_KEEP: "1"  # the stack stays up for the next step's logs
+      - name: The stack's errors
+        if: failure()
+        working-directory: e2e/.work/compass-e2e
+        env:
+          E2E_FAKES_DIR: ${{ github.workspace }}/e2e/fakes
+        run: |
+          docker compose -f docker-compose.yml -f compose.e2e.yml --profile updater ps
+          docker compose -f docker-compose.yml -f compose.e2e.yml --profile updater logs --no-color api compass updater \
+            | grep -iE -B3 -A25 "Traceback|ERROR|Exception" | tail -400 || true
       - if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: e2e-artifacts
           path: e2e/.artifacts
+          include-hidden-files: true  # .artifacts starts with a dot
           retention-days: 14

@@ -90,9 +90,9 @@ def test_map_5_the_map_exports_as_json_dot_and_html_and_the_viewer_serves_it(sta
     for fmt, name in (("json", "map.json"), ("dot", "map.dot"), ("html", "index.html")):
         out = stack.cli("mapper", "export", f"format={fmt}", f"out=/compass/map/{name}")
         assert out["nodes"] > 0 and out["edges"] > 0, out
-    exported = json.loads((stack.project / "map" / "map.json").read_text())
+    exported = json.loads(stack.read("map/map.json"))
     assert len(exported["nodes"]) > 0
-    assert (stack.project / "map" / "map.dot").read_text().startswith(("digraph", "strict digraph"))
+    assert stack.read("map/map.dot").startswith(("digraph", "strict digraph"))
     page.open("/map/")
     assert fixture.MANAGED_FUNCTION in page.content()
 
