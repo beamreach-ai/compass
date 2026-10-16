@@ -5,6 +5,44 @@ workflow refuses a tag without one, and reads from it what the dashboard shows
 next to the Update button: the first paragraph is the summary, the bullets under
 `### After the update` are the notes an operator needs after applying it.
 
+## 0.5.2 — unreleased
+
+An end-to-end suite that runs on every pull request, and the bugs it found on
+its first runs.
+
+- `pytest e2e` (docs/e2e.md): the stack built from the commit, the shipped
+  compose file and the quickstart's commands, against a fake AWS account (moto)
+  and a fake GitHub, driven through a real browser, the API and the `compass`
+  command. 74 tests over install, sign-in and tokens, the dashboard, settings,
+  captains, the map, decoys, code-as-cloud, the PR watcher, jobs, updates and the
+  release artefacts. Model-free; no account or token needed. CI runs it on every
+  pull request.
+- `GITHUB_API_URL` and `GITHUB_GIT_URL`: where Compass talks to GitHub, for
+  GitHub Enterprise Server (`https://<host>/api/v3`; the clone URL follows) and
+  for the suite's fake. Unset, nothing changes.
+- The alert consumer starts with the workspace config as it is now. The
+  quickstart runs `init_alerts` after `up -d`, and the daemon kept the config
+  it read at start, so decoy alerts were not consumed until it was restarted.
+- A pull request on a host other than github.com is tracked by the watcher (a
+  GitHub Enterprise Server install's were not).
+- `compass init_config` on an existing workspace prints the one line telling
+  you to pass `overwrite=true` and exits 2, instead of a traceback.
+- `--workspace` with an id that is not the config file's (a typo) is refused,
+  instead of quietly acting on the workspace in `COMPASS_CONFIG`.
+- Planting an `s3_object` decoy without a bucket is refused with what to
+  enter, and a `dns_record` decoy without a zone uses the default zone; both
+  crashed the plant job. A suggestion's ARN is accepted as the bucket or zone,
+  so autopilot plants S3 and DNS decoys in the right place.
+- Fix-drift that could not make its pull request (no model, a refused push)
+  fails with the reason, instead of completing with nothing done.
+- The page's "Check now" for updates reaches the daemon (they share the
+  check on the extensions volume), so an automatic patch update does not wait
+  for the daemon's own six-hourly check.
+- The plant form's fields are labelled for screen readers; the Maps panel and
+  the banner say "re-scan" for a scan after the first one.
+- The decoy settings describe `network` (VPC and subnets), which a
+  `db_credential` decoy's listener needs.
+
 ## 0.5.1 — unreleased
 
 Dashboard polish: readable buttons, Settings in sections, a progress bar for

@@ -1406,7 +1406,9 @@ const toggleCategoryFilter = useCallback(
           >
             <div className="flex flex-wrap items-center gap-3">
               <span className="font-semibold">
-                {mapperBusy && infraScan?.scanned
+                {/* `scanned` is reset while any scan runs (it gates features on a current map); a scan
+                    that has completed before makes this one a re-scan */}
+                {mapperBusy && (infraScan?.scanned || infraScan?.last_completed_at)
                   ? "Re-scan in progress"
                   : !infraScan?.scanned
                   ? mapperBusy

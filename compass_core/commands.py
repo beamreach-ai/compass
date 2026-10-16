@@ -111,7 +111,9 @@ def _gh_login(token: str) -> str:
     try:
         import requests
 
-        resp = requests.get("https://api.github.com/user", headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"}, timeout=10)
+        from compass_core.github import api_url as github_api_url
+
+        resp = requests.get(f"{github_api_url()}/user", headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"}, timeout=10)
         if resp.status_code == 200:
             return str(resp.json().get("login") or "")
     except Exception:  # noqa: BLE001 - optional nicety at install time

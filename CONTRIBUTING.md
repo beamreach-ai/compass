@@ -95,6 +95,11 @@ for the first time and will not open a second one.
 - Prefer one test that walks a realistic path over five that each check a
   branch. Assert on behaviour the user would notice, not on call counts.
 - A bug fix comes with the test that would have caught it.
+- The end-to-end suite (`pytest e2e`, [docs/e2e.md](docs/e2e.md)) runs the
+  real stack against a fake AWS and a fake GitHub, through the browser, the API
+  and the CLI. A change a user would notice gets a test there too, with its ID
+  in the guide's list. It runs on every pull request; locally it needs Docker
+  and `pip install -e ".[dev,e2e]"`.
 
 ### TypeScript (dashboard)
 
@@ -124,7 +129,7 @@ then bumps the `COMPASS_VERSION` defaults on `main`.
   why and what a reader of `git log` needs to know; it is prose, not a list
   of files.
 - One change per pull request. Refactors travel alone.
-- CI must be green: `pytest`, `ruff`, `tsc`, the three image builds.
+- CI must be green: `pytest`, `ruff`, `tsc`, the three image builds, and the end-to-end suite.
 - Nothing from your account in the diff: no account ids, no ARNs with real
   ids, no tokens, no screenshots with real names. Test fixtures use
   `123456789012` and `example.com`.

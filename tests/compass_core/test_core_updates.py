@@ -351,3 +351,15 @@ def test_migrate_creates_tables_and_runs_each_step_once(monkeypatch):
         assert second["created"] == [] and second["migrations"] == ["0.6.0"] and ran == ["0.5.0", "0.6.0"]
         assert migrations.applied(config, workspace_id="local") == ["0.5.0", "0.6.0"]
         assert migrations.run(config, workspace_id="local", client=client)["migrations"] == [], "none registered today"
+
+
+def test_a_check_made_by_one_process_reaches_the_other_through_the_volume(install, tmp_path):
+    """The API checks when the page asks; the daemon, which applies the policy, sees it on its next tick."""
+    volume, publish, _ = install
+    publish(_feed(_release("0.5.0")))
+    assert updates.check().latest == "0.5.0"               # the daemon's copy
+    (tmp_path / "releases.json").write_text(json.dumps(_feed(_release("0.6.0"))))
+    record = json.loads((volume / "update.check.json").read_text())
+    record.update(document=_feed(_release("0.6.0")), checked_at=time.time() + 5)  # the API's newer check
+    (volume / "update.check.json").write_text(json.dumps(record))
+    assert updates.check().latest == "0.6.0"

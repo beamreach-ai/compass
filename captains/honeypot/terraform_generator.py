@@ -241,12 +241,18 @@ TEMPLATE
 
 # ── S3 object ───────────────────────────────────────────────────────
 
+S3_OBJECT_NEEDS_A_BUCKET = "an s3_object decoy needs its bucket: set resource_path to <bucket> or <bucket>/<key>"
+
+
 def _gen_s3_object(honeytoken: Dict[str, Any]) -> Dict[str, str]:
     honeytoken_id = honeytoken["honeytoken_id"]
     name = _name_for(honeytoken)
     cover = _cover(honeytoken)
     workspace_id = _workspace_literal(honeytoken)
-    resource_path = honeytoken.get("resource_path", "")
+    # a suggestion names the bucket by its ARN; a person types bucket/key
+    resource_path = (honeytoken.get("resource_path") or "").removeprefix("arn:aws:s3:::")
+    if not resource_path.strip("/"):
+        raise ValueError(S3_OBJECT_NEEDS_A_BUCKET)
     bucket = resource_path.split("/")[0] if "/" in resource_path else resource_path
     object_key = "/".join(resource_path.split("/")[1:]) if "/" in resource_path else f"secrets/{cover}.env"
     content = _s3_content(honeytoken)
@@ -493,7 +499,9 @@ def _gen_dns_record(honeytoken: Dict[str, Any]) -> Dict[str, str]:
     honeytoken_id = honeytoken["honeytoken_id"]
     name = _name_for(honeytoken)
     cover = _cover(honeytoken)
-    resource_path = honeytoken.get("resource_path", "")
+    resource_path = honeytoken.get("resource_path") or ""  # none given: the corp.local zone
+    if resource_path.startswith("arn:aws:route53:::hostedzone/"):  # a suggestion names the zone by its ARN
+        resource_path = resource_path.rsplit("/", 1)[1]
     zone_id = resource_path if resource_path.startswith("Z") else ""
 
     zone_block = (

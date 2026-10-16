@@ -64,3 +64,25 @@ def test_the_core_commands_are_shorthand_and_update_takes_a_bare_verb():
 
     assert set(commands.COMMANDS) == cli.CORE_SHORTHAND
     assert {"migrate", "update"} <= cli.CORE_SHORTHAND and cli.VERB_COMMANDS == {"update": ("check", "apply", "rollback")}
+
+
+def test_a_config_that_exists_is_a_message_not_a_traceback(capsys, tmp_path):
+    out = tmp_path / "local.json"
+    out.write_text("{}")
+    assert cli.main(["init_config", "workspace=local", f"out={out}"]) == 2
+    err = capsys.readouterr().err
+    assert "pass overwrite=true" in err and "Traceback" not in err
+
+
+def test_a_workspace_that_is_not_the_config_file_s_is_not_quietly_the_config_file_s(tmp_path, monkeypatch):
+    from compass_core import config
+
+    path = tmp_path / "local.json"
+    path.write_text('{"workspace_id": "local", "aws": {}}')
+    monkeypatch.setenv("COMPASS_CONFIG", str(path))
+    monkeypatch.setattr(config, "_loader", None)
+    assert config.workspace_config("local")["workspace_id"] == "local"
+    import pytest
+
+    with pytest.raises(LookupError, match="no configuration for workspace 'loacl'"):
+        config.workspace_config("loacl")

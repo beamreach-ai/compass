@@ -91,7 +91,9 @@ class RepoCheckout:
         """Shallow clone of a single branch — history is never needed here."""
         self._workdir = tempfile.mkdtemp(prefix="beamreach-iac-")
         dest = str(Path(self._workdir) / "repo")
-        url = f"https://github.com/{repo}.git"
+        from compass_core.github import git_url
+
+        url = git_url(repo)
         self._git(
             ["clone", "--depth", "1", "--branch", base_branch, "--single-branch", url, dest],
             authed=True,

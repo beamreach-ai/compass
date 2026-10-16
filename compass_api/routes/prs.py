@@ -20,7 +20,7 @@ from compass_core.queue import queue_proxy
 router = APIRouter()
 _queue_client = queue_proxy
 
-_PR_URL_RE = re.compile(r"https?://github\.com/[\w.-]+/[\w.-]+/pull/\d+")
+_PR_URL_RE = re.compile(r"https?://[^/\s]+/[\w.-]+/[\w.-]+/pull/\d+")
 
 _TYPE_LABELS = {
     ("iac", "import"): "iac_import",
@@ -36,7 +36,7 @@ _TYPE_LABELS = {
 def _repo_from_url(url: Optional[str]) -> Optional[str]:
     if not url:
         return None
-    match = re.match(r"https?://github\.com/([\w.-]+/[\w.-]+)/pull/\d+", url)
+    match = re.match(r"https?://[^/\s]+/([\w.-]+/[\w.-]+)/pull/\d+", url)
     return match.group(1) if match else None
 
 

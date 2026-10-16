@@ -23,7 +23,7 @@ BROKEN="${E2E_BROKEN:-9.9.9}"
 PORT="${E2E_REGISTRY_PORT:-5055}"
 REG="localhost:$PORT/e2e"
 WORK="${E2E_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/compass-e2e.XXXXXX")}"
-PROJ="$WORK/compass-e2e"
+PROJ="$WORK/compass-update-e2e"  # not the suite's project name: two stacks side by side
 WEB="${E2E_PORT:-18080}"
 
 log() { echo "e2e: $*"; }
@@ -46,6 +46,7 @@ cleanup() {
 trap cleanup EXIT
 
 log "updating $FROM -> $VERSION in $PROJ"
+docker rm -f compass-e2e-registry >/dev/null 2>&1 || true  # one an interrupted run left behind
 docker run -d --rm --name compass-e2e-registry -p "$PORT:5000" registry:2 >/dev/null
 
 # ── the images ──────────────────────────────────────────────────────────────

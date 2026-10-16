@@ -247,14 +247,16 @@ def _cache_file() -> Optional[Path]:
 
 
 def _cached(url: str) -> Optional[Feed]:
+    """This process's last copy, or the shared one on the volume when that is newer: the API
+    and the daemon share update.check.json, so a check made from the page reaches the daemon."""
     with _lock:
         feed = _cache.get(url)
-    if feed is not None:
-        return feed
     file = _cache_file()
     record = extensions.read_json(file, None) if file else None
     if not isinstance(record, dict) or record.get("url") != url:
-        return None
+        return feed
+    if feed is not None and float(record.get("checked_at") or 0) <= feed.checked_at:
+        return feed
     try:
         feed = parse_feed(record.get("document"), source=url)
     except ValueError:

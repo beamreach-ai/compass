@@ -6,7 +6,7 @@ import re
 from typing import Any, Dict, List, Optional
 
 import hcl2
-from github import Github, GithubException
+from github import GithubException
 
 from captains.honeypot.honeytoken_material import default_cover_name
 from captains.honeypot.task_env import TASK_DEF_TYPE, find_task_definition, inject_env, remove_env
@@ -18,6 +18,7 @@ from captains.honeypot.terraform_generator import (
     TOKEN_MODULE_PREFIX,
     account_module_files,
 )
+from compass_core.github import client as github_client
 from compass_core.github import resolve_github_token
 from compass_core.github_prs import PublishedPR, commit_files, ensure_branch, open_or_update_pr
 
@@ -305,7 +306,7 @@ class HoneypotPRWriter:
         if not token:
             raise RuntimeError("GitHub write token is required")
 
-        g = Github(token)
+        g = github_client(token)
         repo_name = self._resolve_repo(resolved_repo)
         gh_repo = g.get_repo(repo_name)
         base_branch = self._get_base_branch()
@@ -382,7 +383,7 @@ class HoneypotPRWriter:
         token = resolve_github_token(self.config, capability="write")
         if not token:
             raise RuntimeError("GitHub write token is required")
-        g = Github(token)
+        g = github_client(token)
         repo_name = self._resolve_repo(resolved_repo)
         gh_repo = g.get_repo(repo_name)
         base_branch = self._get_base_branch()
@@ -429,7 +430,7 @@ class HoneypotPRWriter:
         if not token:
             raise RuntimeError("GitHub write token is required")
 
-        g = Github(token)
+        g = github_client(token)
         repo_name = self._resolve_repo(resolved_repo)
         gh_repo = g.get_repo(repo_name)
         base_branch = self._get_base_branch()

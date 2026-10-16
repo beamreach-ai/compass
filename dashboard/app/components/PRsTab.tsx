@@ -70,7 +70,7 @@ function ChecksCell({ pr }: { pr: PRRecord }) {
 }
 
 function PRLink({ pr }: { pr: PRRecord }) {
-  const label = pr.tracked && pr.number ? `${pr.repo}#${pr.number}` : pr.repo ?? pr.pr_url?.replace("https://github.com/", "") ?? "—";
+  const label = pr.tracked && pr.number ? `${pr.repo}#${pr.number}` : pr.repo ?? pr.pr_url?.replace(/^https?:\/\/[^/]+\//, "") ?? "—";
   return (
     <span className="flex flex-col">
       {pr.pr_url ? (

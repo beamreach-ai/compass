@@ -177,3 +177,30 @@ def test_aws_credential_rule_sees_read_only_management_events():
     (rule,) = _resource_blocks(main, "aws_cloudwatch_event_rule").values()
     assert _unq(rule["state"]) == "ENABLED_WITH_ALL_CLOUDTRAIL_MANAGEMENT_EVENTS"
     assert 'state       = "ENABLED_WITH_ALL_CLOUDTRAIL_MANAGEMENT_EVENTS"' in main
+
+
+def test_a_decoy_planted_without_a_path_is_generated_or_refused_with_the_reason():
+    """The plant form's resource path is optional, and the API stores it as None."""
+    import pytest
+
+    from captains.honeypot.terraform_generator import S3_OBJECT_NEEDS_A_BUCKET, generate_terraform
+
+    base = {"honeytoken_id": "11111111-2222-3333-4444-555555555555", "region": "us-east-1", "resource_path": None,
+            "workspace_id": "local", "alert_queue_arn": "arn:aws:sqs:us-east-1:123456789012:q"}
+    dns = generate_terraform({**base, "honeytoken_class": "dns_record", "name": "e2e-dns"})
+    assert any('name = "corp.local"' in text for text in dns.values()), "the default zone"
+    with pytest.raises(ValueError, match="needs its bucket"):
+        generate_terraform({**base, "honeytoken_class": "s3_object", "name": "e2e-s3"})
+    assert "resource_path" in S3_OBJECT_NEEDS_A_BUCKET
+
+
+def test_a_suggestion_s_arn_is_a_valid_place_for_an_s3_or_dns_decoy():
+    from captains.honeypot.terraform_generator import generate_terraform
+
+    base = {"honeytoken_id": "11111111-2222-3333-4444-555555555555", "region": "us-east-1", "workspace_id": "local",
+            "alert_queue_arn": "arn:aws:sqs:us-east-1:123456789012:q"}
+    s3 = "\n".join(generate_terraform({**base, "honeytoken_class": "s3_object", "name": "e2e-s3", "resource_path": "arn:aws:s3:::acme-assets"}).values())
+    assert 'bucket  = "acme-assets"' in s3 and "arn:aws:s3" not in s3.split("aws_s3_object")[1].split("}")[0]
+    dns = "\n".join(generate_terraform({**base, "honeytoken_class": "dns_record", "name": "e2e-dns",
+                                         "resource_path": "arn:aws:route53:::hostedzone/Z0123456789ABC"}).values())
+    assert 'zone_id = "Z0123456789ABC"' in dns

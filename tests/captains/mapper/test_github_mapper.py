@@ -220,3 +220,16 @@ resource "aws_lambda_function" "handler" {}
     assert "writes" in edge_types
     assert "part_of" in edge_types
     assert "declares" in edge_types
+
+
+def test_without_an_injected_client_the_collector_builds_one_against_github_api_url(monkeypatch):
+    """The production path: no client passed in, a token in the config. (A constructor
+    parameter once shadowed the helper and every real scan failed at the GitHub step.)"""
+    import compass_core.github as core_github
+    from captains.mapper import github_mapper
+
+    monkeypatch.setenv("GITHUB_API_URL", "http://github.example.com/api/v3/")
+    built = []
+    monkeypatch.setattr(github_mapper, "client_for_token", lambda token: built.append((token, core_github.api_url())) or object())
+    github_mapper.GitHubGraphCollector("org", {"token": "t0ken"})
+    assert built == [("t0ken", "http://github.example.com/api/v3")]

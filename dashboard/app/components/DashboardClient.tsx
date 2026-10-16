@@ -555,13 +555,13 @@ resource "aws_iam_role_policy_attachment" "beamreach_compass_readonly" {
       finops: "Triage and fixes unlock when it completes. Findings are available now.",
       audits: "Triage and fixes unlock when it completes. Findings are available now.",
     };
-    if (activeMapperJob && infraScanned) {
+    if (activeMapperJob && (infraScanned || infraScan?.last_completed_at)) {
       return "Mapping your account. The map updates when the scan completes; until then it shows the last scan.";
     }
     const lead = activeMapperJob ? "Mapping your account (first full scan)." : "The first full scan of your account has not completed yet.";
     const detail = afterScan[activeTab] || "Features that depend on the map unlock when it completes.";
     return `${lead} ${detail}`;
-  }, [activeMapperJob, activeTab, infraScanBannerVisible, infraScanStatusLabel, infraScanned]);
+  }, [activeMapperJob, activeTab, infraScanBannerVisible, infraScanStatusLabel, infraScanned, infraScan?.last_completed_at]);
 
   useEffect(() => {
     if (activeTab !== "queue") return;

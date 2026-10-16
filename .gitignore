@@ -37,3 +37,5 @@ examples/*/*.egg-info/
 
 # the end-to-end update test (tests/e2e/update_compose.sh)
 /dist-e2e/
+/e2e/.work/
+/e2e/.artifacts/

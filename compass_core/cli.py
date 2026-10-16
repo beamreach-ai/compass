@@ -96,7 +96,8 @@ def main(argv: Optional[List[str]] = None, *, captain: Optional[str] = None) -> 
 
     try:
         result = dispatch.dispatch(chosen, args.command, build_payload(args))
-    except (LookupError, ValueError, RuntimeError, captains.CaptainUnavailable) as exc:  # unknown command, no config, a bad argument, a captain that is off
+    # unknown command, no config, a bad argument, a captain that is off, a file that exists or cannot be written
+    except (LookupError, ValueError, RuntimeError, OSError, captains.CaptainUnavailable) as exc:
         print(str(exc.args[0] if exc.args else exc), file=sys.stderr)
         return 2
     json.dump(result, sys.stdout, indent=2, default=str)
