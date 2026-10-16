@@ -14,44 +14,13 @@ import type { SettingsSlot } from "../lib/extensions";
 import { ShellProvider } from "../lib/shell";
 import CaptainsSection from "./CaptainsSection";
 import CompassSection, { UpdateBanner } from "./CompassUpdates";
+import MappingProgressBar from "./MappingProgressBar";
+import { lastScanDurationMs } from "./mappingProgress";
 import GenericCaptainTab from "./GenericCaptainTab";
 import type { QueueEvent, QueueJob, SettingsBootstrap, SettingsSaveParticipant, Shell } from "../lib/shell";
-import { ALL_WORKSPACE_TABS, TAB_ALIASES, asWorkspaceTab, resolveEnabledTabs } from "../lib/tabs";
+import { ALL_WORKSPACE_TABS, SETTINGS_VIEWS, TAB_ALIASES, asWorkspaceTab, resolveEnabledTabs, settingsSectionId } from "../lib/tabs";
 import type { DashboardTab, WorkspaceTab } from "../lib/tabs";
 import SlackIntegrationCard from "./SlackIntegrationCard";
-
-const SCAN_PHASES: Array<{ prefix: string; pct: number }> = [
-  { prefix: "Initializing infra scan", pct: 1 },
-  { prefix: "Preparing mapper components", pct: 1 },
-  { prefix: "Building infra map", pct: 2 },
-  { prefix: "Resolving target AWS account", pct: 2 },
-  { prefix: "Resolving AWS regions", pct: 3 },
-  { prefix: "Collecting AWS infrastructure inventory", pct: 3 },
-  // 3% → 85% is the AWS region scan window (handled dynamically below)
-  { prefix: "AWS inventory collection complete", pct: 85 },
-  { prefix: "Collecting GitHub ownership facts", pct: 88 },
-  { prefix: "GitHub ownership collection complete", pct: 91 },
-  { prefix: "Collecting Terraform state facts", pct: 93 },
-  { prefix: "Terraform state collection complete", pct: 95 },
-  { prefix: "Deriving ownership correspondence", pct: 97 },
-  { prefix: "Computing IAC coverage and drift", pct: 98 },
-  { prefix: "Writing infra map graph", pct: 99 },
-  { prefix: "Infra scan completed", pct: 100 },
-];
-
-function scanProgressFromMessage(message: string | null | undefined): number {
-  if (!message) return 1;
-  const regionMatch = message.match(/^Scanning region .+ \((\d+)\/(\d+)\)$/);
-  if (regionMatch) {
-    const i = parseInt(regionMatch[1], 10);
-    const total = Math.max(parseInt(regionMatch[2], 10), 1);
-    return Math.round(3 + ((i - 1) / total) * 82);
-  }
-  for (const { prefix, pct } of SCAN_PHASES) {
-    if (message.startsWith(prefix)) return pct;
-  }
-  return 1;
-}
 
 const resolveTab = (
   params: ReturnType<typeof useSearchParams>,
@@ -82,6 +51,17 @@ const resolveTab = (
   }
   return fallbackTab;
 };
+
+// One of the Settings page's sections (lib/tabs.ts SETTINGS_VIEWS): the heading the
+// sidebar's sub-link scrolls to.
+function SettingsHeading({ view, title, children }: { view: string; title: string; children?: React.ReactNode }) {
+  return (
+    <div id={settingsSectionId(view)} className="scroll-mt-6 border-b border-gray-200 pb-2 pt-4">
+      <h2 className="text-xl font-semibold text-gray-900">{title}</h2>
+      {children && <p className="mt-1 text-sm text-gray-600">{children}</p>}
+    </div>
+  );
+}
 
 // The product's settings sections registered for one position among the open ones.
 function SettingsSections({ slot }: { slot: SettingsSlot }) {
@@ -528,11 +508,38 @@ resource "aws_iam_role_policy_attachment" "beamreach_compass_readonly" {
     () => (activeMapperJob?.events?.length ? activeMapperJob.events[activeMapperJob.events.length - 1] : null),
     [activeMapperJob],
   );
-  const mapperScanPct = useMemo(
-    () => scanProgressFromMessage(latestMapperEvent?.message),
-    [latestMapperEvent],
-  );
-  const infraScanBannerVisible = infraScanIntegrationsReady && !infraScanned;
+  // a running scan's events are refreshed every five seconds on every tab (the Queue tab polls on its own)
+  useEffect(() => {
+    if (!activeMapperJob || activeTab === "queue") return;
+    const poll = window.setInterval(() => void fetchQueueJobs(), 5000);
+    return () => window.clearInterval(poll);
+  }, [activeMapperJob, activeTab, fetchQueueJobs]);
+  // Settings is one page: ?view=<section> scrolls to that section's heading
+  const settingsView = searchParams?.get("view") || null;
+  useEffect(() => {
+    if (activeTab !== "settings") return;
+    const views = SETTINGS_VIEWS(isOpenEdition);
+    if (!settingsView || settingsView === views[0]) {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
+    if (!views.includes(settingsView)) return;
+    // the sections render after the bootstrap; try again briefly until the heading is there
+    let tries = 0;
+    const find = window.setInterval(() => {
+      const el = document.getElementById(settingsSectionId(settingsView));
+      if (el || ++tries > 20) {
+        window.clearInterval(find);
+        el?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    }, 100);
+    return () => window.clearInterval(find);
+  }, [activeTab, settingsView]);
+
+  const previousScanMs = useMemo(() => lastScanDurationMs(queueJobs, activeMapperJob?.job_id), [queueJobs, activeMapperJob?.job_id]);
+  // the Maps tab shows a running scan in its own scan panel; every other tab in the banner
+  const infraScanBannerVisible =
+    !(activeTab === "maps" && activeMapperJob) && ((infraScanIntegrationsReady && !infraScanned) || Boolean(activeMapperJob));
   const infraScanBannerCopy = useMemo(() => {
     if (!infraScanBannerVisible) return null;
     if (infraScanStatusLabel === "failed") {
@@ -548,10 +555,13 @@ resource "aws_iam_role_policy_attachment" "beamreach_compass_readonly" {
       finops: "Triage and fixes unlock when it completes. Findings are available now.",
       audits: "Triage and fixes unlock when it completes. Findings are available now.",
     };
+    if (activeMapperJob && infraScanned) {
+      return "Mapping your account. The map updates when the scan completes; until then it shows the last scan.";
+    }
     const lead = activeMapperJob ? "Mapping your account (first full scan)." : "The first full scan of your account has not completed yet.";
     const detail = afterScan[activeTab] || "Features that depend on the map unlock when it completes.";
     return `${lead} ${detail}`;
-  }, [activeMapperJob, activeTab, infraScanBannerVisible, infraScanStatusLabel]);
+  }, [activeMapperJob, activeTab, infraScanBannerVisible, infraScanStatusLabel, infraScanned]);
 
   useEffect(() => {
     if (activeTab !== "queue") return;
@@ -625,7 +635,7 @@ resource "aws_iam_role_policy_attachment" "beamreach_compass_readonly" {
           <Banner key={index} />
         ))}
         {isOpenEdition && (
-          <UpdateBanner update={settingsBootstrap?.update} settingsHref="/workspace?tab=settings#compass" />
+          <UpdateBanner update={settingsBootstrap?.update} settingsHref="/workspace?tab=settings&view=updates" />
         )}
         {infraScanBannerVisible && (
           <div
@@ -638,15 +648,8 @@ resource "aws_iam_role_policy_attachment" "beamreach_compass_readonly" {
             <div className="font-medium">{infraScanBannerCopy}</div>
             {activeMapperJob ? (
               <>
-                <div className="mt-2 h-1.5 w-full rounded-full bg-sky-100 overflow-hidden">
-                  <div
-                    className="h-full rounded-full bg-sky-500 transition-all duration-700 ease-out"
-                    style={{ width: `${mapperScanPct}%` }}
-                  />
-                </div>
-                {latestMapperEvent?.message && (
-                  <div className="mt-1 text-xs opacity-70">{latestMapperEvent.message}</div>
-                )}
+                <MappingProgressBar job={activeMapperJob} previousMs={previousScanMs} />
+                {latestMapperEvent?.message && <div className="mt-1 text-[11px] opacity-60">{latestMapperEvent.message}</div>}
               </>
             ) : (
               (infraScan?.latest_message || infraScan?.last_error) && (
@@ -685,6 +688,10 @@ resource "aws_iam_role_policy_attachment" "beamreach_compass_readonly" {
             )}
 
             <SettingsSections slot="top" />
+
+            <SettingsHeading view="integrations" title="Integrations">
+              The AWS account Compass maps, the GitHub it opens pull requests on, and where it sends alerts.
+            </SettingsHeading>
 
             {awsIntegrationEnabled && <section className={`bg-white border rounded-lg shadow-sm p-6 space-y-4 ${!settingsBootstrap?.aws?.configured ? "border-amber-400 ring-2 ring-amber-300" : ""}`}>
               <div className="space-y-1">
@@ -1002,13 +1009,20 @@ resource "aws_iam_role_policy_attachment" "beamreach_compass_readonly" {
 
             <SettingsSections slot="after_integrations" />
 
-            {isOpenEdition && (
-              <div id="compass">
-                <CompassSection readOnly={isReadOnly} />
-              </div>
-            )}
+            <SettingsHeading view="captains" title="Captains">
+              What this Compass can do, each part on or off for the workspace, with its configuration.
+            </SettingsHeading>
 
             <CaptainsSection readOnly={isReadOnly} />
+
+            {isOpenEdition && (
+              <>
+                <SettingsHeading view="updates" title="Updates">
+                  The version this Compass runs and how it updates.
+                </SettingsHeading>
+                <CompassSection readOnly={isReadOnly} />
+              </>
+            )}
 
             <SettingsSections slot="bottom" />
 

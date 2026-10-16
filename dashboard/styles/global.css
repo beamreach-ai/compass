@@ -97,8 +97,11 @@ a {
   table.rt td.rt-block { display: block; text-align: left; }
 }
 
+/* The blue button: Tailwind's blue-600 with white text, the same as the Maps tab's
+   "Load" (bg-blue-600 text-white). A button that names no background of its own is
+   drawn this way. */
 button {
-  background-color: #0077cc;
+  background-color: #2563eb;
   color: white;
   border: none;
   padding: 0.6rem 1.2rem;
@@ -109,12 +112,25 @@ button {
 }
 
 button:hover {
-  background-color: #005fa3;
+  background-color: #1d4ed8;
 }
 
 button:disabled {
   background-color: #ccc;
   cursor: not-allowed;
+}
+
+/* Many buttons name a text colour or a hover background but no background, so they
+   come out blue with grey (or blue) text, or turn light grey under the pointer. A
+   button with no bg-* class of its own keeps white text and the blue hover. A button
+   that names its background (bg-white, bg-gray-900, …) is not touched. */
+button:not([class^="bg-"]):not([class*=" bg-"]):not([class*="\a bg-"]) {
+  color: white;
+}
+
+button:not([class^="bg-"]):not([class*=" bg-"]):not([class*="\a bg-"]):not(:disabled):hover {
+  background-color: #1d4ed8;
+  color: white;
 }
 
 @keyframes progress-stripes {

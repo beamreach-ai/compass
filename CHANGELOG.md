@@ -5,6 +5,32 @@ workflow refuses a tag without one, and reads from it what the dashboard shows
 next to the Update button: the first paragraph is the summary, the bullets under
 `### After the update` are the notes an operator needs after applying it.
 
+## 0.5.1 — unreleased
+
+Dashboard polish: readable buttons, Settings in sections, a progress bar for
+map scans.
+
+- Every blue button is the same blue with white text. Buttons that named only
+  a text colour (Refresh map on the Maps tab, and others) came out as grey or
+  blue text on blue, and turned pale grey under the pointer.
+- Settings sits at the bottom of the sidebar. While it is open it lists its
+  sections, Integrations, Captains and Updates; each scrolls to its part of
+  the one Settings page.
+- A captain is turned on or off with a switch, and a click anywhere on its row
+  opens its configuration.
+- A running map scan shows a progress bar on every tab, with the phase, the
+  region it is reading, the resources found so far, the time it has run and
+  about how long is left. On the Maps tab it is in the scan panel. Re-scans
+  show it too, not only the first scan. The mapper's region events carry the
+  region, its position and the count so far.
+- `compass serve` records a job's progress events on the job in the jobs
+  table, not only in its log. Before, the dashboard never saw a scan's progress
+  in the open edition and its bar stayed at the start.
+- The job list returns the newest jobs. It read one page of the jobs table in
+  key order, which is not time order, so once a workspace had more jobs than
+  the page (the PR watcher adds one every five minutes) the Queue tab and the
+  progress bar could miss the job that was running.
+
 ## 0.5.0 — unreleased
 
 Updates: the dashboard says when a release is out and applies it with one

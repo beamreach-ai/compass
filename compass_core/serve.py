@@ -252,6 +252,19 @@ class Server:
                 logger.exception("job worker loop failed; backing off")
             self._stop.wait(self.job_poll)
 
+    def _install_event_sink(self) -> None:
+        """Job events go to the job in the jobs table as well as the log, so the dashboard
+        follows a job's progress (a map scan's progress bar). Only over the open default:
+        a host that installed its own sink keeps it."""
+        from compass_core import events
+        from compass_core.jobs import store_for
+
+        if type(events.event_sink()) is not events.LogSink:
+            return
+        store = store_for(self.config)
+        if store is not None:
+            events.set_event_sink(events.StoreSink(store))
+
     # ── updates ─────────────────────────────────────────────────────────────
 
     def _update_tick(self) -> None:
@@ -281,6 +294,7 @@ class Server:
     def run(self) -> Dict[str, Any]:
         registry.load_all_commands()
         dispatch.use_inline_queue()
+        self._install_event_sink()
         if self.map_port:
             self._start_map_viewer()
         if self.once:

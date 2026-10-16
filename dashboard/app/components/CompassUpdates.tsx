@@ -201,10 +201,7 @@ export default function CompassSection({ readOnly }: { readOnly: boolean }) {
   return (
     <section className="bg-white border rounded-lg shadow-sm p-6 space-y-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <div className="space-y-1">
-          <h2 className="text-lg font-semibold">Compass</h2>
-          <p className="text-sm text-gray-600">This install&apos;s version and its updates. Nothing changes version without a click unless you choose a policy below.</p>
-        </div>
+        <p className="text-sm text-gray-600">Nothing changes version without a click unless you choose a policy below.</p>
         <button type="button" onClick={() => void load(true)} disabled={!listing || busy !== null} className="rounded border border-gray-300 px-3 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50">
           Check now
         </button>

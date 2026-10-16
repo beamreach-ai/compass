@@ -51,6 +51,32 @@ def test_serve_runs_what_the_api_queued(local_store, monkeypatch):
     assert server._run_queued_jobs() == 0, "nothing is run twice"
 
 
+def test_serve_records_a_jobs_progress_events_on_the_job(local_store, monkeypatch):
+    from compass_core import events, serve
+
+    monkeypatch.setattr(dispatch, "_registry", {})
+    dispatch.register("x", {"scan": lambda p: events.emit_job_event("Scanning region r1 (1/2)", event_type="progress", status="running",
+                                                                       data={"region": "r1", "index": 1, "total": 2, "resources": 0}) or {}})
+    monkeypatch.setattr("compass_core.jobs.store_for", lambda config: local_store)
+    monkeypatch.setattr(events, "_sink", events.LogSink())
+    job = queue.StoreQueue(local_store).enqueue(captain="x", command="scan", payload={"workspace_id": "ws"})
+
+    server = serve.Server("ws", {"workspace_id": "ws"}, prs_tick=0)
+    server._install_event_sink()
+    assert server._run_queued_jobs() == 1
+    progress = [e for e in local_store.get_job(job["job_id"], workspace_id="ws")["events"] if e.get("message", "").startswith("Scanning")]
+    assert progress and progress[0]["data"] == {"region": "r1", "index": 1, "total": 2, "resources": 0}
+
+    class Hosts:
+        def append_event(self, *a, **k):
+            pass
+
+    mine = Hosts()
+    monkeypatch.setattr(events, "_sink", mine)
+    server._install_event_sink()
+    assert events.event_sink() is mine, "a host's own sink is kept"
+
+
 def test_open_app_serves_health_bootstrap_and_hides_closed_tabs(tmp_path, monkeypatch):
     cfg = {
         "workspace_id": "local",
