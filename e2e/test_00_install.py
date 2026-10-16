@@ -52,7 +52,7 @@ def test_ins_5_the_sign_in_in_env_wins_over_the_generated_one(stack):
 
 def test_ins_6_without_any_password_compass_warns_that_sign_in_is_off(stack):
     """The login block for a config with no password and no APP_PASSWORD (a hand-written config)."""
-    printed = stack.compose("run", "--rm", "-T", "--entrypoint", "python", "compass", "-c",
+    printed = stack.compose("run", "--rm", "-T", "--no-deps", "--entrypoint", "python", "compass", "-c",
                             "from compass_core.commands import dashboard_login; import json; print(json.dumps(dashboard_login({})))")
     assert "anyone who can reach this port can use Compass" in printed.stdout, printed.stderr
 

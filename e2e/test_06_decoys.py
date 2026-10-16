@@ -190,7 +190,7 @@ def test_dec_3_planting_each_class_opens_a_pull_request_with_one_formatted_modul
     for path in changed:
         text = stack.fakes.get(f"/_control/repos/{owner}/{repo}/file", params={"path": path, "branch": planted["pull"]["head"]}).json()["text"]
         stack.write(f"extensions/fmt-check/{honeytoken_class}/{path}", text)
-    fmt = stack.compose("run", "--rm", "-T", "--entrypoint", "terraform", "compass", "fmt", "-check", "-recursive", "-diff",
+    fmt = stack.compose("run", "--rm", "-T", "--no-deps", "--entrypoint", "terraform", "compass", "fmt", "-check", "-recursive", "-diff",
                         f"/compass/extensions/fmt-check/{honeytoken_class}", check=False)
     assert fmt.returncode == 0, f"terraform fmt would change:\n{fmt.stdout[-2000:]}"
     # these are not applied; close them so later tests see only their own pull requests open

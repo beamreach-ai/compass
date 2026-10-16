@@ -53,7 +53,7 @@ def test_job_3_a_job_whose_daemon_died_is_marked_dead_and_new_jobs_run_after_a_r
         job = stack.wait_job(started, timeout=420)  # three minutes without a heartbeat, plus the listing that notices
         assert job["status"] == "failed" and "interrupted" in (job.get("error") or "").lower(), job
     finally:
-        stack.compose("up", "-d", "compass")
+        stack.compose("up", "-d", "--no-deps", "compass")
     again = stack.api.post("/api/maps/reindex", json={"mode": "full"}).json()["job_id"]
     assert stack.wait_job(again, timeout=600)["status"] == "completed"
 

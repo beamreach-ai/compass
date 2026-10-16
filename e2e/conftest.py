@@ -94,7 +94,8 @@ class Stack:
     def cli(self, *args: str, expect: int = 0, timeout: float = 600) -> Any:
         """`docker compose run --rm compass <args>`: the JSON it prints, or (for an expected
         failure) its stderr. Asserts the exit code."""
-        result = self.compose("run", "--rm", "-T", "compass", *args, check=False, timeout=timeout)
+        # --no-deps: the stack is up; never touch moto or the fakes, whose state lives in memory
+        result = self.compose("run", "--rm", "-T", "--no-deps", "compass", *args, check=False, timeout=timeout)
         assert result.returncode == expect, f"compass {' '.join(args)} exited {result.returncode}, expected {expect}:\n{result.stderr[-2000:]}"
         if expect != 0:
             return result.stderr
@@ -150,7 +151,9 @@ class Stack:
 
     def restart(self, *services: str) -> None:
         """Recreate services so they read .env again, and wait until the API answers."""
-        self.compose("up", "-d", "--force-recreate", *services)
+        # --no-deps: --force-recreate would otherwise recreate the services these depend on too
+        # (some Compose versions do), and moto and the fakes keep the seeded world in memory
+        self.compose("up", "-d", "--force-recreate", "--no-deps", *services)
         self.wait_healthy()
         self._api = None
 
@@ -217,6 +220,15 @@ class Stack:
         assert started.status_code == 200, started.text
         return self.wait_job(started.json()["job_id"], timeout=timeout)
 
+    def check_world(self) -> None:
+        """The seeded repository and account are still there: a test that fails on a lost world
+        says so, rather than with a 404 from somewhere inside Compass."""
+        owner, name = fixture.REPO.split("/")
+        repo = self.fakes.get(f"/_control/repos/{owner}/{name}")
+        assert repo.status_code == 200, "the fake GitHub lost its repository: was the fakes container recreated? (docker compose ps)"
+        buckets = {b["Name"] for b in self.aws_client("s3").list_buckets().get("Buckets", [])}
+        assert fixture.STATE_BUCKET in buckets, "moto lost the seeded account: was its container recreated? (docker compose ps)"
+
     def logs(self) -> str:
         """Each container's creation time (a recreated one lost its state), then the last log lines."""
         ps = self.compose("ps", "-a", "--format", "{{.Service}} {{.CreatedAt}} {{.Status}}", check=False).stdout
@@ -278,11 +290,9 @@ def stack() -> Iterator[Stack]:
     stack = make_install(project)
     stack.compose("down", "-v", "--remove-orphans", check=False)
     try:
-        stack.compose("up", "-d", "--build", "moto", "fakes")
+        stack.compose("up", "-d", "--build", "moto", "fakes", "dynamodb")  # what init_config and init_tables need
         wait_for(f"{stack.moto_url}/moto-api/")
         wait_for(f"{stack.fakes_url}/health")
-        stack.seeded = fixture.seed_aws(_MotoSession(stack))
-        fixture.seed_github(stack.fakes)
         # the quickstart, as written
         stack.records["init_config"] = stack.cli("init_config", "workspace=local", f"region={fixture.REGION}",
                                                  f"github_repo={fixture.REPO}", f"terraform_root={fixture.TERRAFORM_ROOT}")
@@ -290,6 +300,13 @@ def stack() -> Iterator[Stack]:
         stack.records["init_tables_again"] = stack.cli("init_tables")
         stack.compose("up", "-d")
         stack.wait_healthy()
+        # The world is seeded once everything runs: moto and the fakes keep it in memory, and
+        # some Compose versions recreate a dependency while starting another service.
+        wait_for(f"{stack.moto_url}/moto-api/")
+        wait_for(f"{stack.fakes_url}/health")
+        stack.seeded = fixture.seed_aws(_MotoSession(stack))
+        fixture.seed_github(stack.fakes)
+        stack.check_world()
         yield stack
     except Exception:
         ARTIFACTS.mkdir(parents=True, exist_ok=True)
@@ -317,6 +334,7 @@ def mapped(stack: Stack) -> Dict[str, Any]:
     """The first full scan of the seeded account, run once for every test that needs a map."""
     if stack.records.get("scan"):
         return stack.records["scan"]
+    stack.check_world()
     started = stack.api.post("/api/maps/reindex", json={"mode": "full"})
     assert started.status_code == 200, started.text
     job = stack.wait_job(started.json()["job_id"], timeout=900)
