@@ -1,0 +1,9 @@
+{
+  "name": "compass",
+  "description": "Beamreach Compass: install, configure and operate Compass from Claude Code. Bundles the compass MCP server and the playbook skills.",
+  "version": "0.1.3",
+  "author": { "name": "Beamreach", "url": "https://beamreach.ai" },
+  "mcpServers": {
+    "compass": { "command": "compass", "args": ["mcp"] }
+  }
+}

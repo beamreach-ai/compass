@@ -1,0 +1,7 @@
+{
+  "name": "beamreach",
+  "owner": { "name": "Beamreach", "url": "https://beamreach.ai" },
+  "plugins": [
+    { "name": "compass", "source": "./", "description": "Beamreach Compass CLI, MCP server and skills" }
+  ]
+}

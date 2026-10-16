@@ -1,0 +1,47 @@
+{
+  "name": "@beamreach/compass",
+  "version": "0.2.0",
+  "description": "The Compass CLI, MCP server and agent skills: configure and operate Compass from a terminal or an AI agent. Plugins add more (src/core/plugins.ts).",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "compass": "./dist/bin.js"
+  },
+  "files": [
+    "dist",
+    "plugin",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsx src/bin.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "commander": "^15.0.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsup": "^8.5.1",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0",
+    "vitest": "^5.0.3"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "exports": {
+    "./plugin": {
+      "types": "./dist/plugin.d.ts",
+      "import": "./dist/plugin.js"
+    },
+    "./package.json": "./package.json"
+  }
+}
