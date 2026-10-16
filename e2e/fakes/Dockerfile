@@ -6,4 +6,5 @@ RUN pip install --no-cache-dir "fastapi>=0.115,<1" "uvicorn>=0.30,<1"
 COPY app.py /app/app.py
 WORKDIR /app
 EXPOSE 9000
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "9000", "--log-level", "warning"]
+# info: every request in the logs, what Compass called and the answer it got
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "9000", "--log-level", "info"]

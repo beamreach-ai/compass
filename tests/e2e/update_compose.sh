@@ -41,7 +41,11 @@ cleanup() {
   docker rm -f compass-e2e-registry >/dev/null 2>&1 || true
   docker images --format '{{.Repository}}:{{.Tag}}' | grep "^$REG/" | xargs docker rmi -f >/dev/null 2>&1 || true
   git -C "$ROOT" worktree remove --force "$WORK/from" >/dev/null 2>&1 || true
-  rm -rf "$ROOT/dist-e2e" "$WORK"
+  rm -rf "$ROOT/dist-e2e"
+  # on Linux the stack's containers leave root's files in the project; remove them as root
+  rm -rf "$WORK" 2>/dev/null || docker run --rm -v "$WORK:/w" busybox:1.36 sh -c 'rm -rf /w/* /w/.[!.]* 2>/dev/null' >/dev/null 2>&1
+  rm -rf "$WORK" 2>/dev/null
+  true  # cleanup never changes how the test ended
 }
 trap cleanup EXIT
 

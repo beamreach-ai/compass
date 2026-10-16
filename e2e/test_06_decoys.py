@@ -38,7 +38,7 @@ def plant(stack, honeytoken_class: str, name: str, *, endpoints: Optional[List[s
     token_id = created.json()["honeytoken_id"]
     job_id = stack.api.get(f"/api/honeypots/tokens/{token_id}").json()["plant_job_id"]
     job = stack.wait_job(job_id, timeout=300)
-    assert job["status"] == "completed", job
+    assert job["status"] == "completed", f"plant {honeytoken_class}: {job.get('error')} {[e['message'] for e in job.get('events', [])[-4:]]}"
     token = stack.api.get(f"/api/honeypots/tokens/{token_id}").json()
     number = int(str(job["result_summary"]["pr_url"]).rsplit("/", 1)[1])
     pull = next(p for p in stack.repo()["pulls"] if p["number"] == number)

@@ -218,7 +218,9 @@ class Stack:
         return self.wait_job(started.json()["job_id"], timeout=timeout)
 
     def logs(self) -> str:
-        return self.compose("logs", "--no-color", "--tail", "300", check=False).stdout
+        """Each container's creation time (a recreated one lost its state), then the last log lines."""
+        ps = self.compose("ps", "-a", "--format", "{{.Service}} {{.CreatedAt}} {{.Status}}", check=False).stdout
+        return ps + "\n" + self.compose("logs", "--no-color", "--tail", "300", check=False).stdout
 
 
 def _remove_tree(path: Path) -> None:
