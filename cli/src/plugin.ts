@@ -9,7 +9,7 @@ export type { CompassPlugin, AwsLoginOptions, AwsLoginResult } from "./core/plug
 export { CompassClient } from "./core/client.js";
 export type { RequestOptions } from "./core/client.js";
 export * from "./core/errors.js";
-export { readConfig, writeConfig, upsertProfile, configPath, resolveConnection } from "./core/config.js";
+export { readConfig, writeConfig, upsertProfile, removeProfile, configPath, resolveConnection } from "./core/config.js";
 export type { Connection, Profile, ConfigFile } from "./core/config.js";
 export * from "./core/poll.js";
 export { CLI_VERSION } from "./version.js";
