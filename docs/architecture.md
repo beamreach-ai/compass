@@ -96,3 +96,21 @@ compass serve ──every 2s──► claims a queued job ──► dispatch(cap
 A job with no heartbeat for three minutes is marked dead, so a crashed daemon
 never leaves the dashboard waiting. The CLI runs commands inline, in the same
 process, and still records them.
+
+## Hosts: products built on Compass
+
+A captain adds one capability. A *host* changes how the whole install behaves:
+where workspaces come from, which queue runs jobs, which model answers, extra
+API routers and startup work. A host is a function registered under the
+`compass.hosts` entry point group (or named in `COMPASS_HOSTS` as
+`module:function`). `compass_core.hosts.install()` runs every host once, at the
+start of the CLI and before the API is assembled, so with a host installed
+`compass api` and `compass serve` are that host's API and daemon.
+
+A host works through the same seams as everything else:
+`compass_core.queue.set_job_queue`, `compass_core.config.set_workspace_config_loader`,
+`compass_core.llm.set_model_factory`, `compass_core.captains.register`, and in
+the API `compass_api.extensions` (`register_router`, `register_startup`,
+`register_shutdown`, the bootstrap and status sections). The open defaults step
+aside for what a host set: the job queue, and the flags that hide closed tabs.
+A host that fails to install is logged and the open defaults stay in effect.
