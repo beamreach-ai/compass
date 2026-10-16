@@ -39,3 +39,7 @@ examples/*/*.egg-info/
 /dist-e2e/
 /e2e/.work/
 /e2e/.artifacts/
+
+# the CLI
+/cli/node_modules/
+/cli/dist/

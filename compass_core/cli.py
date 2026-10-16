@@ -70,6 +70,9 @@ def load_commands(captain: str) -> None:
 
 
 def main(argv: Optional[List[str]] = None, *, captain: Optional[str] = None) -> int:
+    from compass_core import hosts
+
+    hosts.install()  # before the captain choices are read: a host may register captains
     argv = list(sys.argv[1:] if argv is None else argv)
     # `compass serve` / `compass init_tables` read better than `compass core serve`.
     if captain is None and argv and argv[0] in CORE_SHORTHAND:

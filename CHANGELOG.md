@@ -104,6 +104,12 @@ from the shell; `compass migrate` on every new version.
 - Fetch the new `docker-compose.yml` once: it carries the updater service and
   passes `COMPASS_VERSION` into the containers.
 
+## 0.4.1 — 2026-10-16
+
+The Compass CLI and MCP server (`cli/`, `@beamreach/compass`) move into this
+repository, with a plugin interface; hosts built on Compass install their
+seams before the open defaults.
+
 ## 0.4.0 — 2026-10-15
 
 Install, update and uninstall captains from the page; restart Compass from

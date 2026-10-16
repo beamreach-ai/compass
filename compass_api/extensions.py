@@ -150,6 +150,40 @@ def run_aws_saved_hooks(request: Any, config: Dict[str, Any]) -> Dict[str, Any]:
     return jobs
 
 
+# Routers and lifecycle hooks a host adds to the app (compass_core.hosts): included
+# after the captains' routers; the hooks run on the app's startup and shutdown.
+_routers: List[Any] = []                 # (router, prefix)
+_startup: List[Callable[[], Any]] = []
+_shutdown: List[Callable[[], Any]] = []
+
+
+def register_router(router: Any, prefix: str = "") -> None:
+    if not any(r is router and p == prefix for r, p in _routers):
+        _routers.append((router, prefix))
+
+
+def register_startup(fn: Callable[[], Any]) -> None:
+    if fn not in _startup:
+        _startup.append(fn)
+
+
+def register_shutdown(fn: Callable[[], Any]) -> None:
+    if fn not in _shutdown:
+        _shutdown.append(fn)
+
+
+def routers() -> List[Any]:
+    return list(_routers)
+
+
+def startup_hooks() -> List[Callable[[], Any]]:
+    return list(_startup)
+
+
+def shutdown_hooks() -> List[Callable[[], Any]]:
+    return list(_shutdown)
+
+
 def run_job_restart_guards(request: Any, job: Dict[str, Any]) -> None:
     for guard in list(_job_restart_guards):
         guard(request, job)
@@ -165,3 +199,6 @@ def reset_for_tests() -> None:
         registry.clear()
     _tabs.clear()
     _default_tabs.clear()
+    _routers.clear()
+    _startup.clear()
+    _shutdown.clear()

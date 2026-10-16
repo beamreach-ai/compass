@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 import os
 import time
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -34,11 +35,14 @@ def routers() -> list:
 
 def _configure_environment() -> None:
     """Defaults that make the shared routers behave as a single-workspace install."""
+    from compass_core import hosts
     from compass_core.config import workspace_config
     from compass_core.tables import tables
     from compass_core.workspace import default_workspace_id
 
-    os.environ.setdefault("DISABLED_FEATURES", OPEN_DISABLED_FEATURES)
+    if not hosts.installed():
+        # the open edition alone: no closed captains, so their legacy flags stay off
+        os.environ.setdefault("DISABLED_FEATURES", OPEN_DISABLED_FEATURES)
     workspace_id = default_workspace_id() or "local"
     os.environ.setdefault("DEFAULT_WORKSPACE", workspace_id)
     try:
@@ -63,12 +67,18 @@ def _configure_environment() -> None:
 def _configure_queue() -> None:
     """Jobs started from the dashboard go to the jobs table; `compass serve` runs them."""
     from compass_core import anthropic_model, llm
+    from compass_core import queue as _queue
     from compass_core.config import workspace_config
     from compass_core.dispatch import use_inline_queue
     from compass_core.jobs import store_for
     from compass_core.queue import StoreQueue, set_job_queue
     from compass_core.workspace import default_workspace_id
 
+    if _queue._factory is not None:
+        # a host installed its own queue (compass_core.hosts): keep it
+        if llm.model_for() is None:
+            anthropic_model.install_if_available()
+        return
     store = None
     try:
         store = store_for(workspace_config(default_workspace_id() or "local"))
@@ -110,7 +120,31 @@ def _start_status_writer() -> None:
     threading.Thread(target=_loop, name="status-writer", daemon=True).start()
 
 
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    """Run the hosts' startup hooks, then their shutdown hooks (compass_api.extensions)."""
+    import inspect
+
+    from compass_api import extensions as _extensions
+
+    for hook in _extensions.startup_hooks():
+        result = hook()
+        if inspect.isawaitable(result):
+            await result
+    yield
+    for hook in _extensions.shutdown_hooks():
+        try:
+            result = hook()
+            if inspect.isawaitable(result):
+                await result
+        except Exception:  # noqa: BLE001 - one hook failing does not skip the others
+            logger.exception("shutdown hook %s failed", getattr(hook, "__name__", hook))
+
+
 def create_app() -> FastAPI:
+    from compass_core import hosts
+
+    hosts.install()  # a host (the product on top of Compass) sets its seams before the open defaults
     _configure_environment()
     _configure_queue()
     _start_status_writer()
@@ -122,7 +156,7 @@ def create_app() -> FastAPI:
     from compass_api.routes import settings
     from compass_core import captain_admin, captains
 
-    app = FastAPI(title="Compass")
+    app = FastAPI(title="Compass", lifespan=_lifespan)
     # innermost: runs after the workspace middleware, so the gate sees the workspace config
     app.add_middleware(CaptainGateMiddleware)
     app.add_middleware(SimpleAuthMiddleware)
@@ -140,6 +174,10 @@ def create_app() -> FastAPI:
         return response
 
     for router, prefix in routers():
+        app.include_router(router, prefix=prefix)
+    from compass_api import extensions as _extensions
+
+    for router, prefix in _extensions.routers():
         app.include_router(router, prefix=prefix)
 
     @app.exception_handler(captains.CaptainUnavailable)
