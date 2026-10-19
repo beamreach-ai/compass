@@ -4,12 +4,12 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError, EndpointConnectionError
 
-from compass_core.events import emit_job_event
+from compass_core.events import current_job_id, emit_job_event
 from infra_map.fact_store import InfraMapFactStore
 from infra_map.facts import FactBatch
+from infra_map.graph_store import GraphStore, open_store
 from infra_map.materializer import InfraMapMaterializer
 from infra_map.models import RelationshipEdge, ResourceNode
-from infra_map.store import InfraMapStore
 
 from .coverage_drift import annotate_coverage, annotate_drift
 from .github_mapper import GitHubGraphCollector
@@ -77,11 +77,11 @@ class AWSInfraMapper:
         workspace_id: str,
         target_session: boto3.Session,
         control_session: boto3.Session,
-        table_name: str,
+        table_name: Optional[str] = None,
         *,
         regions: Optional[Sequence[str]] = None,
         collector_cls=None,
-        store: Optional[InfraMapStore] = None,
+        store: Optional[GraphStore] = None,
         fact_store: Optional[InfraMapFactStore] = None,
         github_config: Optional[Dict] = None,
         github_collector_cls=None,
@@ -94,17 +94,13 @@ class AWSInfraMapper:
         self.target_session = target_session
         self.regions = list(regions) if regions else []
         self.collector_cls = collector_cls or AWSGraphCollector
-        self.store = store or InfraMapStore(
-            table_name=table_name,
-            workspace_id=workspace_id,
-            session=control_session,
-        )
+        self.store = store or open_store({"dynamodb_config": {"map": table_name}}, workspace_id=workspace_id, session=control_session)
         self.github_config = github_config or {}
         self.github_collector_cls = github_collector_cls or GitHubGraphCollector
         self.state_buckets = list(state_buckets or [])
         self.tf_state_collector_cls = tf_state_collector_cls or TerraformStateGraphCollector
         self.fact_store = fact_store
-        if self.fact_store is None and (self.state_buckets or self._should_collect_github()):
+        if self.fact_store is None and table_name and (self.state_buckets or self._should_collect_github()):
             self.fact_store = InfraMapFactStore(
                 table_name=table_name,
                 workspace_id=workspace_id,
@@ -195,34 +191,10 @@ class AWSInfraMapper:
             data={"node_count": len(nodes), "edge_count": len(edges)},
         )
 
-        existing_graph = self.store.fetch_graph(self.org_id)
-        existing_node_ids = {node.resource_id for node in existing_graph.get("nodes", [])}
-        existing_edges = {edge.canonical_edge_id(): edge for edge in existing_graph.get("edges", [])}
-
-        for node in nodes:
-            self.store.put_resource(node)
-
-        for edge in edges:
-            self.store.put_relationship(edge)
-
-        new_node_ids = {node.resource_id for node in nodes}
-        new_edge_ids = {edge.canonical_edge_id() for edge in edges}
-
-        stale_nodes = existing_node_ids - new_node_ids
-        for resource_id in stale_nodes:
-            self.store.delete_resource(self.org_id, resource_id)
-
-        stale_edge_ids = set(existing_edges.keys()) - new_edge_ids
-        for edge_id in stale_edge_ids:
-            self.store.delete_relationship(existing_edges[edge_id])
-
-        if stale_nodes or stale_edge_ids:
-            logger.info(
-                "🧹 Removed %d stale nodes and %d stale edges from infra map",
-                len(stale_nodes),
-                len(stale_edge_ids),
-            )
-
+        # a full scan: everything the scan did not produce is stale, whatever its scope
+        with self.store.begin_scan(self.org_id, job_id=current_job_id()) as scan:
+            scan.put_nodes(nodes)
+            scan.put_edges(edges)
         logger.info("🌐 Infra map write complete: %d nodes, %d edges", len(nodes), len(edges))
         emit_job_event(
             "Infra map graph write complete",

@@ -235,11 +235,11 @@ def _iac_context(record: Dict[str, Any], *, config: Dict[str, Any], workspace_id
     org_id = str(config.get("org_id") or config.get("org") or workspace_id)
     if map_table and resource_ids:
         try:
-            from infra_map.store import InfraMapStore
+            from infra_map.graph_store import open_store
 
-            store = InfraMapStore(table_name=map_table, workspace_id=workspace_id)
+            store = open_store({**config, "dynamodb_config": _dynamodb_config(config)}, workspace_id=workspace_id)
             for rid in resource_ids[:25]:
-                node = store.get_resource(org_id, rid)
+                node = store.get_node(org_id, rid)
                 if node is None:
                     out["changed_since_pr"].append(f"{rid} is no longer in the map")
                     continue

@@ -5,8 +5,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from infra_map.facts import EdgeFact
+from infra_map.graph_store import GraphStore
 from infra_map.models import RelationshipEdge, ResourceNode
-from infra_map.store import InfraMapStore
 
 from .infra_map_ids import state_file_scope, tf_address_node_id
 
@@ -87,7 +87,7 @@ def build_derived_correspondence_edge_facts(
 
 
 class InfraMapOwnershipResolver:
-    def __init__(self, store: InfraMapStore):
+    def __init__(self, store: GraphStore):
         self.store = store
 
     def resolve_ownership(

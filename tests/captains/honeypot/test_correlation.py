@@ -105,14 +105,14 @@ class _Store:
             "arn:aws:s3:::other": SimpleNamespace(resource_id="arn:aws:s3:::other", type="s3_bucket", name="other"),
         }
 
-    def get_resource(self, org_id, resource_id):
+    def get_node(self, org_id, resource_id, **kw):
         return self.nodes.get(resource_id)
 
     def fetch_graph(self, org_id, **kw):
         return {"nodes": list(self.nodes.values()), "edges": []}
 
-    def neighbors(self, org_id, resource_id, **kw):
-        return {"nodes": [], "edges": []}
+    def neighborhood(self, org_id, resource_id, **kw):
+        return SimpleNamespace(nodes=[], edges=[])
 
 
 def test_investigate_marks_the_incident(monkeypatch):

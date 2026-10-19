@@ -10,7 +10,7 @@ from captains.iac.fix_drift_job import IACFixDriftJob
 
 def _job(monkeypatch, outcome):
     job = IACFixDriftJob("org", "target", {"workspace_id": "ws"})
-    store = type("Store", (), {"batch_get_resources": lambda self, org, ids: {rid: object() for rid in ids}})()
+    store = type("Store", (), {"get_nodes": lambda self, org, ids: {rid: object() for rid in ids}})()
     monkeypatch.setattr(job, "_load_store", lambda: store)
     monkeypatch.setattr(job, "_batch_lookup_ownership", lambda store, ids: {rid: {"repo": f"acme/{rid}"} for rid in ids})
     monkeypatch.setattr(job, "_fix_drift_in_repo", outcome)

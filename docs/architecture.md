@@ -25,7 +25,7 @@ never waits on work. That is the whole queue; there is no broker.
 | Package | What it is |
 |---|---|
 | `compass_core` | What every captain shares: the config file, DynamoDB table names and keys, the AWS session, the GitHub client, the job store and queue, events, the model, the `compass` command. The registries (`dispatch`, `queue`, `config`, `llm`, `notify`) have a default and a hook, so a larger deployment can plug in behind the same code. |
-| `infra_map` | The map: resource and ownership nodes, edges, the store and the fact store on DynamoDB. The mapper writes it; everything else reads it. |
+| `infra_map` | The map: resource and ownership nodes, edges, the fact store, and the `GraphStore` interface every reader and the mapper go through (`graph_store.py`: the interface and `open_store`; `dynamo_store.py`: the map on DynamoDB). The mapper writes it, one scan at a time; everything else reads it. |
 | `captains/mapper` | Reads the AWS account (every region), Terraform state and the GitHub organisation, and writes the map: which resource is managed by which module in which repository. `export` renders it as JSON, DOT or one HTML page. |
 | `captains/librarian` | Answers questions against the map ("what owns this ARN", "what is unmanaged") for the API and the other captains. |
 | `captains/honeypot` | Decoys: classes (`aws_credential`, `db_credential`, `ssh_key`, `s3_object`, `api_token`, `dns_record`), placement (where a decoy would look real, from the map), the Terraform generator, the pull request, arming, the alert consumer, incidents, blast radius, and the responses (`iam_deactivate_key`, `ecs_restart_task`). |
@@ -74,6 +74,7 @@ model. Each seam is a module-level default plus an `install`/`set_*` hook:
 | Seam | Open default | Hook |
 |---|---|---|
 | Job queue | `compass_core.queue.StoreQueue` (the jobs table, polled by the daemon) | `set_job_queue` |
+| Map store | `infra_map.graph_store.open_store`: the map table on DynamoDB | `set_graph_store_factory` |
 | Workspace config | the JSON file | `set_workspace_config_loader` / `saver` |
 | Events | the job store | `set_event_sink` |
 | Model | Anthropic (`ANTHROPIC_API_KEY`) or none | `set_model_factory` |

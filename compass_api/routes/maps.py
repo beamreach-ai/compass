@@ -10,8 +10,8 @@ from compass_api.routes._infra_map import resolve_infra_map_context
 from compass_api.routes._infra_scan import enqueue_full_infra_scan, mark_infra_scan_pending_for_request
 from compass_api.routes._workspace import get_actor_ids
 from compass_core.queue import queue_proxy
+from infra_map.graph_store import GraphStore
 from infra_map.models import RelationshipEdge, ResourceNode
-from infra_map.store import InfraMapStore
 
 router = APIRouter()
 logger = logging.getLogger("maps-api")
@@ -72,7 +72,7 @@ def get_infra_map(
     ),
 ):
     ctx = resolve_infra_map_context(request)
-    map_store: InfraMapStore = ctx["store"]
+    map_store: GraphStore = ctx["store"]
     default_org_id: str = ctx["default_org"]
     chosen_org = (org_id or default_org_id).strip()
     if not chosen_org:
@@ -82,13 +82,7 @@ def get_infra_map(
 
     try:
         if focus:
-            graph = map_store.neighbors(
-                chosen_org,
-                focus,
-                depth=depth,
-                direction=direction,
-                relationship_types=rel_types,
-            )
+            graph = map_store.neighborhood(chosen_org, focus, depth=depth, direction=direction, types=rel_types, max_nodes=limit).as_dict()
         else:
             graph = map_store.fetch_graph(
                 chosen_org,
@@ -154,7 +148,7 @@ def enqueue_map_reindex(request: Request, body: Optional[MapReindexRequest] = No
 # IAC coverage endpoint
 # ---------------------------------------------------------------------------
 
-def _iac_coverage_summary(org_id: str, store: InfraMapStore) -> Dict[str, Any]:
+def _iac_coverage_summary(org_id: str, store: GraphStore) -> Dict[str, Any]:
     graph = store.fetch_graph(org_id)
     aws_nodes = [n for n in graph.get("nodes", []) if n.source == "aws_scan"]
 

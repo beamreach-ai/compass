@@ -6,8 +6,7 @@ from collections import defaultdict
 from typing import Any, Dict, List, Optional
 
 from compass_core.events import emit_job_event
-from compass_core.tables import tables
-from infra_map.store import InfraMapStore
+from infra_map.graph_store import GraphStore, open_store
 
 logger = logging.getLogger("iac-fix-drift-job")
 
@@ -29,7 +28,7 @@ class IACFixDriftJob:
         emit_job_event("Loading infra map for drift resolution", event_type="progress", status="running")
         store = self._load_store()
 
-        nodes = store.batch_get_resources(self.org_id, resource_ids)
+        nodes = store.get_nodes(self.org_id, resource_ids)
 
         emit_job_event("Resolving resource ownership", event_type="progress", status="running")
         ownership = self._batch_lookup_ownership(store, resource_ids)
@@ -75,16 +74,12 @@ class IACFixDriftJob:
             "errors": errors,
         }
 
-    def _load_store(self) -> InfraMapStore:
-        table_name = tables(self.config).map
-        if not table_name:
-            raise RuntimeError("dynamodb_config.map is not configured")
-        workspace_id = self.config.get("workspace_id") or self.target
-        return InfraMapStore(table_name=table_name, workspace_id=workspace_id)
+    def _load_store(self) -> GraphStore:
+        return open_store(self.config, workspace_id=self.config.get("workspace_id") or self.target)
 
     def _batch_lookup_ownership(
         self,
-        store: InfraMapStore,
+        store: GraphStore,
         resource_ids: List[str],
     ) -> Dict[str, Dict]:
         graph = store.fetch_graph(self.org_id)

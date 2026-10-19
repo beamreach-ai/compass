@@ -24,17 +24,14 @@ DATA_NODE_TYPES = ("secretsmanager_secret", "s3_bucket", "rds_instance", "dynamo
 def load_map_store_for_config(config: Dict[str, Any], workspace_id: str) -> Tuple[Optional[Any], str]:
     """The infra map store for a workspace, from its config alone (jobs have no
     request). Returns (store, org_id); (None, "") when the map is not configured."""
-    from infra_map.store import InfraMapStore
+    from infra_map.graph_store import open_store
 
     config = config or {}
     resolved = tables(config)
-    table_name = resolved.map
     org_id = str(config.get("org_id") or config.get("org") or resolved.org_id or workspace_id or "")
-    if not table_name:
-        return None, org_id
     try:
-        return InfraMapStore(table_name=table_name, workspace_id=workspace_id), org_id
-    except Exception as exc:  # noqa: BLE001
+        return open_store(config, workspace_id=workspace_id), org_id
+    except Exception as exc:  # noqa: BLE001 - no map table, or the store cannot open: the investigation goes on without the map
         logger.warning("map store unavailable: %s", exc)
         return None, org_id
 
@@ -44,7 +41,7 @@ def _now() -> str:
 
 
 def role_policies_from_map(store: Any, org_id: str, role_arn: str) -> List[Dict[str, Any]]:
-    node = store.get_resource(org_id, role_arn) if store and role_arn else None
+    node = store.get_node(org_id, role_arn) if store and role_arn else None
     attrs = getattr(node, "attributes", None) or {}
     return list(attrs.get("policies") or [])
 
@@ -120,9 +117,9 @@ def data_resources_live(session: Any, region: str) -> List[Dict[str, Any]]:
 def linked_resources_from_map(store: Any, org_id: str, task_definition_arn: Optional[str]) -> List[Dict[str, Any]]:
     if store is None or not task_definition_arn:
         return []
-    found = store.neighbors(org_id, task_definition_arn, depth=1, direction="incoming")
+    found = store.neighborhood(org_id, task_definition_arn, depth=1, direction="incoming")
     out = []
-    for node in found.get("nodes", []):
+    for node in found.nodes:
         if getattr(node, "type", None) in DATA_NODE_TYPES:
             out.append({"resource_id": node.resource_id, "type": node.type, "name": node.name})
     return out
@@ -158,7 +155,7 @@ def investigate_incident(
     role_arn = correlation.get("task_role_arn") or ""
     task = correlation.get("task") or {}
     if not role_arn and store is not None and task.get("task_definition_arn"):
-        td = store.get_resource(org_id, task["task_definition_arn"])
+        td = store.get_node(org_id, task["task_definition_arn"])
         role_arn = ((getattr(td, "attributes", None) or {}).get("taskRoleArn")) or ""
         correlation["task_role_arn"] = role_arn or None
 
