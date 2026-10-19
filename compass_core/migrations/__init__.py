@@ -7,9 +7,8 @@ then the steps listed in ``STEPS``, each once per workspace: a step is
 for ``serve`` and ``api`` under the extensions lock, so the two containers,
 which start together, do not race.
 
-No step exists today; the list is here so the next one has a place. A step
-must be safe to run against data the newer code already wrote (the daemon may
-have started first) and must never delete.
+A step must be safe to run against data the newer code already wrote (the daemon
+may have started first) and must never delete.
 """
 
 from __future__ import annotations
@@ -24,7 +23,16 @@ from compass_core.tables import dynamo_table, tables
 logger = logging.getLogger("compass.migrations")
 
 Step = Tuple[str, Callable[[Dict[str, Any]], None]]
-STEPS: List[Step] = []
+
+
+def _map_to_sqlite(config: Dict[str, Any]) -> None:
+    from infra_map.migrate import step_0_6_0
+
+    step_0_6_0(config)
+
+
+# 0.6.0: the map moves from DynamoDB to the SQLite file (infra_map.migrate); the table stays for rollback
+STEPS: List[Step] = [("0.6.0-map-sqlite", _map_to_sqlite)]
 
 
 def sort_key(version: str) -> str:

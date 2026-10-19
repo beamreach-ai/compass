@@ -35,9 +35,14 @@ def world():
     return generate(WorldSpec(resources=60, regions=2, org_id=ORG, seed=3))
 
 
-@pytest.fixture
-def client(monkeypatch, world):
-    """The three routers that read the map, over ``world`` in the workspace's map store."""
+@pytest.fixture(params=["dynamodb", "sqlite"])
+def client(request, monkeypatch, world, tmp_path):
+    """The three routers that read the map, over ``world`` in each store: the same answers
+    from both is what lets the default change without the API changing."""
+    from infra_map import graph_store
+
+    monkeypatch.setenv("COMPASS_MAP_STORE", request.param)
+    monkeypatch.setenv("COMPASS_DATA_DIR", str(tmp_path))
     with mock_aws():
         from compass_core.commands import create_tables
         from infra_map.graph_store import open_store
@@ -57,6 +62,7 @@ def client(monkeypatch, world):
             app.include_router(module.router)
         monkeypatch.setattr(importlib.import_module("compass_api.routes.honeypots"), "get_workspace_config", lambda _r: {"github": {}})
         yield TestClient(app)
+    graph_store.close_shared_stores()
 
 
 def test_the_whole_map_lists_every_node_and_edge_with_their_shape(client, world):

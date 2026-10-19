@@ -133,6 +133,9 @@ async def _lifespan(app: FastAPI):
         if inspect.isawaitable(result):
             await result
     yield
+    from infra_map.graph_store import close_shared_stores
+
+    close_shared_stores()  # the map's SQLite connections, one per request thread
     for hook in _extensions.shutdown_hooks():
         try:
             result = hook()

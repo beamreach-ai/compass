@@ -33,6 +33,10 @@ x-compass: &compass
     - ./config:/compass/config
     - ./map:/compass/map
     - ./extensions:/compass/extensions
+    # the map: one SQLite file per workspace, shared by the daemon (which writes it) and the API.
+    # A named volume, not a bind mount: SQLite's WAL needs the file locks a Docker Desktop bind
+    # mount does not guarantee. `compass mapper backup` copies it out while the stack runs.
+    - map-data:/compass/data
     - ${AWS_DIR:-~/.aws}:/root/.aws:ro
   depends_on:
     - dynamodb
@@ -101,3 +105,4 @@ services:
 
 volumes:
   dynamodb-data:
+  map-data:

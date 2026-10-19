@@ -5,6 +5,8 @@ history says so instead of guessing."""
 
 from __future__ import annotations
 
+import os
+import uuid
 from datetime import datetime, timezone
 
 import boto3
@@ -28,15 +30,39 @@ def _edge(src: str, dst: str, rel: str, *, source: str = "aws_scan", scope: str 
     return RelationshipEdge(org_id=ORG, from_resource_id=src, to_resource_id=dst, relationship_type=rel, source=source, scope=scope, last_seen=OBSERVED)
 
 
-@pytest.fixture(params=["dynamodb"])
-def store(request):
-    with mock_aws():
-        from compass_core.commands import create_tables
-        from infra_map.dynamo_store import DynamoGraphStore
+@pytest.fixture(params=["sqlite", "dynamodb", "postgres"])
+def store(request, tmp_path):
+    if request.param == "sqlite":
+        from infra_map.sql_store import SqliteGraphStore
 
-        session = boto3.Session(region_name="us-east-1")
-        create_tables({"dynamodb_config": {"map": "compass_map_t"}}, client=session.client("dynamodb"))
-        yield DynamoGraphStore(table_name="compass_map_t", workspace_id="ws", session=session)
+        s = SqliteGraphStore(tmp_path / "map.sqlite", "ws")
+        yield s
+        s.close()
+        return
+    if request.param == "postgres":
+        # never the network in CI: only with a database someone pointed us at
+        dsn = os.getenv("COMPASS_TEST_POSTGRES_DSN")
+        if not dsn:
+            pytest.skip("COMPASS_TEST_POSTGRES_DSN is not set")
+        from infra_map.sql_store import PostgresGraphStore
+
+        s = PostgresGraphStore(dsn, f"ws-{uuid.uuid4().hex[:8]}")
+        yield s
+        with s.conn().raw.cursor() as cur:
+            for table in ("nodes", "edges", "scans"):
+                cur.execute(f"DELETE FROM {table} WHERE workspace_id = %s", (s.workspace_id,))
+        s.close()
+        return
+    if request.param == "dynamodb":
+        with mock_aws():
+            from compass_core.commands import create_tables
+            from infra_map.dynamo_store import DynamoGraphStore
+
+            session = boto3.Session(region_name="us-east-1")
+            create_tables({"dynamodb_config": {"map": "compass_map_t"}}, client=session.client("dynamodb"))
+            yield DynamoGraphStore(table_name="compass_map_t", workspace_id="ws", session=session)
+        return
+    raise LookupError(request.param)
 
 
 def _write(store, nodes, edges, **kw):

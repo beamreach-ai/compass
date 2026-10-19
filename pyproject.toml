@@ -47,6 +47,8 @@ prs = "captains.prs.manifest:MANIFEST"
 # a model for the incident summary, drift-fix HCL and PR triage (compass_core.llm)
 anthropic = ["anthropic>=0.40"]
 dev = ["pytest", "pytest-asyncio", "httpx", "moto", "pyflakes"]
+# the map store on Postgres (infra_map.sql_store.PostgresGraphStore) for a hosted deployment; the open default is SQLite
+postgres = ["psycopg[binary]>=3.1,<4"]
 # the end-to-end suite (docs/e2e.md): a real browser for the dashboard, and the wheel builds it runs
 e2e = ["playwright>=1.47,<2", "build"]
 
@@ -73,7 +75,8 @@ pythonpath = ["."]
 testpaths = ["tests"]
 # tests are imported by path: `captains` is a namespace package, so a `tests`
 # directory on sys.path would otherwise contribute tests/captains/* to it
-addopts = ["--import-mode=importlib"]
+addopts = ["--import-mode=importlib", "-m", "not benchmark"]
+markers = ["benchmark: the map benchmark (tests/benchmark); `pytest -m benchmark` runs it, the default run skips it"]
 
 [tool.ruff]
 line-length = 140

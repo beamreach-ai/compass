@@ -18,6 +18,7 @@ ENV COMPASS_CONFIG=/compass/config/local.json \
     COMPASS_MAP_PORT=8787 \
     COMPASS_ALLOW_LOCAL_IAM=1 \
     COMPASS_EXTENSIONS_DIR=/compass/extensions \
+    COMPASS_DATA_DIR=/compass/data \
     PYTHONUNBUFFERED=1
 EXPOSE 8787
 # Extensions (COMPASS_EXTENSIONS, a list of pip requirements) are installed into

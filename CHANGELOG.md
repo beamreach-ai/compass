@@ -5,6 +5,41 @@ workflow refuses a tag without one, and reads from it what the dashboard shows
 next to the Update button: the first paragraph is the summary, the bullets under
 `### After the update` are the notes an operator needs after applying it.
 
+## 0.6.0 — unreleased
+
+The map moves from DynamoDB to a SQLite file and keeps its history: scans of a
+100,000-resource account take seconds instead of the better part of an hour,
+and the map reads that took tens of seconds take milliseconds.
+
+- The map is one SQLite file per workspace on a new `map-data` volume
+  (`/compass/data/map/<workspace>.sqlite`). The daemon writes a scan in one
+  transaction; the API reads at the same time and never sees half a scan.
+  DynamoDB keeps the jobs, decoys, pull requests and the rest.
+- A scan no longer deletes what it did not find: it closes it. Every node and
+  edge is a version with the time it appeared and the time it went, so the map
+  can later be read as it was and two scans compared (the API for that comes
+  in a later release).
+- Every reader of the map goes through one interface, `GraphStore`
+  (`infra_map.graph_store`), with `set_graph_store_factory` for a deployment
+  that brings its own store. A Postgres store implements it too:
+  `pip install compass[postgres]` and `map: {store: postgres, dsn: …}`.
+- `compass mapper backup out=<path>` copies the map while the stack runs.
+- The map benchmark (`docs/benchmark.md`): a synthetic account of 10k, 100k or
+  1M resources, run against each store. 10k runs on every pull request with
+  its budgets enforced; 100k nightly.
+- A neighbourhood around a resource with thousands of edges (a shared role, a
+  security group) is bounded and returns; on DynamoDB its edge listing was cut
+  at 1 MB without saying so.
+
+### After the update
+
+- Fetch the new `docker-compose.yml` once: it adds the `map-data` volume.
+- The first start copies the existing map from DynamoDB into the file, once
+  (`compass migrate`, step `0.6.0-map-sqlite`). On a large map the first start
+  takes a few minutes longer. The DynamoDB table is left as it was.
+- To go back to the DynamoDB map, set `COMPASS_MAP_STORE=dynamodb` in `.env`
+  and restart; the next scan brings the table up to date.
+
 ## 0.5.2 — unreleased
 
 An end-to-end suite that runs on every pull request, and the bugs it found on

@@ -331,12 +331,17 @@ def test_extensions_are_rebuilt_when_a_new_core_runs(tmp_path, monkeypatch):
 
 # ── migrate ─────────────────────────────────────────────────────────────────
 
-def test_migrate_creates_tables_and_runs_each_step_once(monkeypatch):
+def test_migrate_creates_tables_and_runs_each_step_once(monkeypatch, tmp_path):
     import boto3
     from moto import mock_aws
 
+    from compass_core import config as config_module
     from compass_core import migrations
 
+    monkeypatch.setenv("COMPASS_DATA_DIR", str(tmp_path))  # the 0.6.0 step puts the map file here
+    monkeypatch.delenv("COMPASS_MAP_STORE", raising=False)
+    saved = []
+    monkeypatch.setattr(config_module, "save_workspace_config", lambda ws, cfg: saved.append((ws, dict(cfg))))
     monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "testing")
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "testing")
@@ -350,7 +355,10 @@ def test_migrate_creates_tables_and_runs_each_step_once(monkeypatch):
         second = migrations.run(config, workspace_id="local", client=client, steps=steps)
         assert second["created"] == [] and second["migrations"] == ["0.6.0"] and ran == ["0.5.0", "0.6.0"]
         assert migrations.applied(config, workspace_id="local") == ["0.5.0", "0.6.0"]
-        assert migrations.run(config, workspace_id="local", client=client)["migrations"] == [], "none registered today"
+        # the registered steps: 0.6.0 moves the map to SQLite (here: no map table, so it only marks the config)
+        assert migrations.run(config, workspace_id="local", client=client)["migrations"] == ["0.6.0-map-sqlite"]
+        assert saved[-1][1]["map"]["store"] == "sqlite"
+        assert migrations.run(config, workspace_id="local", client=client)["migrations"] == []
 
 
 def test_a_check_made_by_one_process_reaches_the_other_through_the_volume(install, tmp_path):

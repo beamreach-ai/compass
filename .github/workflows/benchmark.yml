@@ -1,0 +1,54 @@
+name: benchmark
+
+# The map benchmark at 100k resources on the SQLite store, nightly on main, budgets
+# enforced; any scale and store set on demand (docs/benchmark.md). The 10k point runs
+# on every pull request in ci.yml. The numbers are in the job summary and an artifact.
+
+on:
+  schedule:
+    - cron: "41 2 * * *"
+  workflow_dispatch:
+    inputs:
+      scale:
+        description: 10k, 100k or 1m
+        default: 100k
+      store:
+        description: comma-separated, from sqlite and postgres
+        default: sqlite
+
+permissions:
+  contents: read
+
+jobs:
+  map:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: bench
+          POSTGRES_PASSWORD: bench
+          POSTGRES_DB: bench
+        ports: ["15432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U bench" --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e ".[dev,postgres]"
+      - name: Run the benchmark
+        env:
+          SCALE: ${{ inputs.scale || '100k' }}
+          STORE: ${{ inputs.store || 'sqlite' }}
+        run: |
+          python -m tests.benchmark.run --scale "$SCALE" --store "$STORE" --out bench.json --fail-on-budget | tee bench.log
+          sed -n '/^## /,$p' bench.log >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: map-benchmark
+          path: bench.json

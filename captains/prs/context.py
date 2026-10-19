@@ -231,9 +231,8 @@ def _iac_context(record: Dict[str, Any], *, config: Dict[str, Any], workspace_id
     out = _empty()
     origin = record.get("origin") or {}
     resource_ids = [str(r) for r in ((record.get("intent") or {}).get("scope") or {}).get("resource_ids") or origin.get("resource_ids") or []]
-    map_table = tables(_dynamodb_config(config)).map
     org_id = str(config.get("org_id") or config.get("org") or workspace_id)
-    if map_table and resource_ids:
+    if resource_ids:
         try:
             from infra_map.graph_store import open_store
 
@@ -254,10 +253,8 @@ def _iac_context(record: Dict[str, Any], *, config: Dict[str, Any], workspace_id
                     "managed": attrs.get("managed") if "managed" in attrs else attrs.get("tf_managed"),
                     "attributes": _cap({k: attrs.get(k) for k in list(attrs)[:12]}),
                 })
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - no map store for this workspace, or it cannot open
             out["notes"].append(f"map lookup failed: {exc}")
-    elif resource_ids:
-        out["notes"].append("map table not configured")
     job_id = origin.get("job_id")
     if job_id:
         try:

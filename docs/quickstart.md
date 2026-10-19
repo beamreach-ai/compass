@@ -97,8 +97,14 @@ docker compose run --rm compass prs sync          # sync pull requests now, not 
 docker compose run --rm compass honeypot endpoint_add type=webhook name=ops webhook_url=https://…
 docker compose run --rm compass mapper export format=json out=/compass/map/map.json
 docker compose run --rm compass mapper export format=html out=/compass/map/index.html   # the map as one HTML page
-docker compose down                               # stop; data stays in the volume (down -v wipes it)
+docker compose run --rm compass mapper backup out=/compass/map/map-backup.sqlite   # a copy of the map while it runs
+docker compose down                               # stop; data stays in the volumes (down -v wipes them)
 ```
+
+The map is one SQLite file on the `map-data` volume. `mapper backup` copies it
+consistently while the stack runs (into `./map/` in the example above, which is
+mounted from the host). To restore one, stop the stack, copy it to
+`/compass/data/map/<workspace>.sqlite` in the volume, and start it again.
 
 ## 6. Updates
 
@@ -181,6 +187,7 @@ that builds the two images from a checkout.
 | Dashboard and API | http://localhost:8080 (`COMPASS_PORT`); the API under `/api/` |
 | Map viewer files | `./map/` (also at `/map/` on the dashboard's port) |
 | Updates | `./extensions/update*.json`, `status.json`, `rollback.json`: what the API and the updater exchange |
+| The map | `/compass/data/map/<workspace>.sqlite` in the `map-data` volume |
 | Tables | `compass_{map,items,aws_inventory,tf_inventory,tf_state,progress}_<workspace>` in the `dynamodb-data` volume |
 | Branches | `beamreach/honeypot/<name>`, `beamreach/iac-import/<hash>` |
 | Resource tags | `beamreach:honeytoken-id`, `beamreach:managed` on everything Compass plants |

@@ -15,6 +15,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import threading
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Generic, Iterable, List, Literal, Mapping, Optional, Protocol, Sequence, Tuple, TypeVar
@@ -355,7 +356,7 @@ def set_graph_store_factory(factory: Optional[StoreFactory]) -> None:
 
 def backend_name(config: Mapping[str, Any]) -> str:
     """Which store the workspace uses: ``COMPASS_MAP_STORE`` for this process, else the
-    config's ``map.store``, else DynamoDB."""
+    config's ``map.store``, else DynamoDB (the store every install had before 0.6)."""
     override = (os.getenv("COMPASS_MAP_STORE") or "").strip().lower()
     if override:
         return override
@@ -374,7 +375,70 @@ def _default_factory(config: Mapping[str, Any], workspace_id: str, session: Any)
         if not table_name:
             raise LookupError("dynamodb_config.map is not configured: the workspace config names no map table")
         return DynamoGraphStore(table_name=table_name, workspace_id=workspace_id, session=session)
-    raise LookupError(f"map.store {backend!r} is not a store this Compass knows (dynamodb)")
+    if backend == "sqlite":
+        return _shared_sqlite(sqlite_path(config, workspace_id), workspace_id)
+    if backend == "postgres":
+        from infra_map.sql_store import PostgresGraphStore
+
+        dsn = (os.getenv("COMPASS_MAP_DSN") or "").strip() or str(((config.get("map") or {}) if isinstance(config, Mapping) else {}).get("dsn") or "")
+        if not dsn:
+            raise LookupError("map.store is postgres but no DSN: set map.dsn in the workspace config or COMPASS_MAP_DSN")
+        return PostgresGraphStore(dsn, workspace_id)
+    raise LookupError(f"map.store {backend!r} is not a store this Compass knows (sqlite, dynamodb, postgres)")
+
+
+_sqlite_stores: Dict[Tuple[str, str], GraphStore] = {}
+_sqlite_lock = threading.Lock()
+
+
+def _shared_sqlite(path: str, workspace_id: str) -> GraphStore:
+    """One SQLite store per file and workspace in this process: it keeps a connection per
+    thread, so the API's request threads reuse theirs instead of opening the file per request."""
+    from infra_map.sql_store import SqliteGraphStore
+
+    key = (os.path.abspath(path), workspace_id)
+    with _sqlite_lock:
+        store = _sqlite_stores.get(key)
+        if store is None:
+            store = _ShareableStore(SqliteGraphStore(path, workspace_id))
+            _sqlite_stores[key] = store
+        return store
+
+
+class _ShareableStore:
+    """A shared store whose ``close`` is a no-op: callers that close what ``open_store`` gave
+    them (the export, a job) must not close the connections other threads are using.
+    ``close_shared_stores`` closes them for real, on shutdown and in tests."""
+
+    def __init__(self, inner: Any):
+        self._inner = inner
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+    def close(self) -> None:
+        return None
+
+
+def close_shared_stores() -> None:
+    with _sqlite_lock:
+        for store in _sqlite_stores.values():
+            store._inner.close()
+        _sqlite_stores.clear()
+
+
+def data_dir() -> str:
+    """Where the map file lives: ``COMPASS_DATA_DIR`` (``/compass/data`` in the image, the
+    ``map-data`` volume), else ``./data`` next to a checkout's config."""
+    return (os.getenv("COMPASS_DATA_DIR") or "").strip() or "data"
+
+
+def sqlite_path(config: Mapping[str, Any], workspace_id: str) -> str:
+    section = config.get("map") if isinstance(config, Mapping) else None
+    explicit = (section or {}).get("path") if isinstance(section, Mapping) else None
+    if explicit:
+        return str(explicit)
+    return os.path.join(data_dir(), "map", f"{workspace_id}.sqlite")
 
 
 def open_store(config: Mapping[str, Any], *, workspace_id: str, session: Any = None) -> GraphStore:

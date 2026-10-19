@@ -31,6 +31,18 @@ jobs:
           AWS_ACCESS_KEY_ID: testing
           AWS_SECRET_ACCESS_KEY: testing
 
+  # the map benchmark at 10k on the SQLite store, budgets enforced (docs/benchmark.md); seconds
+  benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e ".[dev]"
+      - run: pytest -m benchmark tests/benchmark -q -s
+
   dashboard:
     runs-on: ubuntu-latest
     defaults:
