@@ -10,15 +10,11 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List
 
-from compass_core.tables import tables
-from infra_map.store import InfraMapStore
+from infra_map.graph_store import open_store
 
 
 def load_graph(config: Dict[str, Any], *, org_id: str, workspace_id: str) -> Dict[str, List[Dict[str, Any]]]:
-    table_name = tables(config).map
-    if not table_name:
-        raise RuntimeError("dynamodb_config.map is not configured")
-    graph = InfraMapStore(table_name=table_name, workspace_id=workspace_id).fetch_graph(org_id)
+    graph = open_store(config, workspace_id=workspace_id).fetch_graph(org_id)
     nodes = [
         {
             "id": n.resource_id,

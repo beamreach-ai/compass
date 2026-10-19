@@ -25,10 +25,9 @@ TABLE = "compass_map_ws-1"
 
 
 def _write_world(store, world) -> None:
-    for node in world.nodes:
-        store.put_resource(node)
-    for edge in world.edges:
-        store.put_relationship(edge)
+    with store.begin_scan(ORG) as scan:
+        scan.put_nodes(world.nodes)
+        scan.put_edges(world.edges)
 
 
 @pytest.fixture
@@ -38,17 +37,18 @@ def world():
 
 @pytest.fixture
 def client(monkeypatch, world):
-    """The three routers that read the map, over a moto table holding ``world``."""
+    """The three routers that read the map, over ``world`` in the workspace's map store."""
     with mock_aws():
         from compass_core.commands import create_tables
-        from infra_map.store import InfraMapStore
+        from infra_map.graph_store import open_store
 
         session = boto3.Session(region_name="us-east-1")
         create_tables({"dynamodb_config": {"map": TABLE}}, client=session.client("dynamodb"))
-        _write_world(InfraMapStore(table_name=TABLE, workspace_id=WORKSPACE, session=session), world)
+        config = {"dynamodb_config": {"map": TABLE}}
+        _write_world(open_store(config, workspace_id=WORKSPACE, session=session), world)
 
         def ctx(_request) -> Dict[str, Any]:
-            return {"store": InfraMapStore(table_name=TABLE, workspace_id=WORKSPACE, session=session), "default_org": ORG, "workspace_id": WORKSPACE}
+            return {"store": open_store(config, workspace_id=WORKSPACE, session=session), "default_org": ORG, "workspace_id": WORKSPACE}
 
         app = FastAPI()
         for name in ("maps", "honeypots", "librarian"):

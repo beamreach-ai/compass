@@ -5,14 +5,14 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Sequence
 
+from infra_map.graph_store import GraphStore
 from infra_map.models import RelationshipEdge, ResourceNode
-from infra_map.store import InfraMapStore
 
 
 class InfraMapLibrarian:
     """Deterministic query layer over infra_map for agent-facing answers."""
 
-    def __init__(self, store: InfraMapStore):
+    def __init__(self, store: GraphStore):
         self.store = store
 
     def get_terraform_location(

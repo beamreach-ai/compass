@@ -5,6 +5,7 @@ import boto3
 from compass_core.aws import build_target_session, resolve_target_region
 from compass_core.events import emit_job_event
 from compass_core.tables import tables
+from infra_map.graph_store import open_store
 
 from .aws_mapper import AWSInfraMapper
 from .context import ExecutionContext
@@ -87,16 +88,14 @@ class MapperCaptain:
             fallback_region = self.config.get("aws_region")
             mapper_regions = [fallback_region] if fallback_region else None
 
-        table_name = tables(self.config).map
-        if not table_name:
-            raise RuntimeError("dynamodb_config.map is required for mapper runs")
-
+        workspace_id = _workspace_id_from_config(self.config)
         self.infra_mapper = AWSInfraMapper(
             org_id=self.ctx.org_id,
-            workspace_id=_workspace_id_from_config(self.config),
+            workspace_id=workspace_id,
             target_session=self.ctx.target_session,
             control_session=self.ctx.control_session,
-            table_name=table_name,
+            table_name=tables(self.config).map,
+            store=open_store(self.config, workspace_id=workspace_id, session=self.ctx.control_session),
             regions=mapper_regions,
             github_config=self.config.get("github"),
         )

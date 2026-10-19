@@ -13,7 +13,7 @@ from compass_api.routes._workspace import (
 )
 from compass_core.config import workspace_config as load_target_config
 from compass_core.tables import tables
-from infra_map.store import InfraMapStore
+from infra_map.graph_store import open_store
 
 logger = logging.getLogger("infra-map-routes")
 
@@ -21,10 +21,6 @@ logger = logging.getLogger("infra-map-routes")
 def _load_legacy_map_store() -> Dict[str, Any]:
     target = os.getenv("TARGET")
     config = load_target_config(target)
-    table_name = tables(config).map
-    if not table_name:
-        raise RuntimeError("dynamodb_config.map is not defined in the target configuration")
-
     default_org = (
         config.get("org_id")
         or config.get("org")
@@ -34,7 +30,7 @@ def _load_legacy_map_store() -> Dict[str, Any]:
     if not default_org:
         raise RuntimeError("Unable to determine default org_id for infra map queries")
 
-    store = InfraMapStore(table_name=table_name, workspace_id=target or default_org)
+    store = open_store(config, workspace_id=target or default_org)
     return {"store": store, "default_org": default_org}
 
 
@@ -43,9 +39,6 @@ def resolve_infra_map_context(request: Request) -> Dict[str, Any]:
         ctx = get_workspace_context(request)
         config = get_workspace_config(request)
         resolved = tables(get_workspace_dynamodb_config(request))
-        table_name = resolved.map
-        if not table_name:
-            raise RuntimeError("dynamodb_config.map is not defined in the workspace configuration")
         default_org = (
             ctx.org_id
             or config.get("org_id")
@@ -53,7 +46,7 @@ def resolve_infra_map_context(request: Request) -> Dict[str, Any]:
             or resolved.org_id
             or ctx.workspace_id
         )
-        store = InfraMapStore(table_name=table_name, workspace_id=ctx.workspace_id)
+        store = open_store({**config, "dynamodb_config": get_workspace_dynamodb_config(request)}, workspace_id=ctx.workspace_id)
         return {
             "store": store,
             "default_org": str(default_org).strip() if default_org else "",

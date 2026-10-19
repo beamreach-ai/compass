@@ -55,24 +55,33 @@ class _FakeCollector:
 
 
 class _RecordingStore:
+    """The write side of the GraphStore interface: what one scan put."""
+
     def __init__(self):
         self.nodes = []
         self.edges = []
+        self.scans = []
 
-    def put_resource(self, node):
-        self.nodes.append(node)
+    def begin_scan(self, org_id, *, scopes=None, job_id=None):
+        store = self
 
-    def put_relationship(self, edge):
-        self.edges.append(edge)
+        class _Scan:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                store.scans.append({"org_id": org_id, "scopes": scopes, "job_id": job_id})
+
+            def put_nodes(self, nodes):
+                store.nodes.extend(nodes)
+
+            def put_edges(self, edges):
+                store.edges.extend(edges)
+
+        return _Scan()
 
     def fetch_graph(self, org_id):
         return {"nodes": [], "edges": []}
-
-    def delete_resource(self, org_id, resource_id):
-        return None
-
-    def delete_relationship(self, edge):
-        return None
 
 
 class _RecordingFactStore:

@@ -633,12 +633,9 @@ class HoneypotCaptain:
         return repo, module_path
 
     def _load_store(self):
-        from infra_map.store import InfraMapStore
-        table_name = tables(self.config).map
-        if not table_name:
-            raise RuntimeError("dynamodb_config.map is not configured")
-        workspace_id = self.config.get("workspace_id") or self.workspace_id
-        return InfraMapStore(table_name=table_name, workspace_id=workspace_id)
+        from infra_map.graph_store import open_store
+
+        return open_store(self.config, workspace_id=self.config.get("workspace_id") or self.workspace_id)
 
     def _register_pr(
         self,

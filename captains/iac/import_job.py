@@ -5,9 +5,8 @@ from typing import Any, Dict, List, Optional
 
 from compass_core.aws import resolve_target_region
 from compass_core.events import emit_job_event
-from compass_core.tables import tables
+from infra_map.graph_store import open_store
 from infra_map.models import ResourceNode
-from infra_map.store import InfraMapStore
 
 logger = logging.getLogger("iac-import-job")
 
@@ -236,12 +235,8 @@ class IACImportJob:
     # ---------------------------------------------------------------- lookup
 
     def _fetch_resources(self, resource_ids: List[str]) -> List[ResourceNode]:
-        table_name = tables(self.config).map
-        if not table_name:
-            raise RuntimeError("dynamodb_config.map is not configured")
-        workspace_id = self.config.get("workspace_id") or self.target
-        store = InfraMapStore(table_name=table_name, workspace_id=workspace_id)
-        node_map = store.batch_get_resources(self.org_id, resource_ids)
+        store = open_store(self.config, workspace_id=self.config.get("workspace_id") or self.target)
+        node_map = store.get_nodes(self.org_id, resource_ids)
         resources = [node_map[rid] for rid in resource_ids if rid in node_map]
         logger.info("Fetched %d of %d requested resources", len(resources), len(resource_ids))
         return resources
