@@ -4,7 +4,8 @@ Compass maps an AWS account to the Terraform and repositories that own it,
 then acts on the map: plants decoy credentials that trip when used, imports
 unmanaged resources into Terraform, and keeps the pull requests it opens
 alive. It runs on your machine — a dashboard, an API, a daemon and a local
-DynamoDB in Docker Compose. Your credentials, your account; nothing leaves.
+DynamoDB and a SQLite file in Docker Compose. Your credentials, your account;
+nothing leaves.
 
 | | |
 |---|---|
@@ -76,7 +77,7 @@ socket, so it is off by default. See
 
 ```
 compass_core/     config, tables and keys, AWS and GitHub clients, jobs, the compass command
-infra_map/        the map: nodes, edges, the store
+infra_map/        the map: nodes, edges, the store (SQLite by default)
 captains/
   mapper/         AWS + Terraform state + GitHub → the map
   librarian/      questions against the map

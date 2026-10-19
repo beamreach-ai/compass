@@ -11,23 +11,25 @@ measurements, `adapters.py` is each store seen through `GraphStore`.
 # a throwaway DynamoDB-local and Postgres, on ports nothing else uses
 docker run -d --name compass-bench-dynamodb -p 18000:8000 amazon/dynamodb-local -jar DynamoDBLocal.jar -inMemory -sharedDb
 docker run -d --name compass-bench-postgres -p 15432:5432 -e POSTGRES_PASSWORD=bench -e POSTGRES_USER=bench -e POSTGRES_DB=bench postgres:16-alpine
-pip install -e ".[dev]"
+pip install -e ".[dev,postgres]"
 
-.venv/bin/python -m tests.benchmark.run --scale 10k --store legacy --out bench-10k.json
+.venv/bin/python -m tests.benchmark.run --scale 10k --store legacy,dynamodb,sqlite,postgres --out bench-10k.json
 ```
 
 | Store | What it measures |
 |---|---|
-| `legacy` | the map as it is today: `InfraMapStore` and the mapper's write block, on DynamoDB |
-
-The `GraphStore` backends (`dynamodb`, `sqlite`, `postgres`) join the table with
-the pull requests that add them (docs/specs/map-store.md section 14).
+| `legacy` | the code before the `GraphStore` interface: `InfraMapStore` and the mapper's write block, on DynamoDB |
+| `dynamodb` | the same table through `DynamoGraphStore` |
+| `sqlite` | `SqliteGraphStore` on a temp file (`BENCH_SQLITE_PATH` to choose) |
+| `postgres` | `PostgresGraphStore` (`BENCH_POSTGRES_DSN`, default the container above) |
 
 `BENCH_DYNAMODB_URL` points the two DynamoDB stores elsewhere. `--scale 100k`
 takes minutes on the SQL stores and the better part of an hour on DynamoDB;
 `--scale 1m` is for a machine with time. Run one store at a time when the
 numbers matter: a DynamoDB-local JVM next to Postgres skews both.
 
+`pytest -m benchmark` runs the 10k point on SQLite with the budgets enforced;
+the default `pytest -q` skips it (`-m "not benchmark"` in `pyproject.toml`).
 
 ## The world
 

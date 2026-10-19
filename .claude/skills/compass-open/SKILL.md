@@ -31,7 +31,12 @@ Order, and what to check after each step:
    http://localhost:8080 and the sign-in (`docker compose run --rm compass login`
    prints it).
 5. The first map: **Maps → Run mapping** in the dashboard, or
-   `mapper run`. It takes minutes; the **Queue** tab shows the job.
+   `mapper run`. It takes minutes; the **Queue** tab shows the job. The map
+   is a SQLite file on the `map-data` volume; `mapper backup` copies it while
+   the stack runs. On an install from before 0.6, the first start after the
+   update copies the DynamoDB map into it once (`compass migrate` in the
+   logs: `0.6.0-map-sqlite`); the table stays for a rollback
+   (`COMPASS_MAP_STORE=dynamodb` in `.env`).
 6. Decoys: `init_alerts` (one SQS queue; write access), `honeypot action_set`,
    then plant from the dashboard's Honeypots tab or `honeypot create …` — a
    pull request URL. The user merges and applies; then `honeypot arm` and,

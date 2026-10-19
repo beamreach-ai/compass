@@ -24,6 +24,7 @@ def test_init_config_writes_a_complete_workspace_file(tmp_path, monkeypatch):
     assert cfg["github"]["token"] == "ghp_test" and cfg["github"]["login"] == "octocat" and cfg["github"]["honeypot_repo"] == "acme/infra" and cfg["github"]["org"] == "acme"
     assert cfg["honeypot"]["terraform_root"] == "envs/prod"
     assert cfg["dynamodb_config"]["map"] == "compass_map_local" and cfg["dynamodb_config"]["items"] == "compass_items_local"
+    assert cfg["map"] == {"store": "sqlite"}  # a new install's map is the SQLite file
     assert result["config"]["github"]["token"] == "<set>" and result["github_token"] == "from gh CLI"
     assert cfg["dashboard"]["username"] == "admin" and len(cfg["dashboard"]["password"]) >= 12
     assert result["login"]["username"] == "admin" and result["login"]["password"] == cfg["dashboard"]["password"]

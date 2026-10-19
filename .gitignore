@@ -43,3 +43,6 @@ examples/*/*.egg-info/
 # the CLI
 /cli/node_modules/
 /cli/dist/
+
+# the map file of a checkout (infra_map.graph_store.data_dir); the image uses the map-data volume
+/data/

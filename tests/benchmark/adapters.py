@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import os
+import uuid
 from typing import Any, Dict, Optional
 
 from infra_map.graph_store import EdgeQuery, GraphStore, NodeQuery
@@ -87,6 +88,34 @@ class GraphStoreAdapter:
 
 
 def resolve(name: str) -> GraphStoreAdapter:
+    if name == "sqlite":
+        from infra_map.sql_store import SqliteGraphStore
+
+        path = os.getenv("BENCH_SQLITE_PATH") or os.path.join(os.getenv("TMPDIR", "/tmp"), f"compass-bench-{uuid.uuid4().hex[:8]}.sqlite")
+
+        def reset():
+            for suffix in ("", "-wal", "-shm"):
+                try:
+                    os.unlink(path + suffix)
+                except FileNotFoundError:
+                    pass
+
+        reset()
+        store = SqliteGraphStore(path, "bench")
+        return GraphStoreAdapter("sqlite", store, reset=lambda: None, size=store.size_bytes)
+    if name == "postgres":
+        from infra_map.sql_store import PostgresGraphStore
+
+        dsn = os.getenv("BENCH_POSTGRES_DSN", "postgresql://bench:bench@localhost:15432/bench")
+        store = PostgresGraphStore(dsn, "bench")
+
+        def reset():
+            conn = store.conn()
+            for table in ("nodes", "edges", "scans"):
+                conn.execute(f"TRUNCATE {table}")
+            conn.execute("VACUUM ANALYZE")
+
+        return GraphStoreAdapter("postgres", store, reset=reset, size=store.size_bytes)
     if name == "dynamodb":
         import boto3
 
@@ -107,4 +136,4 @@ def resolve(name: str) -> GraphStoreAdapter:
 
         store = DynamoGraphStore(table_name=table_name, workspace_id="bench", session=session, table=table)
         return GraphStoreAdapter("dynamodb (GraphStore)", store, reset=reset)
-    raise LookupError(f"no benchmark store named {name!r} (legacy, dynamodb)")
+    raise LookupError(f"no benchmark store named {name!r} (legacy, dynamodb, sqlite, postgres)")

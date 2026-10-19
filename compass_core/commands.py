@@ -100,6 +100,8 @@ def config_template(
             "progress": f"{table_prefix}_progress_{workspace_id}",
             "jobs": f"{table_prefix}_jobs_{workspace_id}",
         },
+        # the map lives in a SQLite file (infra_map.graph_store); DynamoDB keeps everything else
+        "map": {"store": "sqlite"},
         "dashboard": {"username": "admin", "password": secrets.token_urlsafe(12)},
         "anthropic": {"model": "claude-opus-5-5", "effort": "medium"},
         "prs": {"watcher": {"mode": "autopilot", "risk_max": 2}},

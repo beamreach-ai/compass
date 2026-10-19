@@ -64,6 +64,27 @@ def export(payload: Dict[str, Any]) -> Dict[str, Any]:
     return write_map(config, org_id=org_id, workspace_id=workspace.workspace_id, fmt=fmt, out=out)
 
 
-COMMANDS = {"run": run, "export": export}
+def backup(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Copy the map's SQLite file while the stack runs: a consistent snapshot (VACUUM INTO).
+
+    payload: out=<path> (default map-backup-<workspace>-<UTC time>.sqlite in the current
+    directory). Restore by stopping the stack and putting the copy where `path` says."""
+    import time
+
+    from infra_map.graph_store import backend_name, open_store, sqlite_path
+
+    workspace = resolve(payload)
+    config = captain_config(payload, workspace)
+    if backend_name(config) != "sqlite":
+        raise ValueError(f"the map is on {backend_name(config)}, not sqlite: there is no file to back up")
+    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    out = str(payload.get("out") or f"map-backup-{workspace.workspace_id}-{stamp}.sqlite")
+    store = open_store(config, workspace_id=workspace.workspace_id)
+    written = store.backup(out)
+    return {"workspace_id": workspace.workspace_id, "path": sqlite_path(config, workspace.workspace_id), "out": str(written),
+            "bytes": written.stat().st_size}
+
+
+COMMANDS = {"run": run, "export": export, "backup": backup}
 
 dispatch.register("mapper", COMMANDS)

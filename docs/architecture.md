@@ -1,7 +1,7 @@
 # Architecture
 
-Compass is three processes and a database, all on your machine, with your AWS
-account and your GitHub repository as the only things outside.
+Compass is three processes, a database and a file, all on your machine, with
+your AWS account and your GitHub repository as the only things outside.
 
 ```
  browser ──► nginx :8080 ──┬── /      ──► dashboard (Next.js)
@@ -11,7 +11,8 @@ account and your GitHub repository as the only things outside.
                  compass serve (the daemon) ┤  runs jobs, consumes decoy alerts,
                                            │  ticks the PR watcher, re-scans
                                            ▼
-                                   DynamoDB (local) ◄── api
+                                   DynamoDB (local) ◄── api    jobs, decoys, state
+                                   the map (SQLite) ◄── api    one file on the map-data volume
                                            │
                        AWS account (read; decoys write once) · GitHub (pull requests)
 ```
@@ -25,7 +26,7 @@ never waits on work. That is the whole queue; there is no broker.
 | Package | What it is |
 |---|---|
 | `compass_core` | What every captain shares: the config file, DynamoDB table names and keys, the AWS session, the GitHub client, the job store and queue, events, the model, the `compass` command. The registries (`dispatch`, `queue`, `config`, `llm`, `notify`) have a default and a hook, so a larger deployment can plug in behind the same code. |
-| `infra_map` | The map: resource and ownership nodes, edges, the fact store, and the `GraphStore` interface every reader and the mapper go through (`graph_store.py`: the interface and `open_store`; `dynamo_store.py`: the map on DynamoDB). The mapper writes it, one scan at a time; everything else reads it. |
+| `infra_map` | The map: resource and ownership nodes, edges, and the `GraphStore` they live in (`graph_store.py`: the interface and `open_store`; `sql_store.py`: SQLite, the default, and Postgres; `dynamo_store.py`: the DynamoDB map of installs before 0.6). The mapper writes it, one scan at a time; everything else reads it. |
 | `captains/mapper` | Reads the AWS account (every region), Terraform state and the GitHub organisation, and writes the map: which resource is managed by which module in which repository. `export` renders it as JSON, DOT or one HTML page. |
 | `captains/librarian` | Answers questions against the map ("what owns this ARN", "what is unmanaged") for the API and the other captains. |
 | `captains/honeypot` | Decoys: classes (`aws_credential`, `db_credential`, `ssh_key`, `s3_object`, `api_token`, `dns_record`), placement (where a decoy would look real, from the map), the Terraform generator, the pull request, arming, the alert consumer, incidents, blast radius, and the responses (`iam_deactivate_key`, `ecs_restart_task`). |
@@ -54,11 +55,23 @@ never waits on work. That is the whole queue; there is no broker.
 
 ## Storage
 
-DynamoDB, one table set per workspace (`init_tables` creates them):
-`map`, `items`, `aws_inventory`, `tf_inventory`, `tf_state`, `progress`,
-`jobs`. Keys are built in `compass_core.keys` and nowhere else. Locally the
-tables live in the `dynamodb-data` volume; point `AWS_ENDPOINT_URL_DYNAMODB`
-elsewhere to use a real one.
+**The map** is a SQLite file per workspace,
+`/compass/data/map/<workspace>.sqlite` on the `map-data` volume
+(`COMPASS_DATA_DIR`; `./data` in a checkout). The daemon writes it, one scan per
+transaction; the API reads it at the same time (WAL). Every node and edge is a
+version with `valid_from` and `valid_to`: a scan closes what it no longer sees
+instead of deleting it. `map.store` in the workspace config names the store
+(`sqlite`; `dynamodb` for an install not yet migrated); `COMPASS_MAP_STORE`
+overrides it for one process. [docs/specs/map-store.md](specs/map-store.md) is
+the design, [docs/benchmark.md](benchmark.md) the numbers.
+
+**Everything else** is DynamoDB, one table set per workspace (`init_tables`
+creates them): `items`, `aws_inventory`, `tf_inventory`, `tf_state`,
+`progress`, `jobs`, and `map`, which holds the fact store and, on an install
+from before 0.6, the old map (`compass migrate` copied it to the file and left
+it in place for a rollback). Keys are built in `compass_core.keys` and nowhere
+else. Locally the tables live in the `dynamodb-data` volume; point
+`AWS_ENDPOINT_URL_DYNAMODB` elsewhere to use a real one.
 
 The config file (`config/local.json`) is the workspace: AWS auth mode and
 region, the GitHub token and repositories, the decoy alert queue, PR-watcher
@@ -74,7 +87,7 @@ model. Each seam is a module-level default plus an `install`/`set_*` hook:
 | Seam | Open default | Hook |
 |---|---|---|
 | Job queue | `compass_core.queue.StoreQueue` (the jobs table, polled by the daemon) | `set_job_queue` |
-| Map store | `infra_map.graph_store.open_store`: the map table on DynamoDB | `set_graph_store_factory` |
+| Map store | `infra_map.graph_store.open_store`: the SQLite file | `set_graph_store_factory` |
 | Workspace config | the JSON file | `set_workspace_config_loader` / `saver` |
 | Events | the job store | `set_event_sink` |
 | Model | Anthropic (`ANTHROPIC_API_KEY`) or none | `set_model_factory` |
