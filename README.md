@@ -63,6 +63,15 @@ docker compose run --rm compass --help
 
 To run from source instead of the images, see [CONTRIBUTING.md](CONTRIBUTING.md#setting-up).
 
+### Updates
+
+The dashboard says when a new release is out. Without the updater, apply it
+with `docker compose pull && docker compose up -d` after changing
+`COMPASS_VERSION` in `.env`. With `docker compose --profile updater up -d`, it
+is one click, with a health check and a rollback. The updater holds the Docker
+socket, so it is off by default. See
+[docs/quickstart.md](docs/quickstart.md#6-updates).
+
 ## What is inside
 
 ```
@@ -76,7 +85,7 @@ captains/
   prs/            the PR watcher
 compass_api/      the FastAPI app behind the dashboard
 dashboard/        Next.js
-docker/           the image; docker-compose.yml at the root runs the released images
+docker/           the image and the updater; docker-compose.yml at the root runs the released images
 ```
 
 [docs/architecture.md](docs/architecture.md) explains how the pieces fit;

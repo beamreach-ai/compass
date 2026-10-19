@@ -755,8 +755,9 @@ function PlacementForm({ value, onChange }: { value: Placement; onChange: (p: Pl
   return (
     <div className="space-y-2">
       <div>
-        <label className="block text-xs font-medium text-gray-700 mb-1">Placement type</label>
+        <label htmlFor="ht-placement-type" className="block text-xs font-medium text-gray-700 mb-1">Placement type</label>
         <select
+                id="ht-placement-type"
           className={INPUT_CLS}
           value={value.type}
           onChange={(e) => onChange({ ...value, type: e.target.value as PlacementType })}
@@ -786,8 +787,9 @@ function PlacementForm({ value, onChange }: { value: Placement; onChange: (p: Pl
             Manual placements get no automatic correlation: an alert cannot point at a task, container or env var.
           </p>
           <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1">Detail</label>
+            <label htmlFor="ht-detail" className="block text-xs font-medium text-gray-700 mb-1">Detail</label>
             <input
+                id="ht-detail"
               className={INPUT_CLS}
               placeholder="e.g. Confluence: payments runbook"
               value={value.detail ?? ""}
@@ -795,8 +797,9 @@ function PlacementForm({ value, onChange }: { value: Placement; onChange: (p: Pl
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1">Notes</label>
-            <input className={INPUT_CLS} value={value.notes ?? ""} onChange={(e) => set("notes", e.target.value)} />
+            <label htmlFor="ht-notes" className="block text-xs font-medium text-gray-700 mb-1">Notes</label>
+            <input
+                id="ht-notes" className={INPUT_CLS} value={value.notes ?? ""} onChange={(e) => set("notes", e.target.value)} />
           </div>
         </>
       )}
@@ -1073,8 +1076,9 @@ function HoneytokenModal({
               </div>
             )}
             <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">Name *</label>
+              <label htmlFor="ht-name" className="block text-xs font-medium text-gray-700 mb-1">Name *</label>
               <input
+                id="ht-name"
                 className="w-full border border-gray-200 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"
                 placeholder={`e.g. prod-backup-reporting`}
                 value={name}
@@ -1082,8 +1086,9 @@ function HoneytokenModal({
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">Description</label>
+              <label htmlFor="ht-description" className="block text-xs font-medium text-gray-700 mb-1">Description</label>
               <input
+                id="ht-description"
                 className="w-full border border-gray-200 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"
                 placeholder="What is this honeytoken for?"
                 value={description}
@@ -1092,8 +1097,9 @@ function HoneytokenModal({
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">AWS Account ID</label>
+                <label htmlFor="ht-aws-account-id" className="block text-xs font-medium text-gray-700 mb-1">AWS Account ID</label>
                 <input
+                id="ht-aws-account-id"
                   className="w-full border border-gray-200 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"
                   placeholder="123456789012"
                   value={accountId}
@@ -1101,8 +1107,9 @@ function HoneytokenModal({
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Region</label>
+                <label htmlFor="ht-region" className="block text-xs font-medium text-gray-700 mb-1">Region</label>
                 <input
+                id="ht-region"
                   className="w-full border border-gray-200 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"
                   placeholder="us-east-1"
                   value={region}
@@ -1111,8 +1118,9 @@ function HoneytokenModal({
               </div>
             </div>
             <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">Resource path</label>
+              <label htmlFor="ht-resource-path" className="block text-xs font-medium text-gray-700 mb-1">Resource path</label>
               <input
+                id="ht-resource-path"
                 className="w-full border border-gray-200 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"
                 placeholder="e.g. my-bucket/secrets/passwords.csv"
                 value={resourcePath}
@@ -1179,8 +1187,9 @@ function HoneytokenModal({
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">Action runbook</label>
+              <label htmlFor="ht-action-runbook" className="block text-xs font-medium text-gray-700 mb-1">Action runbook</label>
               <textarea
+                id="ht-action-runbook"
                 className="w-full border border-gray-200 rounded px-3 py-2 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-blue-400"
                 rows={8}
                 value={runbook}

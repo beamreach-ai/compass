@@ -5,8 +5,7 @@ import logging
 import re
 from typing import Any, Dict, List, Optional
 
-from github import Github
-
+from compass_core.github import client as github_client
 from compass_core.github import resolve_github_token
 from compass_core.github_prs import PublishedPR, commit_files, ensure_branch, find_open_pr, open_or_update_pr
 from infra_map.models import ResourceNode
@@ -63,7 +62,7 @@ class GitHubPRWriter:
         if not token:
             raise RuntimeError("GitHub write token is required for creating PRs")
 
-        g = Github(token)
+        g = github_client(token)
         gh_repo = g.get_repo(repo)
 
         suffix = _content_branch_suffix(resources)
@@ -116,7 +115,7 @@ class GitHubPRWriter:
             token = resolve_github_token(self.config, capability="write")
             if not token:
                 raise RuntimeError("GitHub write token is required for creating PRs")
-            gh_repo = Github(token).get_repo(repo)
+            gh_repo = github_client(token).get_repo(repo)
 
         self.last_pr = open_or_update_pr(gh_repo, branch=branch, base_branch=base_branch, title=title, body=body)
         return self.last_pr.url
@@ -134,7 +133,7 @@ class GitHubPRWriter:
         if not token:
             raise RuntimeError("GitHub write token is required for creating PRs")
 
-        g = Github(token)
+        g = github_client(token)
         gh_repo = g.get_repo(repo)
 
         suffix = _content_branch_suffix(resources)

@@ -16,6 +16,40 @@ from cryptography.hazmat.primitives.asymmetric import padding
 from compass_core.secrets import get_secret_field_from_env
 
 GITHUB_API = "https://api.github.com"
+
+
+def api_url() -> str:
+    """The GitHub REST API Compass talks to: ``GITHUB_API_URL`` (GitHub Enterprise Server's
+    ``https://<host>/api/v3``, or the end-to-end suite's fake), else github.com."""
+    return (os.getenv("GITHUB_API_URL") or GITHUB_API).strip().rstrip("/")
+
+
+def web_url() -> str:
+    """Where repositories are cloned from: ``GITHUB_GIT_URL`` when set; else github.com for
+    github.com's API, and the host for GitHub Enterprise Server's ``https://<host>/api/v3``."""
+    explicit = (os.getenv("GITHUB_GIT_URL") or "").strip().rstrip("/")
+    if explicit:
+        return explicit
+    api = api_url()
+    if api == GITHUB_API:
+        return "https://github.com"
+    return api[: -len("/api/v3")] if api.endswith("/api/v3") else api
+
+
+def git_url(repo: str, token: Optional[str] = None) -> str:
+    """The clone URL of ``owner/name``, with the token as the password when given."""
+    base = web_url()
+    if token:
+        scheme, _, rest = base.partition("://")
+        base = f"{scheme}://x-access-token:{token}@{rest}"
+    return f"{base}/{repo}.git"
+
+
+def client(token: str) -> Any:
+    """A PyGithub client for ``token`` against ``api_url()``: the one way captains build one."""
+    from github import Auth, Github
+
+    return Github(auth=Auth.Token(token), base_url=api_url())
 _CACHE_LOCK = threading.Lock()
 _TOKEN_CACHE: Dict[Tuple[int, str], Tuple[float, Dict[str, Any]]] = {}
 
@@ -86,7 +120,7 @@ def build_github_app_manifest(name: str, redirect_url: str, setup_url: str) -> D
 def exchange_manifest_code(code: str) -> Dict[str, Any]:
     """Exchange a one-time GitHub manifest code for App credentials."""
     response = requests.post(
-        f"{GITHUB_API}/app-manifests/{code}/conversions",
+        f"{api_url()}/app-manifests/{code}/conversions",
         headers={
             "Accept": "application/vnd.github+json",
             "User-Agent": "beamreach-compass",
@@ -156,7 +190,7 @@ def _build_app_jwt(env: GitHubAppEnv) -> str:
 def _github_request(method: str, path: str, *, bearer: str, json_body: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     response = requests.request(
         method,
-        f"{GITHUB_API}{path}",
+        f"{api_url()}{path}",
         headers={
             "Accept": "application/vnd.github+json",
             "Authorization": f"Bearer {bearer}",
@@ -181,7 +215,7 @@ def _github_paginated_get(path: str, *, bearer: str, list_key: Optional[str] = N
     while True:
         separator = "&" if "?" in path else "?"
         response = requests.get(
-            f"{GITHUB_API}{path}{separator}per_page=100&page={page}",
+            f"{api_url()}{path}{separator}per_page=100&page={page}",
             headers={
                 "Accept": "application/vnd.github+json",
                 "Authorization": f"Bearer {bearer}",

@@ -147,9 +147,54 @@ export type CaptainSummary = {
   installed_from?: "page" | "env" | null;
 };
 
+// The bootstrap's `update`: compass_core.updates.UpdateState.to_dict()
+export type ReleaseEntry = {
+  version: string;
+  published_at?: string | null;
+  notes_url?: string | null;
+  summary: string;
+  images: Record<string, string>;
+  min_from?: string | null;
+  requires_restart: string[];
+  notes: string[];
+};
+
+// One release from the notes feed (COMPASS_RELEASE_NOTES_URL): plain text only, never HTML.
+export type ReleaseNote = {
+  version: string;
+  title: string;
+  headline?: string | null;
+  link?: string | null; // https only; the API drops anything else
+  published_at?: string | null;
+  summary: string;
+  features: Array<{ title: string; body: string }>;
+  after: string[];
+};
+
+export type UpdateState = {
+  running: string;
+  pinned?: string | null;
+  channel: string;
+  latest?: string | null;
+  available: boolean;
+  direct: boolean;
+  release?: ReleaseEntry | null;
+  checked_at?: number | null;
+  error?: string | null;
+  apply: "updater" | "manual" | "off";
+  pinned_differs: boolean;
+  via?: string | null;
+  releases: ReleaseEntry[];
+  // running < version <= latest, newest first; absent from an API older than 0.5.2
+  release_notes?: ReleaseNote[];
+  notes_source?: string | null;
+  notes_error?: string | null;
+};
+
 export type SettingsBootstrap = {
   app?: AppConfigSummary;
   core_version?: string;
+  update?: UpdateState | null;
   captains?: CaptainSummary[];
   workspace: SessionSummary;
   aws: AwsSettingsSummary;

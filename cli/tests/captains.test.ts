@@ -112,3 +112,26 @@ describe("compass captains", () => {
     expect(names).toContain("compass_captains");
   });
 });
+
+describe("status", () => {
+  it("says when a Compass release is out and when the compose file asks for another version", async () => {
+    const base = { compass_version: "0.5.2", api_version: "2026.10.1", workspace: { workspace_id: "local" }, app: { mode: "production" }, errors: {} };
+    const out = await run(["status"], {
+      "GET /api/status": {
+        ...base,
+        update: {
+          available: true, latest: "0.6.0", running: "0.5.2", apply: "manual", pinned: "0.5.1", pinned_differs: true,
+          release_notes: [
+            { version: "0.6.0", title: "Compass 0.6.0 — Maps for two", headline: "Maps for two", link: "https://beamreach.ai/compass/releases/0.6.0.html" },
+            { version: "0.5.3", title: "Compass 0.5.3", headline: null, link: null },
+          ],
+        },
+      },
+    });
+    expect(out.stdout).toContain("Update: Compass 0.6.0 is available (this is 0.5.2); Settings → Updates shows the two commands");
+    expect(out.stdout).toContain("What's new:\n  0.6.0 — Maps for two  https://beamreach.ai/compass/releases/0.6.0.html\n  0.5.3 — Compass 0.5.3");
+    expect(out.stdout).toContain("the compose file asks for 0.5.1 but 0.5.2 is running");
+    const quiet = await run(["status"], { "GET /api/status": { ...base, update: { available: false, running: "0.5.2" } } });
+    expect(quiet.stdout).not.toContain("Update:");
+  });
+});

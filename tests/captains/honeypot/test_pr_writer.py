@@ -65,7 +65,7 @@ def make_writer(monkeypatch):
     monkeypatch.setattr(pr_writer, "resolve_github_token", lambda *a, **k: "t")
 
     def _make(repo):
-        monkeypatch.setattr(pr_writer, "Github", lambda token: SimpleNamespace(get_repo=lambda name: repo))
+        monkeypatch.setattr(pr_writer, "github_client", lambda token: SimpleNamespace(get_repo=lambda name: repo))
         return HoneypotPRWriter({"github": {"honeypot_repo": "o/r"}})
 
     return _make

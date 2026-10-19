@@ -5,18 +5,24 @@ on the extensions volume (``COMPASS_EXTENSIONS_DIR``, ``/compass/extensions``
 in the image):
 
     requested.json   the extensions installed from the Captains page: [{name, pip, version, requested_at, by}]
-    installed.json   what the last sync installed: {"requirements": [...], "at": ...}
+    installed.json   what the last sync installed: {"requirements": [...], "core": "0.4.0", "at": ...}
     site/            the pip target; the image puts it on PYTHONPATH
     wheels/          local wheels pip may install from (--find-links)
     restart          a restart request: the time it was asked for
 
+The same volume carries the update files ``compass_core.updates`` and the
+updater service exchange; ``read_json``, ``write_json`` and ``lock`` are the
+helpers both use.
+
 ``sync()`` runs from the image's entrypoint before ``compass`` starts. It
 installs the union of ``COMPASS_EXTENSIONS`` and requested.json. When that set
-changed, it installs into a fresh directory and swaps it in, so removing an
-entry or changing its pin rebuilds ``site/`` (uninstall and upgrade are the same
-path), and a failed install leaves the previous ``site/`` in place. A file lock
-keeps the API and the daemon containers, which start together, from installing
-at the same time.
+changed, or the core version the set was built against is not the one running
+(a Compass update: compiled dependencies and manifests are read against the
+new interpreter), it installs into a fresh directory and swaps it in, so
+removing an entry or changing its pin rebuilds ``site/`` (uninstall and upgrade
+are the same path), and a failed install leaves the previous ``site/`` in place.
+A file lock keeps the API and the daemon containers, which start together,
+from installing at the same time.
 
 Requirements are pip specifiers without spaces (``name==1.0``,
 ``name@git+https://…``), separated by spaces, commas or newlines.
@@ -106,7 +112,8 @@ def from_env() -> List[str]:
     return split(os.getenv("COMPASS_EXTENSIONS"))
 
 
-def _read_json(path: Path, default: Any) -> Any:
+def read_json(path: Path, default: Any) -> Any:
+    """The JSON in ``path``, or ``default`` when it is missing or unreadable."""
     try:
         with path.open(encoding="utf-8") as handle:
             return json.load(handle)
@@ -117,7 +124,8 @@ def _read_json(path: Path, default: Any) -> Any:
         return default
 
 
-def _write_json(path: Path, value: Any) -> None:
+def write_json(path: Path, value: Any) -> None:
+    """Write ``value`` as JSON atomically (a reader never sees a half-written file)."""
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
@@ -128,17 +136,26 @@ def requested() -> List[Dict[str, Any]]:
     path = directory()
     if path is None:
         return []
-    rows = _read_json(path / "requested.json", [])
+    rows = read_json(path / "requested.json", [])
     return [r for r in rows if isinstance(r, dict) and r.get("name") and r.get("pip")] if isinstance(rows, list) else []
 
 
-def installed() -> List[str]:
+def _installed_record() -> Dict[str, Any]:
     path = directory()
-    if path is None:
-        return []
-    record = _read_json(path / "installed.json", {})
-    reqs = record.get("requirements") if isinstance(record, dict) else None
+    record = read_json(path / "installed.json", {}) if path is not None else {}
+    return record if isinstance(record, dict) else {}
+
+
+def installed() -> List[str]:
+    reqs = _installed_record().get("requirements")
     return [str(r) for r in reqs] if isinstance(reqs, list) else []
+
+
+def installed_core() -> Optional[str]:
+    """The core version ``site/`` was built against (None before the first sync, or
+    for a record written before this field existed)."""
+    core = _installed_record().get("core")
+    return str(core) if core else None
 
 
 def wanted() -> List[str]:
@@ -156,7 +173,8 @@ def pending() -> bool:
 
 
 @contextmanager
-def _lock(path: Path) -> Iterator[None]:
+def lock(path: Path) -> Iterator[None]:
+    """One writer at a time on the volume: the API and the daemon start together."""
     path.mkdir(parents=True, exist_ok=True)
     with (path / ".lock").open("w") as handle:
         fcntl.flock(handle, fcntl.LOCK_EX)
@@ -171,16 +189,16 @@ def request_install(name: str, pip: str, *, version: Optional[str] = None, by: O
     if not pip or _SPLIT_RE.search(pip):
         raise ExtensionsError("invalid_requirement", f"{pip!r} is not one pip requirement without spaces", status=422)
     path = _need_dir()
-    with _lock(path):
+    with lock(path):
         rows = [r for r in requested() if r.get("name") != name]
         rows.append({"name": name, "pip": pip, "version": version, "requested_at": time.time(), "by": by})
-        _write_json(path / "requested.json", rows)
+        write_json(path / "requested.json", rows)
     return rows
 
 
 def request_uninstall(name: str) -> List[Dict[str, Any]]:
     path = _need_dir()
-    with _lock(path):
+    with lock(path):
         rows = requested()
         if not any(r.get("name") == name for r in rows):
             raise ExtensionsError(
@@ -189,7 +207,7 @@ def request_uninstall(name: str) -> List[Dict[str, Any]]:
                 status=404,
             )
         rows = [r for r in rows if r.get("name") != name]
-        _write_json(path / "requested.json", rows)
+        write_json(path / "requested.json", rows)
     return rows
 
 
@@ -244,12 +262,17 @@ def sync(*, pip: Optional[List[str]] = None) -> Dict[str, Any]:
     path = directory()
     if path is None:
         return {"changed": False, "reason": "no COMPASS_EXTENSIONS_DIR"}
-    with _lock(path):
+    from compass_core import __version__ as core
+
+    with lock(path):
         want = wanted()
         have = installed()
         site = path / "site"
-        if sorted(want) == sorted(have) and (site.exists() or not want):
+        same_core = installed_core() == core or not want
+        if sorted(want) == sorted(have) and same_core and (site.exists() or not want):
             return {"changed": False, "requirements": want}
+        if want and not same_core and sorted(want) == sorted(have):
+            logger.info("rebuilding extensions for compass %s (built against %s)", core, installed_core() or "an older version")
         fresh = path / "site.new"
         shutil.rmtree(fresh, ignore_errors=True)
         fresh.mkdir(parents=True)
@@ -267,7 +290,7 @@ def sync(*, pip: Optional[List[str]] = None) -> Dict[str, Any]:
                 shutil.rmtree(fresh, ignore_errors=True)
                 error = (result.stderr or result.stdout or "").strip().splitlines()[-1:] or ["pip failed"]
                 logger.error("extension install failed, keeping the previous set: %s", error[0])
-                _write_json(path / "last_error.json", {"at": time.time(), "requirements": want, "error": error[0]})
+                write_json(path / "last_error.json", {"at": time.time(), "requirements": want, "error": error[0]})
                 return {"changed": False, "requirements": have, "error": error[0]}
         old = path / "site.old"
         shutil.rmtree(old, ignore_errors=True)
@@ -275,7 +298,7 @@ def sync(*, pip: Optional[List[str]] = None) -> Dict[str, Any]:
             site.replace(old)
         fresh.replace(site)
         shutil.rmtree(old, ignore_errors=True)
-        _write_json(path / "installed.json", {"requirements": want, "at": time.time()})
+        write_json(path / "installed.json", {"requirements": want, "core": core, "at": time.time()})
         (path / "last_error.json").unlink(missing_ok=True)
         return {"changed": True, "requirements": want}
 
@@ -284,7 +307,7 @@ def last_error() -> Optional[Dict[str, Any]]:
     path = directory()
     if path is None:
         return None
-    record = _read_json(path / "last_error.json", None)
+    record = read_json(path / "last_error.json", None)
     return record if isinstance(record, dict) else None
 
 

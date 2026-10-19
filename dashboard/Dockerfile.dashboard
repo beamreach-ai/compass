@@ -11,6 +11,9 @@ COPY dashboard .
 # open | product: the open edition hides licence, billing and Beamreach branding (app/lib/edition.ts)
 ARG NEXT_PUBLIC_EDITION=product
 ENV NEXT_PUBLIC_EDITION=$NEXT_PUBLIC_EDITION
+# the release this build is (app/lib/edition.ts): the banner says when it differs from the API's
+ARG COMPASS_VERSION=dev
+ENV NEXT_PUBLIC_COMPASS_VERSION=$COMPASS_VERSION
 # product only: the founder contact in the sidebar (app/lib/edition.ts)
 ARG NEXT_PUBLIC_SUPPORT_WHATSAPP=
 ARG NEXT_PUBLIC_SUPPORT_EMAIL=

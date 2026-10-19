@@ -64,3 +64,28 @@ def test_heartbeat_keeps_a_running_job_alive(local_store):
         time.sleep(0.2)
     after = local_store.get_job(job["job_id"], workspace_id="ws")
     assert after["status"] == "running" and int(after["heartbeat_at"]) > int(before)
+
+
+def test_the_newest_jobs_are_listed_whatever_their_ids(monkeypatch):
+    """Job keys are JOB#<uuid>, so key order is not time order: a listing that read one
+    page of `limit` items lost the newest jobs once a workspace had more than `limit`."""
+    import boto3
+    from moto import mock_aws
+
+    from compass_core import commands
+    from compass_core.jobs import store_for
+
+    monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "testing")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "testing")
+    config = {"dynamodb_config": {"workspace_id": "ws", "jobs": "compass_jobs_ws"}}
+    with mock_aws():
+        commands.create_tables(config, client=boto3.client("dynamodb", region_name="us-east-1"))
+        store = store_for(config)
+        table = boto3.resource("dynamodb", region_name="us-east-1").Table("compass_jobs_ws")
+        for n in range(40):
+            job_id = f"{(n * 7919) % 100:02d}-job-{n}"  # ids whose order has nothing to do with age
+            table.put_item(Item={"pk": "WORKSPACE#ws", "sk": f"JOB#{job_id}", "job_id": job_id, "workspace_id": "ws",
+                                 "captain": "prs", "command": "sync", "status": "completed", "created_at": 1000 + n, "updated_at": 1000 + n})
+        newest = store.list_jobs(limit=5, workspace_id="ws")
+        assert [j["created_at"] for j in newest] == [1039, 1038, 1037, 1036, 1035]

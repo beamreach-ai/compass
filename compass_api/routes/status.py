@@ -20,6 +20,7 @@ from compass_api.routes._infra_scan import current_infra_scan_summary
 from compass_api.routes._workspace import get_actor_ids, get_workspace_config
 from compass_api.routes.auth import _auth_enabled
 from compass_api.version import API_VERSION, compass_version
+from compass_core import updates as _updates
 from compass_core.queue import queue_proxy
 
 router = APIRouter()
@@ -143,6 +144,7 @@ def get_status(request: Request) -> Dict[str, Any]:
     return {
         "api_version": API_VERSION,
         "compass_version": compass_version(),
+        "update": _section(errors, "update", lambda: _updates.check(config=config).to_dict(), default={}),
         "generated_at": int(time.time() * 1000),
         "workspace": {"workspace_id": workspace_id, "org_id": actor_ids.get("org_id"), "user_id": actor_ids.get("user_id")},
         "app": {

@@ -6,14 +6,23 @@
 #   docker compose run --rm compass init_tables
 #   docker compose up -d                     # http://localhost:8080 (sign in with APP_USERNAME / APP_PASSWORD from .env)
 #
-# Images: ghcr.io/beamreach-ai/compass and compass-dashboard, published by .github/workflows/release.yml on a tag.
+# Images: ghcr.io/beamreach-ai/compass, compass-dashboard and compass-updater, published by
+# .github/workflows/release.yml on a tag. The release workflow keeps the default version below
+# at the latest release; COMPASS_VERSION in .env pins yours.
+#
+# Updates: the dashboard says when a release is out (Settings → Compass). Applying one is
+# `docker compose pull && docker compose up -d` after changing COMPASS_VERSION in .env, or one
+# click when the updater service runs: `docker compose --profile updater up -d`. The updater
+# holds the Docker socket, which is root on this machine; it is off unless you turn it on.
 x-compass: &compass
-  image: ${COMPASS_IMAGE:-ghcr.io/beamreach-ai/compass:${COMPASS_VERSION:-0.1.0}}
+  image: ${COMPASS_IMAGE:-${COMPASS_REGISTRY:-ghcr.io/beamreach-ai}/compass:${COMPASS_VERSION:-0.4.0}}
   env_file: .env
   environment:
     AWS_ENDPOINT_URL_DYNAMODB: http://dynamodb:8000
     AWS_PROFILE: ${AWS_PROFILE:-default}
     AWS_REGION: ${AWS_REGION:-us-east-1}
+    # What this compose file asked to pull; the dashboard says when it differs from what runs.
+    COMPASS_VERSION: ${COMPASS_VERSION:-0.4.0}
     # Extra captains: pip requirements (PyPI name, git URL, or a wheel dropped in
     # ./extensions/wheels), installed on start and kept in ./extensions.
     COMPASS_EXTENSIONS: ${COMPASS_EXTENSIONS:-}
@@ -50,7 +59,7 @@ services:
     command: ["api"]
 
   dashboard:
-    image: ${COMPASS_DASHBOARD_IMAGE:-ghcr.io/beamreach-ai/compass-dashboard:${COMPASS_VERSION:-0.1.0}}
+    image: ${COMPASS_DASHBOARD_IMAGE:-${COMPASS_REGISTRY:-ghcr.io/beamreach-ai}/compass-dashboard:${COMPASS_VERSION:-0.4.0}}
     environment:
       APP_MODE: production
     restart: unless-stopped
@@ -64,6 +73,30 @@ services:
     depends_on:
       - api
       - dashboard
+    restart: unless-stopped
+
+  # Off by default (docs/quickstart.md, "Updates"): `docker compose --profile updater up -d`.
+  # Applies the update the dashboard or `compass update apply` asks for: pulls the release's
+  # images, verifies their digests, sets COMPASS_VERSION in .env and recreates the services,
+  # then checks health and rolls back when they do not come up. It is docker:cli plus one
+  # shell script (docker/updater), with the Docker socket: whoever controls it controls
+  # this machine. This directory is mounted at its own path so the paths compose resolves
+  # inside the updater are the host's.
+  updater:
+    profiles: ["updater"]
+    image: ${COMPASS_UPDATER_IMAGE:-${COMPASS_REGISTRY:-ghcr.io/beamreach-ai}/compass-updater:${COMPASS_VERSION:-0.4.0}}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${PWD}:${PWD}
+      - ./extensions:/compass/extensions
+    working_dir: ${PWD}
+    environment:
+      COMPASS_PROJECT: ${PWD}
+      COMPASS_UPDATER_HEALTH_SECONDS: ${COMPASS_UPDATER_HEALTH_SECONDS:-300}
+      COMPASS_REGISTRY: ${COMPASS_REGISTRY:-ghcr.io/beamreach-ai}
+      COMPASS_VERSION: ${COMPASS_VERSION:-0.4.0}
+      # ~ in this file (the AWS profile mount) must expand to the host's home, not the container's
+      HOME: ${HOME}
     restart: unless-stopped
 
 volumes:

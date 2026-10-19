@@ -32,6 +32,14 @@ CONFIG_SCHEMA = {
             "type": "string", "x-order": 6, "x-group": "Listener",
             "x-help": "Container image of the decoy listener planted next to a service.",
         },
+        "network": {
+            "type": "object", "x-order": 7, "x-group": "Listener",
+            "x-help": "Where a db_credential decoy's listener runs.",
+            "properties": {
+                "vpc_id": {"type": "string", "x-help": "The VPC (vpc-…)."},
+                "subnet_ids": {"type": "array", "items": {"type": "string"}, "x-help": "Private subnets for the listener task."},
+            },
+        },
     },
 }
 

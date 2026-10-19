@@ -27,6 +27,7 @@ except ImportError:  # pragma: no cover
     class GithubException(Exception):  # type: ignore
         """Fallback GithubException so type checking continues."""
 
+from compass_core.github import client as client_for_token
 from compass_core.github import list_installation_repositories, resolve_github_token
 from infra_map.facts import EdgeFact, FactBatch, NodeFact
 from infra_map.materializer import InfraMapMaterializer
@@ -212,7 +213,7 @@ class GitHubGraphCollector:
                 raise ValueError("GitHub token missing in configuration.")
             if Github is None:
                 raise RuntimeError("PyGithub must be installed to use GitHubGraphCollector.")
-            self.github = Github(token)
+            self.github = client_for_token(token)
 
         self.nodes: Dict[str, ResourceNode] = {}
         self.edges: Dict[Tuple[str, str, str], RelationshipEdge] = {}

@@ -1,0 +1,40 @@
+# The end-to-end suite's additions to the shipped docker-compose.yml (docs/e2e.md):
+# a fake AWS (moto) and the fakes server (GitHub, webhooks, release feed, catalog),
+# and the settings that point Compass at them. Used only by e2e/conftest.py:
+#
+#   docker compose -f docker-compose.yml -f compose.e2e.yml --profile updater up -d
+#
+# The project directory is a scratch copy the harness makes; E2E_FAKES_DIR is the
+# absolute path of e2e/fakes in the checkout.
+x-e2e-env: &e2e-env
+  # every AWS call goes to moto, except DynamoDB, which stays on Compass's own dynamodb-local
+  AWS_ENDPOINT_URL: http://moto:5000
+  GITHUB_API_URL: http://fakes:9000/github
+  GITHUB_GIT_URL: http://fakes:9000/git
+  COMPASS_UPDATE_URL: http://fakes:9000/feed/releases.json
+  COMPASS_RELEASE_NOTES_URL: http://fakes:9000/feed/notes.xml
+  COMPASS_CATALOG_URL: http://fakes:9000/catalog.json
+
+services:
+  moto:
+    image: motoserver/moto:5.1.4
+    environment:
+      MOTO_PORT: "5000"
+    ports:
+      - "127.0.0.1:${E2E_MOTO_PORT:-15000}:5000"
+
+  fakes:
+    build: ${E2E_FAKES_DIR:?E2E_FAKES_DIR is the absolute path of e2e/fakes}
+    image: compass-e2e/fakes:local
+    ports:
+      - "127.0.0.1:${E2E_FAKES_PORT:-19000}:9000"
+
+  compass:
+    environment:
+      <<: *e2e-env
+    depends_on: [dynamodb, moto, fakes]
+
+  api:
+    environment:
+      <<: *e2e-env
+    depends_on: [dynamodb, moto, fakes]

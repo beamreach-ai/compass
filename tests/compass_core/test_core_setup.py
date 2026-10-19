@@ -118,3 +118,49 @@ def test_env_password_wins_and_no_password_is_a_warning(monkeypatch):
     monkeypatch.delenv("APP_PASSWORD")
     assert commands.dashboard_login({"dashboard": {"username": "admin", "password": "file"}})["password"] == "file"
     assert "warning" in commands.dashboard_login({})
+
+
+def test_a_service_starts_with_the_config_as_it_is_now_not_as_it_was_when_serve_started(monkeypatch):
+    """init_alerts runs after `up -d` in the quickstart: the alert consumer, restarted by the
+    daemon's check, must see the queue it recorded without a restart of the daemon."""
+    from compass_core.captains import CaptainManifest, ServiceSpec
+
+    current = {"workspace_id": "ws-1", "honeypot": {}}
+    monkeypatch.setattr(core_config, "_loader", lambda ws: dict(current))
+    seen = []
+    monkeypatch.setattr("compass_core.captains.load_reference", lambda ref: lambda ws, config, stop, interval=None: seen.append(config))
+    manifest = CaptainManifest(name="x", label="X", summary="s", tier="open", feature="x", services=(ServiceSpec(name="svc", start="m:f"),))
+    server = serve.Server("ws-1", {"workspace_id": "ws-1", "org_id": "org-1", "honeypot": {}}, prs_tick=0)
+    current["honeypot"] = {"alert_queue_url": "https://sqs.us-east-1.amazonaws.com/1/q"}
+    server._run_service(manifest, manifest.services[0], None, threading.Event())
+    assert seen[0]["honeypot"]["alert_queue_url"] == "https://sqs.us-east-1.amazonaws.com/1/q"
+    assert seen[0]["org_id"] == "org-1", "the ids the daemon resolved at start are kept"
+
+
+def test_a_restart_from_the_page_stops_the_daemon_before_it_claims_another_job(tmp_path, monkeypatch):
+    """The page restarts the API at once; a daemon that waited for its 30-second check claimed
+    the next job with the old set of captains and failed it (found by the e2e suite)."""
+    import time
+
+    from compass_core import extensions
+
+    monkeypatch.setenv("COMPASS_EXTENSIONS_DIR", str(tmp_path))
+    monkeypatch.setenv("COMPASS_SELF_RESTART", "1")
+    monkeypatch.setattr(core_config, "_loader", lambda ws: {"workspace_id": ws})
+    claimed = []
+    server = serve.Server("ws-1", {"workspace_id": "ws-1"}, prs_tick=0, job_poll=0.05, captains_poll=60)
+    monkeypatch.setattr(server, "_run_queued_jobs", lambda: claimed.append(time.time()) or 0)
+    monkeypatch.setattr(server, "_reconcile_services", lambda: None)
+    previous = queue._factory
+    thread = threading.Thread(target=server.run)
+    try:
+        thread.start()
+        time.sleep(0.3)
+        extensions.request_restart()
+        thread.join(timeout=5)
+        assert not thread.is_alive() and server.restarting, "the daemon exits within a job poll, not a 60 s check"
+        after = [t for t in claimed if t > float((tmp_path / "restart").read_text())]
+        assert len(after) <= 1
+    finally:
+        server.stop()
+        queue.set_job_queue(previous)

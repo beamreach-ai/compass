@@ -90,6 +90,8 @@ class Server:
         self.ticks = 0
         self.started: List[str] = []
         self.restarting = False
+        self._announced_update: Optional[str] = None
+        self._started_at = time.time()
 
     def stop(self, *_args: Any) -> None:
         self._stop.set()
@@ -167,6 +169,19 @@ class Server:
                 wanted.append((manifest, spec, interval))
         return wanted
 
+    def _current_config(self) -> Dict[str, Any]:
+        """The workspace config as it is now, with the ids serve resolved at start. Settings
+        written after serve started (init_alerts records the alert queue after `up -d`)
+        reach a service the next time it starts."""
+        try:
+            fresh = dict(workspace_config(self.workspace_id))
+        except LookupError:
+            return self.config
+        for key in ("workspace_id", "org_id", "target"):
+            if key in self.config:
+                fresh[key] = self.config[key]
+        return fresh
+
     def _run_service(self, manifest: CaptainManifest, spec: ServiceSpec, interval: Optional[int], stop: threading.Event) -> None:
         try:
             start = registry.load_reference(spec.start)
@@ -174,7 +189,7 @@ class Server:
             logger.warning("service %s:%s cannot start: %s", manifest.name, spec.name, exc)
             return
         try:
-            start(self.workspace_id, self.config, stop, interval=interval)
+            start(self.workspace_id, self._current_config(), stop, interval=interval)
         except Exception as exc:  # noqa: BLE001
             logger.warning("service %s:%s failed: %s", manifest.name, spec.name, exc)
 
@@ -243,19 +258,69 @@ class Server:
             ran += 1
         return ran
 
+    def _restart_requested(self) -> bool:
+        from compass_core import extensions
+
+        return extensions.self_restart() and extensions.restart_requested_after(self._started_at)
+
     def _job_worker(self) -> None:
         while not self._stop.is_set():
+            if self._restart_requested():
+                # checked before every claim: a job started right after a restart from the page
+                # must wait for the restarted daemon, which knows the new set of captains
+                logger.info("restart requested from the Captains page; exiting to load the new extensions")
+                self.restarting = True
+                self._stop.set()
+                break
             try:
                 self._run_queued_jobs()
             except Exception:  # noqa: BLE001
                 logger.exception("job worker loop failed; backing off")
             self._stop.wait(self.job_poll)
 
+    def _install_event_sink(self) -> None:
+        """Job events go to the job in the jobs table as well as the log, so the dashboard
+        follows a job's progress (a map scan's progress bar). Only over the open default:
+        a host that installed its own sink keeps it."""
+        from compass_core import events
+        from compass_core.jobs import store_for
+
+        if type(events.event_sink()) is not events.LogSink:
+            return
+        store = store_for(self.config)
+        if store is not None:
+            events.set_event_sink(events.StoreSink(store))
+
+    # ── updates ─────────────────────────────────────────────────────────────
+
+    def _update_tick(self) -> None:
+        """Every check: status.json for the updater, the policy mirror, the release check
+        (one fetch every few hours), one log line when a release appears, and the
+        request when the policy lets the updater apply it on its own."""
+        from compass_core import extensions, updates
+
+        if extensions.directory() is None:
+            return
+        try:
+            config = workspace_config(self.workspace_id)
+        except LookupError:
+            config = self.config
+        updates.write_status(updates.count_active_jobs(config, self.workspace_id), by="serve")
+        updates.mirror_policy(config)
+        state = updates.check(config=config)
+        if state.available and state.latest != self._announced_update:
+            self._announced_update = state.latest
+            logger.info("compass %s is available (this is %s): %s", state.latest, state.running, state.release.get("notes_url") if state.release else "")
+        requested, why = updates.auto_request(config)
+        if requested:
+            logger.info("automatic update to %s requested (%s)", requested["target"], why)
+
     # ── run ─────────────────────────────────────────────────────────────────
 
     def run(self) -> Dict[str, Any]:
         registry.load_all_commands()
         dispatch.use_inline_queue()
+        self._install_event_sink()
         if self.map_port:
             self._start_map_viewer()
         if self.once:
@@ -270,11 +335,9 @@ class Server:
             logger.info("running jobs queued by the API (every %ss)", self.job_poll)
         logger.info("compass serving workspace %s: %s", self.workspace_id, ", ".join(self._services) or "no services")
 
-        started_at = time.time()
+        self._started_at = time.time()
         while not self._stop.wait(self.captains_poll):
-            from compass_core import extensions
-
-            if extensions.self_restart() and extensions.restart_requested_after(started_at):
+            if self._restart_requested():
                 # the Captains page installed or removed an extension: exit, and the
                 # container's restart policy brings serve back with the new set
                 logger.info("restart requested from the Captains page; exiting to load the new extensions")
@@ -284,6 +347,10 @@ class Server:
                 self._reconcile_services()
             except Exception:  # noqa: BLE001
                 logger.exception("service check failed")
+            try:
+                self._update_tick()
+            except Exception:  # noqa: BLE001
+                logger.exception("update check failed")
         self.stop()
         for running in list(self._services.values()):
             running.thread.join(timeout=5)

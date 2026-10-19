@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -73,8 +74,9 @@ def _configure_queue() -> None:
     from compass_core.queue import StoreQueue, set_job_queue
     from compass_core.workspace import default_workspace_id
 
-    if _queue._factory is not None:
-        # a host installed its own queue (compass_core.hosts): keep it
+    if _queue._factory is not None and not isinstance(_queue._factory(), _queue.InlineQueue):
+        # a host installed its own queue (compass_core.hosts): keep it. The inline queue is not a
+        # host's: `compass api` starts through the CLI, which installs it for its own commands
         if llm.model_for() is None:
             anthropic_model.install_if_available()
         return
@@ -91,6 +93,32 @@ def _configure_queue() -> None:
         use_inline_queue()
     if llm.model_for() is None:
         anthropic_model.install_if_available()
+
+
+def _start_status_writer() -> None:
+    """``status.json`` on the extensions volume every 30 s: the version and how many jobs
+    are active, so the updater never recreates the containers under a running job."""
+    import threading
+
+    from compass_core import extensions, updates
+    from compass_core.config import workspace_config
+    from compass_core.workspace import default_workspace_id
+
+    if extensions.directory() is None:
+        return
+    workspace_id = default_workspace_id() or "local"
+
+    def _loop() -> None:
+        while True:
+            try:
+                config = workspace_config(workspace_id)
+                updates.write_status(updates.count_active_jobs(config, workspace_id), by="api")
+                updates.mirror_policy(config)
+            except Exception as exc:  # noqa: BLE001 - a missed write is the next loop's problem
+                logger.debug("status.json not written: %s", exc)
+            time.sleep(30)
+
+    threading.Thread(target=_loop, name="status-writer", daemon=True).start()
 
 
 @asynccontextmanager
@@ -120,6 +148,7 @@ def create_app() -> FastAPI:
     hosts.install()  # a host (the product on top of Compass) sets its seams before the open defaults
     _configure_environment()
     _configure_queue()
+    _start_status_writer()
 
     from compass_api.captain_gate import CaptainGateMiddleware, refusal
     from compass_api.middleware.bearer_auth import BearerAuthMiddleware

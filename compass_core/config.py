@@ -35,6 +35,10 @@ def _file_loader(workspace_id: str) -> Dict[str, Any]:
                 data = json.load(handle)
             if not isinstance(data, dict):
                 raise ValueError(f"{path} does not hold a JSON object")
+            if data.get("workspace_id") and str(data["workspace_id"]) != workspace_id:
+                # COMPASS_CONFIG is one workspace's file: another id (a typo in --workspace)
+                # must not quietly act on that workspace
+                continue
             data.setdefault("workspace_id", workspace_id)
             return data
     raise LookupError(
