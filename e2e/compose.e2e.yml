@@ -12,6 +12,7 @@ x-e2e-env: &e2e-env
   GITHUB_API_URL: http://fakes:9000/github
   GITHUB_GIT_URL: http://fakes:9000/git
   COMPASS_UPDATE_URL: http://fakes:9000/feed/releases.json
+  COMPASS_RELEASE_NOTES_URL: http://fakes:9000/feed/notes.xml
   COMPASS_CATALOG_URL: http://fakes:9000/catalog.json
 
 services:

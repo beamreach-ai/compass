@@ -108,6 +108,14 @@ in the user agent and nothing else. `COMPASS_UPDATE_CHECK=off` in `.env` stops
 it. When a release is out, a banner says so and **Settings → Compass** shows
 what changed. Nothing changes version without you.
 
+The card's **What's new** lists every release between the one you run and the
+one on offer, newest first: what each brings and what to do after the update.
+Compass reads these notes from the RSS feed at
+`https://beamreach.ai/compass/releases/feed.xml`, with the same request rules as
+the check. `COMPASS_RELEASE_NOTES_URL` points it at a mirror or a file; `off`
+stops just the notes. When the notes cannot be read, the update itself is
+offered as before.
+
 Without the updater, the card shows the two commands. Run them next to your
 `docker-compose.yml`:
 

@@ -363,3 +363,143 @@ def test_a_check_made_by_one_process_reaches_the_other_through_the_volume(instal
     record.update(document=_feed(_release("0.6.0")), checked_at=time.time() + 5)  # the API's newer check
     (volume / "update.check.json").write_text(json.dumps(record))
     assert updates.check().latest == "0.6.0"
+
+
+# ── the release notes ───────────────────────────────────────────────────────
+
+def _item(version, *, headline="h", link=None, features=(("Short title", "A paragraph."),), after=(), version_element=True):
+    link = link or f"https://beamreach.ai/compass/releases/{version}.html"
+    parts = [f"<title>Compass {version} — {headline}</title>", f"<link>{link}</link>",
+             f'<guid isPermaLink="true">{link}</guid>', "<pubDate>Fri, 16 Oct 2026 12:00:00 +0000</pubDate>",
+             f"<description>Compass {version} in a paragraph.</description>",
+             "<content:encoded><![CDATA[<p>HTML for <script>feed readers</script></p>]]></content:encoded>"]
+    if version_element:
+        parts.append(f"<compass:version>{version}</compass:version>")
+    parts.append(f"<compass:headline>{headline}</compass:headline>")
+    parts += [f"<compass:feature><compass:title>{t}</compass:title><compass:body>{b}</compass:body></compass:feature>" for t, b in features]
+    parts += [f"<compass:after>{a}</compass:after>" for a in after]
+    return "<item>" + "".join(parts) + "</item>"
+
+
+def _notes(*items):
+    return ('<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:content="http://purl.org/rss/1.0/modules/content/"'
+            ' xmlns:compass="https://beamreach.ai/compass/releases/ns/1"><channel><title>Compass releases</title>'
+            "<link>https://beamreach.ai/compass/releases/</link>" + "".join(items) + "</channel></rss>")
+
+
+@pytest.fixture
+def notes_file(install, tmp_path, monkeypatch):
+    path = tmp_path / "feed.xml"
+    monkeypatch.setenv("COMPASS_RELEASE_NOTES_URL", f"file://{path}")
+    return path
+
+
+def test_the_notes_feed_is_read_as_plain_text_and_ignores_what_it_should():
+    notes = updates.parse_notes(_notes(
+        _item("0.4.1", headline="The CLI moves in", features=(("One", "First."), ("Two", "Second.")), after=("Reload the page.",)),
+        _item("0.4.2", link="http://beamreach.ai/compass/releases/0.4.2.html", features=()),
+        _item("0.4.3", version_element=False),
+        _item("not-a-version"),
+    ))
+    assert set(notes) == {"0.4.1", "0.4.2"}, "an item without a compass version is skipped"
+    assert notes["0.4.1"] == {
+        "version": "0.4.1", "title": "Compass 0.4.1 — The CLI moves in", "headline": "The CLI moves in",
+        "link": "https://beamreach.ai/compass/releases/0.4.1.html", "published_at": "2026-10-16T12:00:00Z",
+        "summary": "Compass 0.4.1 in a paragraph.", "features": [{"title": "One", "body": "First."}, {"title": "Two", "body": "Second."}],
+        "after": ["Reload the page."],
+    }
+    assert notes["0.4.2"]["link"] is None and notes["0.4.2"]["features"] == [], "only an https link is kept"
+    assert "<p>" not in json.dumps(notes), "content:encoded is never read"
+
+    for bad, why in [("<rss><channel>", "not XML"), ("<feed/>", "an RSS document"),
+                     ('<?xml version="1.0"?><!DOCTYPE rss [<!ENTITY a "aaaa">]><rss><channel/></rss>', "DOCTYPE"),
+                     (_notes("<!-- " + "x" * updates.NOTES_MAX_BYTES + " -->"), "larger than")]:
+        with pytest.raises(ValueError, match=why):
+            updates.parse_notes(bad)
+
+
+def test_the_state_carries_the_notes_between_the_running_and_the_offered_release(install, notes_file, monkeypatch):
+    volume, publish, _ = install
+    notes_file.write_text(_notes(_item("0.3.0"), _item("0.4.0"), _item("0.4.1", headline="Patch"), _item("0.5.0", headline="Minor"),
+                                 _item("0.5.1rc1"), _item("0.6.0")))
+    publish(_feed(_release("0.4.0"), _release("0.4.1"), _release("0.5.0"), _release("0.6.0"), channels={"stable": "0.5.0"}))
+    state = updates.check()
+    assert state.latest == "0.5.0" and [n["version"] for n in state.release_notes] == ["0.5.0", "0.4.1"], \
+        "after 0.4.0, up to the offered 0.5.0, newest first, no prerelease on stable"
+    assert state.release_notes[0]["headline"] == "Minor" and state.notes_source == f"file://{notes_file}" and state.notes_error is None
+    assert (volume / "update.notes.json").exists(), "the notes are kept on the volume"
+
+    monkeypatch.setattr(updates, "running_version", lambda: "0.5.0")
+    assert updates.check().release_notes == [], "nothing offered, no notes"
+
+
+def test_notes_that_cannot_be_read_leave_the_check_alone_and_keep_the_last_copy(install, notes_file):
+    _, publish, _ = install
+    publish(_feed(_release("0.5.0")))
+    assert updates.check().release_notes == [] and "feed.xml" in updates.check().notes_error, "no notes yet: the check still says 0.5.0"
+    assert updates.check().available
+
+    notes_file.write_text(_notes(_item("0.5.0")))
+    assert [n["version"] for n in updates.check(refresh=True).release_notes] == ["0.5.0"]
+    notes_file.write_text('<?xml version="1.0"?><!DOCTYPE rss SYSTEM "x.dtd"><rss/>')
+    state = updates.check(refresh=True)
+    assert state.available and state.error is None and state.latest == "0.5.0"
+    assert [n["version"] for n in state.release_notes] == ["0.5.0"] and "DOCTYPE" in state.notes_error, "the last good copy, with why"
+
+
+def test_with_the_check_off_the_notes_are_not_fetched_and_off_turns_off_only_the_notes(install, monkeypatch):
+    _, publish, _ = install
+    publish(_feed(_release("0.5.0")))
+    fetched = []
+    monkeypatch.setattr(updates, "_get", lambda url, **kw: fetched.append(url) or (_ for _ in ()).throw(OSError("no network in tests")))
+    monkeypatch.setenv("COMPASS_RELEASE_NOTES_URL", "https://example.com/feed.xml")
+    monkeypatch.setenv("COMPASS_UPDATE_CHECK", "off")
+    assert updates.check().release_notes == [] and fetched == []
+
+    monkeypatch.delenv("COMPASS_UPDATE_CHECK")
+    monkeypatch.setenv("COMPASS_RELEASE_NOTES_URL", "off")
+    monkeypatch.setattr(updates, "_fetch", lambda url, **kw: (200, None, _feed(_release("0.5.0"))))
+    state = updates.check(refresh=True)
+    assert state.available and state.notes_source is None and state.notes_error is None and fetched == []
+
+
+def test_the_notes_are_asked_for_with_the_same_user_agent_and_their_etag(install, monkeypatch):
+    _, publish, _ = install
+    publish(_feed(_release("0.5.0")))
+    seen = []
+
+    class Response:
+        def __init__(self, status, body):
+            self.status, self.body, self.headers = status, body, {"ETag": '"n1"'}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self, limit=-1):
+            return self.body
+
+    def urlopen(request, timeout):
+        headers = dict(request.header_items())
+        seen.append(headers)
+        if headers.get("If-none-match") == '"n1"':
+            raise updates.urllib.error.HTTPError(request.full_url, 304, "Not Modified", {}, None)
+        return Response(200, _notes(_item("0.5.0", headline="Fresh")).encode())
+
+    monkeypatch.setenv("COMPASS_RELEASE_NOTES_URL", "https://example.com/feed.xml")
+    monkeypatch.setattr("urllib.request.urlopen", urlopen)
+    assert updates.check().release_notes[0]["headline"] == "Fresh"
+    assert seen[0]["User-agent"] == "compass-update/0.4.0" and "If-none-match" not in seen[0]
+    state = updates.check(refresh=True)
+    assert seen[-1]["If-none-match"] == '"n1"' and state.release_notes[0]["headline"] == "Fresh" and state.notes_error is None, "304 keeps the copy"
+
+
+def test_the_api_returns_the_notes_with_the_state(client, notes_file):
+    tc, (volume, publish, _), _ = client
+    notes_file.write_text(_notes(_item("0.5.0", headline="Minor", after=("Reload the Captains page.",))))
+    publish(_feed(_release("0.5.0")))
+    update = tc.get("/api/updates").json()["update"]
+    assert update["release_notes"][0]["after"] == ["Reload the Captains page."] and update["notes_error"] is None

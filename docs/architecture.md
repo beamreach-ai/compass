@@ -88,8 +88,11 @@ and, if the dashboard needs it, a route.
 
 `compass_core.updates` reads `releases.json`, which the release workflow keeps
 on the `releases` branch, at most every six hours. It compares the feed with
-`compass_core.__version__`. The bootstrap, `/api/updates`, `/api/status`
-and `compass update check` all show the result. Applying a release is not
+`compass_core.__version__`. When a release is out it also reads the release
+notes, an RSS feed on beamreach.ai, and keeps those of the versions in between
+(`release_notes`); a notes feed that cannot be read never fails the check. The
+bootstrap, `/api/updates`, `/api/status` and `compass update check` all show
+the result. Applying a release is not
 something the Compass containers can do: they have no Docker socket. The
 opt-in `updater` service has one. The two sides talk through files on the
 `./extensions` volume. The API writes `update.json` and `status.json`, the

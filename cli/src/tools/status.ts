@@ -19,6 +19,10 @@ export const statusTool = defineTool({
     if (u.available && u.latest) {
       const how = u.apply === "updater" ? "one click on Settings → Updates" : "Settings → Updates shows the two commands";
       lines.push(`Update: Compass ${u.latest} is available (this is ${u.running}); ${how}`);
+      // the notes feed's releases between the two, newest first: one line each, the page has the rest
+      const notes: any[] = Array.isArray(u.release_notes) ? u.release_notes : [];
+      if (notes.length) lines.push("What's new:");
+      for (const n of notes) lines.push(`  ${n.version}${n.headline || n.title ? ` — ${n.headline || n.title}` : ""}${n.link ? `  ${n.link}` : ""}`);
     }
     if (u.pinned_differs) lines.push(`Update: the compose file asks for ${u.pinned} but ${u.running} is running; run \`docker compose up -d\``);
     const t = s.target || {};

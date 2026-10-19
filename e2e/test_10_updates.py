@@ -1,5 +1,5 @@
 """4.11 Updates (docs/e2e.md): the banner and the Compass card against the fake release feed,
-the manual commands, a real update and rollback (tests/e2e/update_compose.sh), waiting for
+the release notes of the versions in between, the manual commands, a real update and rollback (tests/e2e/update_compose.sh), waiting for
 running jobs, the policy, turning the check off, and a pinned version that differs.
 
 The stack runs the updater service. Tests that must not let it act stop it and write its
@@ -174,11 +174,13 @@ def test_upd_6_with_the_check_off_no_request_leaves_the_stack(stack):
     stack.restart("api", "compass")
     try:
         before = len(stack.fakes.get("/_control/feed/requests").json())
+        notes_before = len(stack.fakes.get("/_control/notes/requests").json())
         state = stack.api.get("/api/updates", params={"refresh": True}).json()["update"]
         assert state["apply"] == "off" and state["latest"] is None
         stack.api.get("/api/settings/bootstrap").raise_for_status()
         time.sleep(40)  # a daemon tick
         assert len(stack.fakes.get("/_control/feed/requests").json()) == before
+        assert len(stack.fakes.get("/_control/notes/requests").json()) == notes_before, "no release notes either"
     finally:
         stack.env(COMPASS_UPDATE_CHECK=None)
         stack.restart("api", "compass")
@@ -197,3 +199,37 @@ def test_upd_7_the_page_says_when_the_compose_file_asks_for_another_version(stac
     finally:
         stack.env(COMPASS_VERSION=VERSION)
         stack.restart("api")
+
+
+def notes_feed(*versions: str) -> str:
+    items = "".join(
+        f"<item><title>Compass {v} — Release {v}</title><link>https://beamreach.ai/compass/releases/{v}.html</link>"
+        f"<pubDate>Tue, 20 Oct 2026 12:00:00 +0000</pubDate><description>What {v} changes, in a paragraph.</description>"
+        f"<content:encoded><![CDATA[<p>HTML for feed readers</p>]]></content:encoded>"
+        f"<compass:version>{v}</compass:version><compass:headline>Release {v}</compass:headline>"
+        f"<compass:feature><compass:title>Feature of {v}</compass:title><compass:body>Body of {v}.</compass:body></compass:feature>"
+        f"<compass:after>After {v}, reload the page.</compass:after></item>"
+        for v in versions
+    )
+    return ('<?xml version="1.0" encoding="UTF-8"?><rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/"'
+            f' xmlns:compass="https://beamreach.ai/compass/releases/ns/1"><channel><title>Compass releases</title>{items}</channel></rss>')
+
+
+def test_upd_8_the_card_shows_the_release_notes_of_every_version_in_between(stack, page):
+    newer, newest = _next(VERSION), _next(_next(VERSION))
+    stack.fakes.put("/_control/notes", content=notes_feed(VERSION, newer, newest)).raise_for_status()
+    try:
+        publish(stack, VERSION, newer, newest)
+        state = stack.api.get("/api/updates").json()["update"]
+        assert [n["version"] for n in state["release_notes"]] == [newest, newer], "after the running version, newest first"
+        assert stack.fakes.get("/_control/notes/requests").json()[-1]["user_agent"] == f"compass-update/{VERSION}"
+        page.open("/workspace?tab=maps")
+        page.get_by_role("link", name="What's new").click()
+        page.get_by_text(f"Release {newest}", exact=False).first.wait_for()
+        page.get_by_text(f"After {newest}, reload the page.", exact=False).wait_for()
+        page.get_by_text(f"Release {newer}", exact=False).first.click()
+        page.get_by_text(f"Body of {newer}.", exact=False).wait_for()
+        assert page.get_by_role("link", name="Read on beamreach.ai").count() >= 1
+        assert page.get_by_text("HTML for feed readers").count() == 0
+    finally:
+        stack.fakes.put("/_control/notes", content="").raise_for_status()

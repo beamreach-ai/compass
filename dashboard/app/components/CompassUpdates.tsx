@@ -2,14 +2,15 @@
 // Updates of Compass itself (docs/open_updates_spec.md §3.2): the banner above the
 // tabs when a release is out, and the Compass card on Settings with the running and
 // pinned versions, the policy, Update (with the updater service) or the two commands
-// (without it), and Roll back for seven days after an update.
+// (without it), the release notes of every version in between, and Roll back for seven
+// days after an update.
 import axios from "axios";
 import Link from "next/link";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { DASHBOARD_VERSION } from "../lib/edition";
 import { useShell } from "../lib/shell";
-import type { UpdateState } from "../lib/shell";
-import { dismissVersion, dismissedVersion, phaseText, POLICY_LABELS, relativeTime, versionsDiffer } from "./updateViews";
+import type { ReleaseNote, UpdateState } from "../lib/shell";
+import { dismissVersion, dismissedVersion, httpsLink, noteDate, phaseText, POLICY_LABELS, relativeTime, versionsDiffer, WHATS_NEW_ID } from "./updateViews";
 import type { UpdatesListing } from "./updateViews";
 
 const errorText = (e: any, fallback: string): string => {
@@ -66,6 +67,69 @@ function Commands({ lines }: { lines: string[] }) {
   );
 }
 
+// The notes feed's releases, as plain text: React escapes every string, nothing is HTML.
+function WhatsNew({ notes }: { notes: ReleaseNote[] }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [arrived, setArrived] = useState(false);
+  useEffect(() => {
+    // the banner's "What's new" links here
+    const land = () => {
+      if (window.location.hash !== `#${WHATS_NEW_ID}`) return;
+      setArrived(true);
+      ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    };
+    land();
+    window.addEventListener("hashchange", land);
+    return () => window.removeEventListener("hashchange", land);
+  }, []);
+  return (
+    <div id={WHATS_NEW_ID} ref={ref} className="space-y-2 border-t border-gray-200 pt-3">
+      <div className="text-xs font-semibold text-gray-700">What&apos;s new</div>
+      {notes.map((note, index) => {
+        const link = httpsLink(note.link);
+        const date = noteDate(note.published_at);
+        return (
+          <details key={note.version} open={notes.length === 1 || (arrived && index === 0)} className="rounded border border-gray-200 bg-white px-3 py-2">
+            <summary className="cursor-pointer text-sm text-gray-900">
+              <span className="font-semibold">{note.version}</span>
+              {note.headline ? ` — ${note.headline}` : ""}
+              {date && <span className="ml-2 text-xs text-gray-500">{date}</span>}
+            </summary>
+            <div className="mt-2 space-y-3 text-xs text-gray-700">
+              {note.summary && <p>{note.summary}</p>}
+              {note.features.length > 0 && (
+                <ul className="space-y-2">
+                  {note.features.map((feature) => (
+                    <li key={feature.title || feature.body}>
+                      {feature.title && <div className="font-semibold text-gray-900">{feature.title}</div>}
+                      {feature.body && <p>{feature.body}</p>}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {note.after.length > 0 && (
+                <div>
+                  <div className="font-semibold text-amber-800">After the update</div>
+                  <ul className="list-disc space-y-1 pl-5">
+                    {note.after.map((line) => (
+                      <li key={line}>{line}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {link && (
+                <a href={link.href} target="_blank" rel="noopener noreferrer" className="inline-block text-blue-600 underline">
+                  Read on {link.host}
+                </a>
+              )}
+            </div>
+          </details>
+        );
+      })}
+    </div>
+  );
+}
+
 // ── the banner ──────────────────────────────────────────────────────────────
 
 export function UpdateBanner({ update, settingsHref }: { update: UpdateState | null | undefined; settingsHref: string }) {
@@ -84,7 +148,11 @@ export function UpdateBanner({ update, settingsHref }: { update: UpdateState | n
             {update.release?.summary ? ` ${update.release.summary}` : ""}
           </span>
           <span className="flex shrink-0 items-center gap-3">
-            {update.release?.notes_url && (
+            {update.release_notes?.length ? (
+              <Link href={`${settingsHref}#${WHATS_NEW_ID}`} className="font-semibold underline underline-offset-2">
+                What&apos;s new
+              </Link>
+            ) : update.release?.notes_url && (
               <a href={update.release.notes_url} target="_blank" rel="noopener noreferrer" className="font-semibold underline underline-offset-2">
                 What changed
               </a>
@@ -258,6 +326,11 @@ export default function CompassSection({ readOnly }: { readOnly: boolean }) {
                     <li key={note}>{note}</li>
                   ))}
                 </ul>
+              )}
+              {u.release_notes?.length ? (
+                <WhatsNew notes={u.release_notes} />
+              ) : (
+                u.notes_error && <p className="text-xs text-gray-500">The release notes could not be read: {u.notes_error}</p>
               )}
               {!u.direct && (
                 <p className="text-xs text-amber-700">

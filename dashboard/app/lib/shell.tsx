@@ -159,6 +159,18 @@ export type ReleaseEntry = {
   notes: string[];
 };
 
+// One release from the notes feed (COMPASS_RELEASE_NOTES_URL): plain text only, never HTML.
+export type ReleaseNote = {
+  version: string;
+  title: string;
+  headline?: string | null;
+  link?: string | null; // https only; the API drops anything else
+  published_at?: string | null;
+  summary: string;
+  features: Array<{ title: string; body: string }>;
+  after: string[];
+};
+
 export type UpdateState = {
   running: string;
   pinned?: string | null;
@@ -173,6 +185,10 @@ export type UpdateState = {
   pinned_differs: boolean;
   via?: string | null;
   releases: ReleaseEntry[];
+  // running < version <= latest, newest first; absent from an API older than 0.5.2
+  release_notes?: ReleaseNote[];
+  notes_source?: string | null;
+  notes_error?: string | null;
 };
 
 export type SettingsBootstrap = {

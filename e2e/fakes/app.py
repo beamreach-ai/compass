@@ -8,7 +8,8 @@ One small server with four parts, each under its own path:
                   `git http-backend` over a bare copy synced from memory before each request
                   and read back after a push
     /hooks/<name> a webhook receiver that records every call (notification endpoints)
-    /feed/…       the release feed (COMPASS_UPDATE_URL points here)
+    /feed/…       the release feed (COMPASS_UPDATE_URL points here) and the release notes
+                  (COMPASS_RELEASE_NOTES_URL)
     /catalog.json the captain catalog (COMPASS_CATALOG_URL points here)
 
 and a control API under /_control/… the tests use to arrange state (seed a repository,
@@ -69,7 +70,8 @@ STATE: Dict[str, Any] = {}
 
 def reset() -> None:
     STATE.clear()
-    STATE.update(repos={}, hooks=[], feed=None, feed_requests=[], catalog={"schema": 1, "captains": []}, comments={}, graphql_requests=0)
+    STATE.update(repos={}, hooks=[], feed=None, feed_requests=[], notes=None, notes_requests=[], catalog={"schema": 1, "captains": []},
+                 comments={}, graphql_requests=0)
 
 
 reset()
@@ -568,6 +570,14 @@ def feed(request: Request) -> Any:
     return STATE["feed"]
 
 
+@app.get("/feed/notes.xml")
+def notes(request: Request) -> Any:
+    STATE["notes_requests"].append({"at": time.time(), "user_agent": request.headers.get("user-agent")})
+    if STATE["notes"] is None:
+        raise HTTPException(404, "no release notes published")
+    return Response(content=STATE["notes"], media_type="application/rss+xml")
+
+
 @app.get("/catalog.json")
 def catalog() -> Dict[str, Any]:
     return STATE["catalog"]
@@ -660,6 +670,17 @@ async def control_feed(request: Request) -> Dict[str, Any]:
 @app.get("/_control/feed/requests")
 def control_feed_requests() -> List[Dict[str, Any]]:
     return STATE["feed_requests"]
+
+
+@app.put("/_control/notes")
+async def control_notes(request: Request) -> Dict[str, Any]:
+    STATE["notes"] = (await request.body()).decode() or None  # an empty body unpublishes them
+    return {"ok": True}
+
+
+@app.get("/_control/notes/requests")
+def control_notes_requests() -> List[Dict[str, Any]]:
+    return STATE["notes_requests"]
 
 
 @app.put("/_control/catalog")

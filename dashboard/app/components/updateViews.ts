@@ -84,3 +84,23 @@ export const relativeTime = (seconds: number | null | undefined): string => {
   if (ago < 129600) return `${Math.round(ago / 3600)} hours ago`;
   return `${Math.round(ago / 86400)} days ago`;
 };
+
+// Where the banner's "What's new" lands on the Compass card.
+export const WHATS_NEW_ID = "whats-new";
+
+// The API keeps only https links from the notes feed; the page checks again before it renders one.
+export function httpsLink(url: string | null | undefined): { href: string; host: string } | null {
+  if (!url) return null;
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "https:" ? { href: parsed.href, host: parsed.hostname } : null;
+  } catch {
+    return null;
+  }
+}
+
+export const noteDate = (iso: string | null | undefined): string | null => {
+  if (!iso) return null;
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime()) ? null : date.toLocaleDateString();
+};

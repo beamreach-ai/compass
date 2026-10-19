@@ -118,6 +118,7 @@ use `docker compose -f docker-compose.yml -f compose.e2e.yml logs` as on any ins
  Compass ── AWS_ENDPOINT_URL ──────► moto          (DynamoDB stays on the stack's own dynamodb-local)
          ── GITHUB_API_URL, GITHUB_GIT_URL ► fakes /github, /git
          ── COMPASS_UPDATE_URL ────► fakes /feed     COMPASS_CATALOG_URL ► fakes /catalog.json
+         ── COMPASS_RELEASE_NOTES_URL ► fakes /feed/notes.xml
 ```
 
 **The world** (`e2e/fixture.py`) is one AWS account and one GitHub organisation.
@@ -299,8 +300,9 @@ PRS-5 (a revision commit written by Claude) is out of this suite: it needs a mod
 | UPD-3 | Roll back from the card asks the updater for the previous version | UI |
 | UPD-4 | The updater waits while jobs run | CLI |
 | UPD-5 | The policy saves from the card; `patch` asks for a patch release on its own and not for a minor one | UI, API |
-| UPD-6 | With the check off no request leaves the stack; on again, one anonymous request with the version | API |
+| UPD-6 | With the check off no request leaves the stack, release notes included; on again, one anonymous request with the version | API |
 | UPD-7 | The page says when the compose file asks for another version than runs | UI |
+| UPD-8 | The banner's What's new opens the release notes of every version between the running one and the offered one, newest first, as plain text | UI, API |
 
 ### 4.12 Release artefacts (`test_11_release.py`)
 
@@ -310,5 +312,5 @@ PRS-5 (a revision commit written by Claude) is out of this suite: it needs a mod
 | REL-2 | `CHANGELOG.md` has this release, and the release script reads it | CLI |
 | REL-3 | The quickstart and the README give the commands this suite ran | — |
 
-74 tests. The multi-architecture image builds are checked by the release workflow,
+75 tests. The multi-architecture image builds are checked by the release workflow,
 not here.

@@ -13,7 +13,7 @@ its first runs.
 - `pytest e2e` (docs/e2e.md): the stack built from the commit, the shipped
   compose file and the quickstart's commands, against a fake AWS account (moto)
   and a fake GitHub, driven through a real browser, the API and the `compass`
-  command. 74 tests over install, sign-in and tokens, the dashboard, settings,
+  command. 75 tests over install, sign-in and tokens, the dashboard, settings,
   captains, the map, decoys, code-as-cloud, the PR watcher, jobs, updates and the
   release artefacts. Model-free; no account or token needed.
 - In CI the suite runs in four parallel shards from images built once into
@@ -58,6 +58,12 @@ its first runs.
   file asks for another version than runs; the status skill mentions it.
   The API version stays 2026.10.1: the additions do not need a CLI that
   knows them, and a bump would have made every CLI call 0.5 incompatible.
+- Settings → Updates shows **What's new** when a release is out: the release
+  notes of every version between the one you run and the one on offer,
+  newest first, read from the RSS feed on beamreach.ai on the check's
+  schedule. The banner links to it, and `compass status` lists each release's
+  headline. `COMPASS_RELEASE_NOTES_URL` points at a mirror or a file; `off`
+  stops just the notes. Notes that cannot be read do not hold up the update.
 
 ## 0.5.1 — unreleased
 

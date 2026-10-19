@@ -7,12 +7,18 @@ the version in the user agent and nothing else. ``COMPASS_UPDATE_CHECK=off``
 turns it off. An install follows one channel, ``COMPASS_UPDATE_CHANNEL``
 (``stable`` or ``prerelease``).
 
+When a release is out, the check also reads the release notes: the RSS feed the
+Beamreach website publishes (``COMPASS_RELEASE_NOTES_URL``; ``off`` skips it), on
+the same cadence and switch. The notes are optional: a feed that cannot be read
+leaves the update check as it was and says why in ``notes_error``.
+
 Applying is the updater service's job (``docker/updater``): it holds the Docker
 socket, Compass does not. The two talk through files on the extensions volume
 (``compass_core.extensions.directory()``), the narrowest interface there is and
 one that works when the API is down:
 
     update.check.json    the last fetched feed, with its ETag
+    update.notes.json    the last fetched release notes (the RSS document), with its ETag
     update.json          a request: {target, digests, requested_at, by, mode, force, wait_minutes}
     update.pending       written by the updater between ``compose up`` and the health check
     update.result.json   what happened: {status, from, to, mode, error, at}
@@ -35,8 +41,10 @@ import threading
 import time
 import urllib.error
 import urllib.request
+import xml.etree.ElementTree as ElementTree
 from dataclasses import asdict, dataclass, field, replace
-from datetime import datetime
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -49,6 +57,9 @@ logger = logging.getLogger("compass.updates")
 
 SCHEMA = 1
 DEFAULT_URL = "https://raw.githubusercontent.com/beamreach-ai/compass/releases/releases.json"
+DEFAULT_NOTES_URL = "https://beamreach.ai/compass/releases/feed.xml"
+NOTES_NAMESPACE = "https://beamreach.ai/compass/releases/ns/1"
+NOTES_MAX_BYTES = 1_000_000
 CHANNELS = ("stable", "prerelease")
 POLICIES = ("notify", "patch", "minor", "off")
 DEFAULT_CHECK_HOURS = 6.0
@@ -156,6 +167,16 @@ def source() -> str:
     return raw or DEFAULT_URL
 
 
+def notes_source() -> Optional[str]:
+    """Where the release notes come from; None when ``COMPASS_RELEASE_NOTES_URL`` is set
+    empty or ``off`` (unset is the Beamreach website)."""
+    raw = os.getenv("COMPASS_RELEASE_NOTES_URL")
+    if raw is None:
+        return DEFAULT_NOTES_URL
+    raw = raw.strip()
+    return None if not raw or raw.lower() in _OFF else raw
+
+
 def mirror_policy(config: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
     """Write the policy where the updater reads it (it refuses an automatic request
     the policy no longer allows). None when there is no volume."""
@@ -218,23 +239,36 @@ def parse_feed(document: Any, *, source: str = "test") -> Feed:
     return Feed(releases=releases, channels=channels, source=source, fetched_at=now, checked_at=now, document=document)
 
 
-def _fetch(url: str, *, etag: Optional[str], timeout: float) -> Tuple[int, Optional[str], Any]:
-    """(HTTP status, ETag, document); 304 carries no document."""
+def _get(url: str, *, etag: Optional[str], timeout: float, accept: str, limit: Optional[int] = None) -> Tuple[int, Optional[str], Optional[bytes]]:
+    """(HTTP status, ETag, body) of an http(s) URL or a file path; 304 carries no body.
+    A body over ``limit`` bytes is refused rather than cut."""
     if url.startswith(("http://", "https://")):
-        headers = {"Accept": "application/json", "User-Agent": f"compass-update/{running_version()}"}
+        headers = {"Accept": accept, "User-Agent": f"compass-update/{running_version()}"}
         if etag:
             headers["If-None-Match"] = etag
         request = urllib.request.Request(url, headers=headers)
         try:
             with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310 - the URL is the operator's
-                return response.status, response.headers.get("ETag"), json.loads(response.read().decode("utf-8"))
+                status, new_etag = response.status, response.headers.get("ETag")
+                body = response.read() if limit is None else response.read(limit + 1)
         except urllib.error.HTTPError as exc:
             if exc.code == 304:
                 return 304, etag, None
             raise
-    path = url[len("file://"):] if url.startswith("file://") else url
-    with open(os.path.expanduser(path), encoding="utf-8") as handle:
-        return 200, None, json.load(handle)
+    else:
+        path = url[len("file://"):] if url.startswith("file://") else url
+        with open(os.path.expanduser(path), "rb") as handle:
+            status, new_etag = 200, None
+            body = handle.read() if limit is None else handle.read(limit + 1)
+    if limit is not None and len(body) > limit:
+        raise ValueError(f"larger than {limit} bytes")
+    return status, new_etag, body
+
+
+def _fetch(url: str, *, etag: Optional[str], timeout: float) -> Tuple[int, Optional[str], Any]:
+    """(HTTP status, ETag, document); 304 carries no document."""
+    status, etag, body = _get(url, etag=etag, timeout=timeout, accept="application/json")
+    return status, etag, None if body is None else json.loads(body.decode("utf-8"))
 
 
 _cache: Dict[str, Feed] = {}
@@ -306,9 +340,157 @@ def load_feed(*, refresh: bool = False, timeout: float = 5.0) -> Feed:
     return feed
 
 
+# ── the release notes ───────────────────────────────────────────────────────
+
+@dataclass(frozen=True)
+class Notes:
+    releases: Dict[str, Dict[str, Any]]   # version -> note
+    source: str
+    fetched_at: float
+    checked_at: float
+    etag: Optional[str] = None
+    error: Optional[str] = None
+    document: Optional[str] = None        # the RSS as fetched, for the cache file
+
+
+_DOCTYPE_RE = re.compile(r"<!DOCTYPE|<!ENTITY", re.IGNORECASE)
+
+
+def _text(element: Optional[ElementTree.Element]) -> str:
+    return (element.text or "").strip() if element is not None else ""
+
+
+def _published(text: str) -> Optional[str]:
+    """RSS's RFC 822 date as the ISO 8601 releases.json uses; None when it does not parse."""
+    try:
+        moment = parsedate_to_datetime(text)
+    except (TypeError, ValueError):
+        return None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return moment.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def parse_notes(document: str) -> Dict[str, Dict[str, Any]]:
+    """The ``compass:*`` elements of the RSS feed, by version. Everything is plain text;
+    ``content:encoded`` (HTML for feed readers) is ignored, and a link that is not https is
+    dropped. Items without a ``compass:version`` are skipped."""
+    if len(document.encode("utf-8")) > NOTES_MAX_BYTES:
+        raise ValueError(f"release notes are larger than {NOTES_MAX_BYTES} bytes")
+    # no DTD at all: the notes never need one, and refusing it rules out entity expansion
+    if _DOCTYPE_RE.search(document):
+        raise ValueError("release notes with a DOCTYPE are refused")
+    try:
+        root = ElementTree.fromstring(document)
+    except ElementTree.ParseError as exc:
+        raise ValueError(f"release notes are not XML: {exc}") from None
+    channel = root.find("channel")
+    if root.tag != "rss" or channel is None:
+        raise ValueError("release notes are an RSS document with a channel")
+    ns = {"compass": NOTES_NAMESPACE}
+    notes: Dict[str, Dict[str, Any]] = {}
+    for item in channel.findall("item"):
+        version = _version(_text(item.find("compass:version", ns)))
+        if version is None:
+            continue
+        link = _text(item.find("link"))
+        features = [{"title": _text(f.find("compass:title", ns)), "body": _text(f.find("compass:body", ns))}
+                    for f in item.findall("compass:feature", ns)]
+        notes[str(version)] = {
+            "version": str(version),
+            "title": _text(item.find("title")),
+            "headline": _text(item.find("compass:headline", ns)) or None,
+            "link": link if link.startswith("https://") else None,
+            "published_at": _published(_text(item.find("pubDate"))),
+            "summary": _text(item.find("description")),
+            "features": [f for f in features if f["title"] or f["body"]],
+            "after": [t for t in (_text(a) for a in item.findall("compass:after", ns)) if t],
+        }
+    return notes
+
+
+_notes_cache: Dict[str, Notes] = {}
+
+
+def _notes_file() -> Optional[Path]:
+    path = extensions.directory()
+    return path / "update.notes.json" if path is not None else None
+
+
+def _cached_notes(url: str) -> Optional[Notes]:
+    """As ``_cached``: this process's copy, or the volume's when that is newer."""
+    with _lock:
+        notes = _notes_cache.get(url)
+    file = _notes_file()
+    record = extensions.read_json(file, None) if file else None
+    if not isinstance(record, dict) or record.get("url") != url:
+        return notes
+    if notes is not None and float(record.get("checked_at") or 0) <= notes.checked_at:
+        return notes
+    try:
+        releases = parse_notes(record.get("document") or "") if record.get("document") else {}
+    except ValueError:
+        return None
+    notes = Notes(releases=releases, source=url, fetched_at=float(record.get("fetched_at") or 0), checked_at=float(record.get("checked_at") or 0),
+                  etag=record.get("etag"), error=record.get("error"), document=record.get("document"))
+    with _lock:
+        _notes_cache[url] = notes
+    return notes
+
+
+def _remember_notes(notes: Notes) -> None:
+    with _lock:
+        _notes_cache[notes.source] = notes
+    file = _notes_file()
+    if file:
+        try:
+            extensions.write_json(file, {"url": notes.source, "etag": notes.etag, "fetched_at": notes.fetched_at,
+                                         "checked_at": notes.checked_at, "error": notes.error, "document": notes.document})
+        except OSError as exc:
+            logger.debug("release notes not cached: %s", exc)
+
+
+def load_notes(*, refresh: bool = False, timeout: float = 5.0) -> Optional[Notes]:
+    """The release notes, on the release feed's cadence and with its fallback: a fetch that
+    fails keeps the last good copy with the reason in ``error``. None when turned off."""
+    url = notes_source()
+    if url is None:
+        return None
+    cached = _cached_notes(url)
+    now = time.time()
+    if cached and not refresh:
+        ttl = check_hours() * 3600 if cached.error is None else RETRY_SECONDS
+        if now - cached.checked_at < ttl:
+            return cached
+    try:
+        status, etag, body = _get(url, etag=cached.etag if cached else None, timeout=timeout,
+                                  accept="application/rss+xml, application/xml;q=0.9", limit=NOTES_MAX_BYTES)
+        if status == 304 and cached:
+            notes = replace(cached, fetched_at=now, checked_at=now, error=None)
+        else:
+            document = (body or b"").decode("utf-8")
+            notes = Notes(releases=parse_notes(document), source=url, fetched_at=now, checked_at=now, etag=etag, document=document)
+    except Exception as exc:  # noqa: BLE001 - the notes are optional; nothing they do breaks the check
+        logger.warning("release notes %s unavailable (%s)", url, exc)
+        if cached:
+            notes = replace(cached, checked_at=now, error=f"{url}: {exc}")
+        else:
+            notes = Notes(releases={}, source=url, fetched_at=0.0, checked_at=now, error=f"{url}: {exc}")
+    _remember_notes(notes)
+    return notes
+
+
+def notes_between(notes: Notes, running: Version, target: Version, *, prereleases: bool) -> List[Dict[str, Any]]:
+    """The notes of every release after ``running`` up to and including ``target``, newest first."""
+    window = [(Version(v), note) for v, note in notes.releases.items()
+              if running < Version(v) <= target and (prereleases or not Version(v).is_prerelease)]
+    return [note for _, note in sorted(window, key=lambda pair: pair[0], reverse=True)]
+
+
 def reset_for_tests() -> None:
     with _lock:
         _cache.clear()
+        _notes_cache.clear()
 
 
 # ── the state ───────────────────────────────────────────────────────────────
@@ -328,6 +510,9 @@ class UpdateState:
     pinned_differs: bool = False      # the compose file asks for another version than runs
     via: Optional[str] = None         # when not direct: the version to step through first
     releases: List[Dict[str, Any]] = field(default_factory=list)  # newer than running, newest first
+    release_notes: List[Dict[str, Any]] = field(default_factory=list)  # running < v <= latest from the notes feed, newest first
+    notes_source: Optional[str] = None  # where release_notes came from (None when the notes are off or nothing is offered)
+    notes_error: Optional[str] = None   # why the notes could not be read; the check itself is unaffected
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -389,10 +574,25 @@ def check(*, refresh: bool = False, config: Optional[Dict[str, Any]] = None) -> 
     direct = floor is None or current >= floor
     newer = sorted((e for v, e in feed.releases.items() if Version(v) > current and (name == "prerelease" or not Version(v).is_prerelease)),
                    key=lambda e: Version(e["version"]), reverse=True)
+    notes: Dict[str, Any] = {}
+    if available:
+        notes = _notes_for(current, newest, prereleases=name == "prerelease", refresh=refresh)
     return UpdateState(
         **base, latest=latest, available=available, direct=direct, release=entry, checked_at=feed.checked_at or None,
-        error=feed.error, apply=mode, via=None if direct or not available else _step_through(feed, current, newest), releases=newer,
+        error=feed.error, apply=mode, via=None if direct or not available else _step_through(feed, current, newest), releases=newer, **notes,
     )
+
+
+def _notes_for(running: Version, target: Version, *, prereleases: bool, refresh: bool) -> Dict[str, Any]:
+    """``release_notes``, ``notes_source`` and ``notes_error`` for the state; never raises."""
+    try:
+        notes = load_notes(refresh=refresh)
+        if notes is None:
+            return {}
+        return {"release_notes": notes_between(notes, running, target, prereleases=prereleases), "notes_source": notes.source, "notes_error": notes.error}
+    except Exception as exc:  # noqa: BLE001 - the notes are optional
+        logger.warning("release notes skipped (%s)", exc)
+        return {"notes_error": str(exc)}
 
 
 # ── the files the updater reads and writes ──────────────────────────────────

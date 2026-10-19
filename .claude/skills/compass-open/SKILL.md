@@ -42,7 +42,8 @@ Order, and what to check after each step:
    given credentials.
 
 8. Updates (only when asked): `update check` shows the running version, the
-   compose file's `COMPASS_VERSION`, and the latest release. Without the
+   compose file's `COMPASS_VERSION`, and the latest release, with the notes of
+   every release in between under `update.release_notes`. Without the
    updater, apply with the two commands it prints. Do not start the updater
    (`--profile updater`) unless the user agrees: it mounts the Docker socket,
    which is root on their machine. `update apply` then answers `requested`.
