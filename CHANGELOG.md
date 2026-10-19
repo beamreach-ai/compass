@@ -91,6 +91,9 @@ Updates: the dashboard says when a release is out and applies it with one
 click when the updater service runs; `compass update check | apply | rollback`
 from the shell; `compass migrate` on every new version.
 
+- The Compass CLI and MCP server (`cli/`, `@beamreach/compass`) move into this
+  repository, with a plugin interface. They landed after the 0.4.1 tag; the
+  0.4.1 entry used to claim them.
 - `releases.json` on the `releases` branch, written by the release workflow,
   with the images' digests, what each release upgrades from directly, and the
   notes from this file. A GitHub Release with the same notes.
@@ -122,9 +125,8 @@ from the shell; `compass migrate` on every new version.
 
 ## 0.4.1 — 2026-10-16
 
-The Compass CLI and MCP server (`cli/`, `@beamreach/compass`) move into this
-repository, with a plugin interface; hosts built on Compass install their
-seams before the open defaults.
+Hosts: a product built on Compass installs its seams before the open
+defaults.
 
 ## 0.4.0 — 2026-10-15
 
