@@ -21,7 +21,7 @@ def test_set_1_connect_left_the_roles_and_a_bad_entry_saves_nothing(stack, page)
     assert stack.api.get("/api/settings/bootstrap").json()["aws"]["roles"] == aws["roles"], "nothing saved"
 
     page.open("/workspace?tab=settings")
-    page.get_by_text(f"Connected to {fixture.ACCOUNT}", exact=False).wait_for()
+    page.get_by_text(f"Account {fixture.ACCOUNT} is connected", exact=False).wait_for()
 
 
 def test_set_2_github_shows_the_token_s_login_and_a_rejected_token_changes_nothing(stack, page):

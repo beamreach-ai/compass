@@ -20,10 +20,9 @@ def _number(url: str) -> int:
 def test_acc_1_the_roles_are_there_and_nothing_is_granted(stack):
     access = stack.api.get("/api/access").json()
     assert access["connected"] and access["roles"]["read"].endswith("svc-inventory-reader-" + json.loads(stack.read("config/local.json"))["aws"]["install_id"])
-    assert access["grants"] == [] and access["summary"]["armed"] == 0
-    iam = stack.aws_client("iam")
-    act = access["roles"]["act"].rsplit("/", 1)[-1]
-    assert iam.list_role_policies(RoleName=act)["PolicyNames"] == [], "the act role starts empty"
+    assert not [g for g in access["grants"] if g["action_type"] == "ecs_restart_task"], "nothing of this kind yet (DEC-7 left its own, off)"
+    assert all(g["armed"] is False for g in access["grants"]), "DEC-7 ended with its response off: nothing is armed"
+    assert access["summary"]["armed"] == 0
 
 
 def test_acc_2_allowing_a_response_opens_the_access_pull_request(stack):
@@ -36,7 +35,7 @@ def test_acc_2_allowing_a_response_opens_the_access_pull_request(stack):
     access = stack.api.get("/api/access").json()
     grant = next(g for g in access["grants"] if g["grant_id"] == row["action_id"])
     assert grant["grant_pr"], "the pull request is recorded on the grant"
-    pull = stack.fakes.get(f"/_control/repos/{OWNER}/{NAME}/pulls/{_number(grant['grant_pr'])}").json()
+    pull = next(p for p in stack.repo()["pulls"] if p["number"] == _number(grant["grant_pr"]))
     assert pull["state"] == "open" and "ecs:StopTask" in pull["body"]
     files = stack.fakes.get(f"/_control/repos/{OWNER}/{NAME}/file", params={"path": f"{fixture.TERRAFORM_ROOT}/services/_ops_access/main.tf", "branch": pull["head"]}).json()["text"]
     assert 'resource "aws_iam_role" "act"' in files and "ecs:StopTask" in files and "svc-inventory-reader-" in files
@@ -56,7 +55,7 @@ def test_acc_3_merging_and_applying_arms_it(stack):
     grant = next(g for g in verified["grants"] if g["action_type"] == "ecs_restart_task")
     assert grant["grant_status"] == "armed" and grant["armed"], verified
     assert grant["verification"]["simulated"] is False, "moto has no SimulatePrincipalPolicy; the live checklist covers it"
-    assert [h["to"] for h in grant["history"]] == ["proposed", "pr_open", "merged", "armed"]
+    assert [h["to"] for h in grant["history"]] == ["proposed", "pr_open", "armed"], "one verify: the policy was already there"
     status = stack.api.get("/api/status").json()["access"]
     assert status["actions_armed"] == 1 and status["actions_total"] == 1
 

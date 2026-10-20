@@ -25,6 +25,7 @@ x-compass: &compass
     # here and no ~/.aws mount: the services run as the runtime identity `connect` created
     # (config/local.json) and refuse to start with a profile in reach.
     AWS_REGION: ${AWS_REGION:-us-east-1}
+    AWS_DEFAULT_REGION: ${AWS_REGION:-us-east-1}
     # What this compose file asked to pull; the dashboard says when it differs from what runs.
     COMPASS_VERSION: ${COMPASS_VERSION:-0.4.0}
     # Extra captains: pip requirements (PyPI name, git URL, or a wheel dropped in

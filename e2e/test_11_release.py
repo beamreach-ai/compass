@@ -42,4 +42,5 @@ def test_rel_3_the_quickstart_runs_the_commands_this_suite_ran(stack):
     for name in ("docker-compose.yml", "nginx.conf", ".env.example"):
         assert f"{name}" in quickstart.split("## 2.")[0], f"the quickstart downloads {name}"
         assert (ROOT / name).exists()
-    assert {"init_config", "init_tables"} <= set(stack.records), "the harness ran them"
+    assert {"init_config", "init_tables", "connect"} <= set(stack.records), "the harness ran them"
+    assert "compass connect account=" in quickstart and "compass connect account=" in readme

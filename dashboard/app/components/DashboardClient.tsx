@@ -651,7 +651,7 @@ export default function DashboardClient() {
               {settingsBootstrap?.aws?.connected ? (
                 <div className="rounded border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700 space-y-2">
                   <div>
-                    Connected to <span className="font-semibold text-gray-900">{settingsBootstrap.aws.account_id || "the account"}</span>
+                    Account <span className="font-semibold text-gray-900">{settingsBootstrap.aws.account_id || "unknown"}</span> is connected
                     {settingsBootstrap.aws.region ? ` (${(settingsBootstrap.aws.regions || [settingsBootstrap.aws.region]).join(", ")})` : ""}
                     {settingsBootstrap.aws.account_name ? ` · ${settingsBootstrap.aws.account_name}` : ""}
                   </div>

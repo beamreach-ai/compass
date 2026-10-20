@@ -29,6 +29,8 @@ cp .env.example .env && $EDITOR .env        # AWS_REGION, GITHUB_TOKEN
 docker compose run --rm compass init_config workspace=local region=us-east-1 \
     github_repo=<owner>/<infra-repo> terraform_root=<path to the root module>
 docker compose run --rm compass init_tables
+docker compose run --rm -v ~/.aws:/root/.aws:ro -e AWS_PROFILE=<profile> \
+    compass connect account=<account id> region=us-east-1   # your profile, once: creates the roles Compass reads through
 docker compose up -d
 ```
 
