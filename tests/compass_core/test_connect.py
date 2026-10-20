@@ -167,11 +167,16 @@ def test_template_renders_the_roles_for_an_account_out_of_reach(workspace):
 
 @mock_aws
 def test_serve_refuses_a_profile_and_a_foreign_identity(workspace, monkeypatch, tmp_path):
-    connect({"workspace_id": "local", "account": ACCOUNT, "region": "us-east-1"})
-    config = _config(workspace)
     monkeypatch.setenv("COMPASS_RUNTIME_CHECK", "1")
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     (tmp_path / "home").mkdir()
+    (tmp_path / "home" / ".aws").mkdir()
+    monkeypatch.setenv("AWS_PROFILE", "default")
+    assert sessions.assert_runtime(_config(workspace)) is None, "before connect an updated install starts with its profile, to run connect"
+    monkeypatch.delenv("AWS_PROFILE")
+    (tmp_path / "home" / ".aws").rmdir()
+    connect({"workspace_id": "local", "account": ACCOUNT, "region": "us-east-1"})
+    config = _config(workspace)
     assert sessions.assert_runtime(config) == config["aws"]["control"]["runtime_arn"], "the runtime user's key from the config is the identity"
     monkeypatch.setenv("AWS_PROFILE", "default")
     with pytest.raises(sessions.RuntimeIdentityError, match="AWS_PROFILE"):

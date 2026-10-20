@@ -276,3 +276,19 @@ def test_the_api_runs_a_request_as_the_captain_that_owns_the_path():
     assert hp["captain"] == "honeypot" and core["captain"] == sessions.CORE
     assert re.match(r"^[0-9a-f]{32}$", hp["request_id"]) and hp["request_id"] != core["request_id"]
     assert sessions.current_captain() is None
+
+
+def test_before_connect_control_reaches_dynamodb_local_with_placeholder_keys(tmp_path, monkeypatch):
+    for name in ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_PROFILE"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("AWS_SHARED_CREDENTIALS_FILE", str(tmp_path / "none"))
+    monkeypatch.setenv("AWS_CONFIG_FILE", str(tmp_path / "none"))
+    monkeypatch.setenv("AWS_EC2_METADATA_DISABLED", "true")
+    monkeypatch.setenv("COMPASS_CONFIG", str(tmp_path / "missing.json"))
+    sessions.clear_cache()
+    monkeypatch.delenv("AWS_ENDPOINT_URL_DYNAMODB", raising=False)
+    assert sessions.control().get_credentials() is None, "no endpoint, no placeholder"
+    monkeypatch.setenv("AWS_ENDPOINT_URL_DYNAMODB", "http://dynamodb:8000")
+    sessions.clear_cache()
+    assert sessions.control().get_credentials().access_key == "local"
+    sessions.clear_cache()

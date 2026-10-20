@@ -48,9 +48,12 @@ The containers need one AWS identity to call `sts:AssumeRole`:
   alternative for anyone who cannot accept a key on disk; it fits the same
   `aws.control` shape (`credential_source`).
 
-The services check at start that no `AWS_PROFILE` is set, no `~/.aws` is
-mounted, and the credentials they run with are the runtime identity `connect`
-recorded. The profile is for `connect` only.
+Once `connect` has run, the services check at start that no `AWS_PROFILE` is
+set, no `~/.aws` is mounted, and the credentials they run with are the runtime
+identity `connect` recorded. Before that they start as they are, so an install
+updated with its old compose file comes up, shows the Connect card, and can run
+`connect` with the profile it already mounts; remove the mount afterwards. The
+profile is for `connect` only.
 
 ## Every session, named
 

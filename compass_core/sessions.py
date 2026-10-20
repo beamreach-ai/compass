@@ -170,6 +170,10 @@ def _control_credentials() -> Dict[str, Any]:
             found = {"aws_access_key_id": str(creds["access_key_id"]), "aws_secret_access_key": str(creds["secret_access_key"])}
     except Exception as exc:  # noqa: BLE001 - no workspace yet is normal before init_config
         logger.debug("no control credentials in the config: %s", exc)
+    if not found and os.getenv("AWS_ENDPOINT_URL_DYNAMODB") and boto3.Session().get_credentials() is None:
+        # Before `connect` the containers hold no AWS identity at all (no profile, by design), and the
+        # one thing to reach is DynamoDB-local, which accepts any signature. Anything real still fails.
+        found = {"aws_access_key_id": "local", "aws_secret_access_key": "local"}
     with _control_lock:
         _control_cached = (key, found, time.time())
     return found
@@ -198,18 +202,20 @@ def assert_runtime(config: Mapping[str, Any]) -> Optional[str]:
     identity `connect` recorded. Returns the identity's ARN, or None when there is no
     target yet (a fresh install shows the Connect card and runs nothing that needs
     one). Off unless COMPASS_RUNTIME_CHECK is set, which the image sets: a checkout
-    on a laptop has ~/.aws for good reasons."""
+    on a laptop has ~/.aws for good reasons. Before `connect` has run nothing is
+    refused: an install updated from 0.6 still has its profile in the compose file,
+    and must start to show the Connect card and run `connect` with it."""
     if (os.getenv("COMPASS_RUNTIME_CHECK") or "").strip().lower() not in ("1", "true", "yes"):
+        return None
+    control_cfg = control_config(config)
+    expected = str(control_cfg.get("runtime_arn") or "")
+    if not role_arn(config, "read") or not expected:
         return None
     if os.getenv("AWS_PROFILE"):
         raise RuntimeIdentityError("AWS_PROFILE is set: the profile is for `compass connect` only; remove it from .env and the compose environment")
     home_aws = os.path.join(os.path.expanduser("~"), ".aws")
     if os.path.isdir(home_aws):
         raise RuntimeIdentityError(f"{home_aws} is mounted: the profile is for `compass connect` only; remove the ~/.aws volume from docker-compose.yml")
-    control_cfg = control_config(config)
-    expected = str(control_cfg.get("runtime_arn") or "")
-    if not role_arn(config, "read") or not expected:
-        return None
     arn = str(control().client("sts").get_caller_identity()["Arn"])
     if not _same_identity(arn, expected):
         raise RuntimeIdentityError(f"running as {arn}, not the runtime identity `connect` created ({expected}); run `compass connect` again or fix the credentials")

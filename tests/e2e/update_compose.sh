@@ -85,11 +85,8 @@ for tag in "$FROM" "$VERSION" "$BROKEN"; do
 done
 
 # ── the stack on the old version ────────────────────────────────────────────
-mkdir -p "$PROJ/extensions/wheels" "$PROJ/aws"
+mkdir -p "$PROJ/extensions/wheels"
 cp "$ROOT/docker-compose.yml" "$ROOT/nginx.conf" "$PROJ/"
-# a profile with fake keys: the stack only talks to its own DynamoDB-local, never to AWS
-printf '[default]\nregion = us-east-1\n' > "$PROJ/aws/config"
-printf '[default]\naws_access_key_id = testing\naws_secret_access_key = testing\n' > "$PROJ/aws/credentials"
 "$PY" -m build --wheel --outdir "$PROJ/extensions/wheels" "$ROOT/examples/captain-hello" >/dev/null
 sed -e "s/^COMPASS_VERSION=.*/COMPASS_VERSION=$FROM/" -e "s/^COMPASS_PORT=.*/COMPASS_PORT=$WEB/" -e "s/^APP_PASSWORD=.*/APP_PASSWORD=e2e-password/" \
   "$ROOT/.env.example" > "$PROJ/.env"
@@ -97,7 +94,10 @@ cat >> "$PROJ/.env" <<ENV
 COMPASS_REGISTRY=$REG
 COMPASS_EXTENSIONS=compass-captain-hello==0.1.0
 PIP_NO_INDEX=1
-AWS_DIR=$PROJ/aws
+# fake keys, for the old version, which reads credentials from the environment: the stack only
+# talks to its own DynamoDB-local, never to AWS (the compose file no longer mounts a profile)
+AWS_ACCESS_KEY_ID=testing
+AWS_SECRET_ACCESS_KEY=testing
 COMPASS_UPDATE_CHECK=off
 COMPASS_UPDATER_HEALTH_SECONDS=90
 ENV
