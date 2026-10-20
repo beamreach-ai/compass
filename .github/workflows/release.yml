@@ -110,7 +110,11 @@ jobs:
         run: |
           flags=""
           [ "${{ steps.version.outputs.prerelease }}" = "true" ] && flags="--prerelease"
-          gh release create "$GITHUB_REF_NAME" --title "Compass ${{ steps.version.outputs.version }}" --notes-file notes.md $flags
+          # the GitHub Release links the release's page on beamreach.ai (its notes and videos);
+          # notes.md itself stays the changelog section, which releases.json reads
+          cp notes.md release-body.md
+          printf '\n\nRelease notes and videos: https://beamreach.ai/compass/releases/%s.html\n' "${{ steps.version.outputs.version }}" >> release-body.md
+          gh release create "$GITHUB_REF_NAME" --title "Compass ${{ steps.version.outputs.version }}" --notes-file release-body.md $flags
       - name: releases.json on the releases branch
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

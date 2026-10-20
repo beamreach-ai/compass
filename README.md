@@ -118,6 +118,13 @@ Settings → Captains → Available lists the captain catalog: Install, then
 Restart Compass, and the captain is there. To build one, start with
 `docs/captain_development.md` and the example under `examples/captain-hello/`.
 
+## Releases
+
+What changed in each release, with a short video of each feature:
+[beamreach.ai/compass/releases](https://beamreach.ai/compass/releases/)
+([RSS](https://beamreach.ai/compass/releases/feed.xml); the dashboard's Updates card reads the same
+notes before you update). [CHANGELOG.md](CHANGELOG.md) is the full list.
+
 ## Compass and Beamreach
 
 This is the open edition of [Beamreach Compass](https://beamreach.ai/compass/),
