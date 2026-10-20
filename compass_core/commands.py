@@ -258,60 +258,6 @@ def migrate(payload: Dict[str, Any]) -> Dict[str, Any]:
         return migrations.run(workspace.config, workspace_id=workspace.workspace_id)
 
 
-# ── init_alerts ──────────────────────────────────────────────────────────────
-
-def queue_policy(queue_arn: str, account_id: str) -> Dict[str, Any]:
-    """EventBridge rules in the account (what a planted decoy creates) and the
-    account's own principals (the listener's task role) may send to the queue."""
-    return {
-        "Version": "2012-10-17",
-        "Statement": [
-            {
-                "Sid": "DecoyEventBridgeRules",
-                "Effect": "Allow",
-                "Principal": {"Service": "events.amazonaws.com"},
-                "Action": "sqs:SendMessage",
-                "Resource": queue_arn,
-                "Condition": {"StringEquals": {"aws:SourceAccount": account_id}},
-            },
-            {
-                "Sid": "AccountPrincipals",
-                "Effect": "Allow",
-                "Principal": {"AWS": f"arn:aws:iam::{account_id}:root"},
-                "Action": ["sqs:SendMessage", "sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:GetQueueAttributes"],
-                "Resource": queue_arn,
-            },
-        ],
-    }
-
-
-def create_alert_queue(config: Dict[str, Any], *, workspace_id: str, region: str, session: Any = None) -> Dict[str, str]:
-    """Create (or find) the decoy alert queue in the target account and set its policy."""
-    session = session or sessions.target("write", region=region, captain=sessions.CORE, config=config)
-    account_id = session.client("sts").get_caller_identity()["Account"]
-    sqs = session.client("sqs", region_name=region)
-    name = f"compass-decoy-alerts-{workspace_id}"
-    url = sqs.create_queue(QueueName=name, Attributes={"MessageRetentionPeriod": "345600"})["QueueUrl"]
-    arn = sqs.get_queue_attributes(QueueUrl=url, AttributeNames=["QueueArn"])["Attributes"]["QueueArn"]
-    sqs.set_queue_attributes(QueueUrl=url, Attributes={"Policy": json.dumps(queue_policy(arn, account_id))})
-    return {"queue_url": url, "queue_arn": arn, "account_id": account_id, "region": region}
-
-
-def init_alerts(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Create the SQS queue planted decoys report to, and record it in the config file."""
-    workspace = resolve(payload)
-    region = str(payload.get("region") or (workspace.config.get("aws") or {}).get("region") or workspace.config.get("aws_region") or os.getenv("AWS_REGION") or "us-east-1")
-    created = create_alert_queue(workspace.config, workspace_id=workspace.workspace_id, region=region)
-    path = core_config.config_path(workspace.workspace_id)
-    if path is not None:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        hp = data.setdefault("honeypot", {})
-        hp["alert_queue_arn"] = created["queue_arn"]
-        hp["alert_queue_url"] = created["queue_url"]
-        path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-    return {"workspace_id": workspace.workspace_id, **created, "config": str(path) if path else None}
-
-
 # ── connect ──────────────────────────────────────────────────────────────────
 
 def connect(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -504,7 +450,7 @@ def update(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 COMMANDS = {
-    "init_config": init_config, "init_tables": init_tables, "init_alerts": init_alerts, "serve": serve, "api": api, "login": login,
+    "init_config": init_config, "init_tables": init_tables, "serve": serve, "api": api, "login": login,
     "captains": captains, "enable": enable, "disable": disable, "configure": configure, "catalog": catalog,
     "install": install, "uninstall": uninstall, "validate": validate, "migrate": migrate, "update": update,
     "connect": connect,

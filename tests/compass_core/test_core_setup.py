@@ -1,11 +1,9 @@
-"""init_config, init_alerts and serve: the setup a new install goes through."""
+"""init_config, init_tables and serve: the setup a new install goes through (connect: test_connect.py)."""
 
 import json
 import threading
 
-import boto3
 import pytest
-from moto import mock_aws
 
 from compass_core import commands, dispatch, queue, serve
 from compass_core import config as core_config
@@ -32,26 +30,6 @@ def test_init_config_writes_a_complete_workspace_file(tmp_path, monkeypatch):
     assert result["config"]["dashboard"]["password"] == "<see login>"
     with pytest.raises(FileExistsError):
         commands.init_config({"workspace": "local", "out": str(out)})
-
-
-@mock_aws
-def test_init_alerts_creates_the_queue_with_a_policy_and_records_it(tmp_path, monkeypatch):
-    monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
-    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "testing")
-    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "testing")
-    path = tmp_path / "local.json"
-    path.write_text(json.dumps({"workspace_id": "local", "aws": {"auth_mode": "local_iam", "region": "us-east-1"}, "honeypot": {}}))
-    monkeypatch.setenv("COMPASS_CONFIG", str(path))
-    monkeypatch.setattr(core_config, "_loader", None)
-    session = boto3.Session(region_name="us-east-1")
-    monkeypatch.setattr("compass_core.sessions.target", lambda *args, **kwargs: session)
-
-    out = commands.init_alerts({"workspace_id": "local"})
-    assert out["queue_arn"].endswith(":compass-decoy-alerts-local")
-    policy = json.loads(session.client("sqs").get_queue_attributes(QueueUrl=out["queue_url"], AttributeNames=["Policy"])["Attributes"]["Policy"])
-    assert {s["Sid"] for s in policy["Statement"]} == {"DecoyEventBridgeRules", "AccountPrincipals"}
-    saved = json.loads(path.read_text())
-    assert saved["honeypot"]["alert_queue_arn"] == out["queue_arn"] and saved["honeypot"]["alert_queue_url"] == out["queue_url"]
 
 
 def test_serve_once_runs_one_prs_tick_and_the_alert_consumer(monkeypatch):
@@ -111,6 +89,9 @@ def test_queue_urls_fall_back_to_the_environment(monkeypatch):
     monkeypatch.setenv("HONEYPOT_ALERT_QUEUE_URLS", "https://a/q1, https://a/q2")
     assert queue_urls({}) == ["https://a/q1", "https://a/q2"]
     assert queue_urls({"honeypot": {"alert_queue_urls": ["https://c/q"]}}) == ["https://c/q"]
+    connected = {"aws": {"control": {"alert_queues": {"eu-west-1": {"arn": "arn:aws:sqs:eu-west-1:1:q", "url": "https://d/q"}}}},
+                 "honeypot": {"alert_queue_url": "https://old/q"}}
+    assert queue_urls(connected) == ["https://d/q"], "connect's queues win over the decoy captain's old keys"
 
 
 def test_env_password_wins_and_no_password_is_a_warning(monkeypatch):
@@ -123,8 +104,8 @@ def test_env_password_wins_and_no_password_is_a_warning(monkeypatch):
 
 
 def test_a_service_starts_with_the_config_as_it_is_now_not_as_it_was_when_serve_started(monkeypatch):
-    """init_alerts runs after `up -d` in the quickstart: the alert consumer, restarted by the
-    daemon's check, must see the queue it recorded without a restart of the daemon."""
+    """`connect` may run after `up -d`: the alert consumer, restarted by the daemon's check,
+    must see the queue it recorded without a restart of the daemon."""
     from compass_core.captains import CaptainManifest, ServiceSpec
 
     current = {"workspace_id": "ws-1", "honeypot": {}}

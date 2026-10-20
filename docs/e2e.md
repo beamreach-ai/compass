@@ -248,7 +248,7 @@ MAP-6 (a scan of a real account) is a manual check before a release.
 
 | ID | Test | Via |
 |---|---|---|
-| DEC-1 | `init_alerts` creates the queue with its policy and records it; the daemon starts consuming it without a restart | CLI |
+| DEC-1 | `connect` created the queue in the control account with its policy and SQS-managed encryption; the daemon consumes it; `replant_alerts` has nothing to do on a fresh install | CLI |
 | DEC-2 | Suggestions appear next to the seeded resources | API, UI |
 | DEC-3 | Planting each of the six classes opens a pull request with one module, `terraform fmt` clean; planting from the page works | API, UI |
 | DEC-4 | Arming before the apply says what is missing; after it, the decoy is armed | API |

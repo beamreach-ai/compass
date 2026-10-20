@@ -207,12 +207,18 @@ class HoneypotCaptain:
         return inputs
 
     def _alert_queue_arn(self, honeytoken: Dict[str, Any]) -> str:
-        """ARN of the Compass alert queue the plant PR points rules at.
+        """ARN of the alert queue the plant PR points rules at: the one `compass connect`
+        created in the control account for the token's region (EventBridge cannot deliver
+        across regions), then the token's own, the decoy captain's older keys, the environment."""
+        from compass_core.aws import alert_queues, resolve_target_region
 
-        Looked up on the token, then workspace config, then the environment."""
+        queues = alert_queues(self.config)
+        region = str(honeytoken.get("region") or resolve_target_region(self.config) or "")
         cfg = self.config.get("honeypot") or {}
         arn = (
-            honeytoken.get("alert_queue_arn")
+            (queues.get(region) or {}).get("arn")
+            or (next(iter(queues.values()))["arn"] if queues else None)   # connect's queues win over older keys
+            or honeytoken.get("alert_queue_arn")
             or cfg.get("alert_queue_arn")
             or self.config.get("beamreach_honeypot_alert_queue_arn")
             or os.getenv("HONEYPOT_ALERT_QUEUE_ARN")
@@ -220,10 +226,38 @@ class HoneypotCaptain:
         )
         if not arn:
             raise RuntimeError(
-                "No alert queue ARN configured (honeypot.alert_queue_arn or HONEYPOT_ALERT_QUEUE_ARN); "
-                "a plant PR cannot deliver alerts without it."
+                f"No alert queue for region {region or '?'}: run `compass connect regions={region or '<region>'}` "
+                "(it creates one per region decoys live in); a plant PR cannot deliver alerts without it."
             )
+        if queues and region and region not in queues:
+            logger.warning("no alert queue in %s; the decoy will report to %s, which EventBridge may not reach from %s", region, arn, region)
         return str(arn)
+
+    # ── Replant alerts: every planted module reports to connect's queues ─────
+
+    def run_replant_alerts(self, *, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """One pull request that points every planted decoy module (and the account
+        module's delivery role) at the alert queues `compass connect` created, touching
+        only the `alert_queue_arn` input of each. Decoys planted before `connect` report
+        to the old queue until this is merged and applied."""
+        from captains.honeypot.pr_writer import HoneypotPRWriter
+        from compass_core.aws import alert_queues
+
+        queues = alert_queues(self.config)
+        if not queues:
+            raise RuntimeError("no alert queues in the config: run `compass connect` first")
+        hp_cfg = self.config.get("honeypot") or {}
+        writer = HoneypotPRWriter(self.config)
+        result = writer.create_replant_alerts_pr(
+            queues_by_region={region: q["arn"] for region, q in queues.items() if q.get("arn")},
+            resolved_repo=str(payload.get("repo") or hp_cfg.get("repo") or "") or None,
+            resolved_module_path=str(payload.get("module_path") or hp_cfg.get("terraform_root") or "") or None,
+        )
+        if result.get("pr_url"):
+            self._register_pr("replant_alerts", pr_url=result["pr_url"], honeytoken={"name": "alert queues"},
+                              module_path=hp_cfg.get("terraform_root") or None, title="Decoy alerts: report to the Compass queues")
+            emit_job_event(f"Replant-alerts PR: {result['pr_url']}", event_type="progress", status="completed")
+        return result
 
     # ── Decommission (remove honeytoken and open removal PR) ────────────
 

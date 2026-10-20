@@ -12,7 +12,7 @@ const accountInput = {
   external_id: z.string().optional().describe("External id in the trust policy; defaults to the one Compass recorded (aws.external_id)"),
   base_identity: z.string().optional().describe("template: the identity Compass runs with (aws.runtime_arn from get, or the machine's role)"),
   region: z.string().optional().describe("Target region"),
-  profile: z.string().optional().describe("connect: the AWS profile in ~/.aws to run it with (printed into the command)"),
+  aws_profile: z.string().optional().describe("connect: the AWS profile in ~/.aws to run it with (printed into the command)"),
   state_bucket: z.string().optional().describe("connect: the Terraform state bucket the mapper may read"),
   account_name: z.string().optional().describe("Friendly name shown in the dashboard"),
 };
@@ -64,7 +64,7 @@ export const accountTool = defineTool({
     const extra = args.state_bucket ? ` state_bucket=${args.state_bucket}` : "";
     return {
       connected: Boolean(bootstrap?.aws?.connected),
-      run_in_the_install_directory: `docker compose run --rm -v ~/.aws:/root/.aws:ro -e AWS_PROFILE=${args.profile || "<profile>"} compass connect account=${account} region=${region}${extra}`,
+      run_in_the_install_directory: `docker compose run --rm -v ~/.aws:/root/.aws:ro -e AWS_PROFILE=${args.aws_profile || "<profile>"} compass connect account=${account} region=${region}${extra}`,
       then: "docker compose up -d",
       note: "the one command that uses the profile: it creates two IAM roles, an alert queue and a runtime user, verifies them and records them in config/local.json",
     };

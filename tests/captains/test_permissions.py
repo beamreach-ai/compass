@@ -43,7 +43,7 @@ def test_the_static_pass_sees_what_the_captains_do():
             "elasticloadbalancing:DescribeLoadBalancers", "cloudwatch:DescribeAlarms", "secretsmanager:ListSecrets"} <= mapper
     assert "lambda:GetFunction" not in mapper
     honeypot = permissions.aws_calls(ROOT / "captains" / "honeypot")
-    assert {c.action for c in honeypot if c.control} == {"sqs:ReceiveMessage", "sqs:DeleteMessage", "ses:SendEmail"}, "the control side is not the target"
+    assert {c.action for c in honeypot if c.control} == {"sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:GetQueueAttributes", "ses:SendEmail"}, "the control side is not the target"
     assert "tag:GetResources" in {c.action for c in honeypot}, "resourcegroupstaggingapi maps to the tag: prefix"
     assert not [c for c in honeypot if "actions/" in c.file], "the write actions are checked against their own statements"
 

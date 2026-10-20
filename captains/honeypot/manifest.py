@@ -21,7 +21,7 @@ CONFIG_SCHEMA = {
         },
         "alert_queue_url": {
             "type": "string", "x-order": 3, "x-group": "Alerts",
-            "x-help": "SQS queue the decoy listeners deliver alerts to (compass init_alerts creates one).",
+            "x-help": "SQS queue the decoy listeners deliver alerts to (`compass connect` creates it creates one).",
         },
         "alert_queue_urls": {
             "type": "array", "items": {"type": "string"}, "x-order": 4, "x-group": "Alerts",

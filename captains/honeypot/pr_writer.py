@@ -42,6 +42,12 @@ HONEYTOKENS_FILE = ROOT_FILE
 _TOKEN_MODULE_PREFIX = TOKEN_MODULE_PREFIX
 
 
+def _unq(value: str) -> str:
+    """The string inside a quoted HCL expression; a reference or a bare value unchanged."""
+    text = str(value or "").strip()
+    return text[1:-1] if len(text) >= 2 and text[0] == text[-1] == '"' else text
+
+
 class HoneytokensFile:
     def __init__(self) -> None:
         # module name -> {attribute: raw HCL expression text}
@@ -408,6 +414,64 @@ class HoneypotPRWriter:
         self.last_pr = open_or_update_pr(gh_repo, branch=branch_name, base_branch=base_branch, title=title, body=body)
         logger.info("Module PR: %s", self.last_pr.url)
         return self.last_pr.url
+
+    def create_replant_alerts_pr(
+        self,
+        *,
+        queues_by_region: Dict[str, str],
+        resolved_repo: Optional[str] = None,
+        resolved_module_path: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Point every module in the root file at the queue of its region: a module whose
+        `alert_queue_arn` names a queue in region R gets the new queue in R; the account
+        module (one input) gets the default region's. Nothing else in the file changes.
+        Returns the PR URL and what was rewritten; no PR when nothing needed it."""
+        token = resolve_github_token(self.config, capability="write")
+        if not token:
+            raise RuntimeError("GitHub write token is required")
+        g = github_client(token)
+        repo_name = self._resolve_repo(resolved_repo)
+        gh_repo = g.get_repo(repo_name)
+        base_branch = self._get_base_branch()
+        root_file = self._root_path(resolved_module_path, HONEYTOKENS_FILE)
+        text = self._read_text(gh_repo, root_file, base_branch)
+        if text is None:
+            return {"pr_url": None, "rewritten": [], "unchanged": [], "reason": f"{root_file} is not in {repo_name}: nothing planted yet"}
+        doc = parse_honeytokens_tf(text)
+        new_arns = set(queues_by_region.values())
+        default_region = next(iter(queues_by_region))
+        rewritten: List[Dict[str, str]] = []
+        unchanged: List[str] = []
+        for name, attrs in doc.modules.items():
+            current = _unq(attrs.get("alert_queue_arn", ""))
+            if not current or current in new_arns:
+                unchanged.append(name)
+                continue
+            region = current.split(":")[3] if current.count(":") >= 5 else default_region
+            replacement = queues_by_region.get(region) or (queues_by_region.get(default_region) if name == ACCOUNT_MODULE_NAME else None)
+            if not replacement:
+                unchanged.append(name)
+                logger.warning("%s reports to %s and there is no new queue in %s: run `compass connect regions=%s`", name, current, region, region)
+                continue
+            attrs["alert_queue_arn"] = _q(replacement)
+            rewritten.append({"module": name, "from": current, "to": replacement})
+        if not rewritten:
+            return {"pr_url": None, "rewritten": [], "unchanged": unchanged, "reason": "every module already reports to the current queues"}
+        branch_name = f"{_BRANCH_PREFIX}replant-alerts"
+        ensure_branch(gh_repo, branch_name, base_branch)
+        commit_files(gh_repo, branch_name, {root_file: render_honeytokens_tf(doc)},
+                     add_message="beamreach: decoy alerts report to the Compass queues",
+                     update_message="beamreach: decoy alerts report to the Compass queues")
+        lines = "\n".join(f"- `{r['module']}`: `{r['from']}` → `{r['to']}`" for r in rewritten)
+        body = (
+            "Decoy alerts now flow into the account Compass runs in. This changes only the `alert_queue_arn` "
+            "input of each planted module (and the account module's delivery role), nothing else.\n\n"
+            f"{lines}\n\nAfter the apply, the old queue receives nothing and can be deleted."
+        )
+        self.last_pr = open_or_update_pr(gh_repo, branch=branch_name, base_branch=base_branch,
+                                         title="Decoy alerts: report to the Compass queues", body=body)
+        logger.info("Replant-alerts PR: %s", self.last_pr.url)
+        return {"pr_url": self.last_pr.url, "rewritten": rewritten, "unchanged": unchanged}
 
     def create_decommission_pr(
         self,

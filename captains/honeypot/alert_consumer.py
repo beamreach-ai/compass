@@ -253,10 +253,16 @@ if __name__ == "__main__":
 
 
 def queue_urls(config: Dict[str, Any]) -> List[str]:
-    """The alert queues a workspace consumes: ``honeypot.alert_queue_urls`` or
-    ``honeypot.alert_queue_url``, else ``HONEYPOT_ALERT_QUEUE_URL(S)``."""
+    """The alert queues a workspace consumes: the ones `compass connect` created in the
+    control account (``aws.control.alert_queues``), else the decoy captain's own keys
+    (``honeypot.alert_queue_urls`` / ``alert_queue_url``, the queue `init_alerts` made in
+    the target account, honoured for one release), else ``HONEYPOT_ALERT_QUEUE_URL(S)``."""
+    from compass_core.aws import alert_queues
+
+    urls = [q["url"] for q in alert_queues(config).values() if q.get("url")]
     hp = config.get("honeypot") if isinstance(config.get("honeypot"), dict) else {}
-    urls = hp.get("alert_queue_urls") or ([hp["alert_queue_url"]] if hp.get("alert_queue_url") else [])
+    if not urls:
+        urls = hp.get("alert_queue_urls") or ([hp["alert_queue_url"]] if hp.get("alert_queue_url") else [])
     if not urls:
         raw = os.getenv("HONEYPOT_ALERT_QUEUE_URLS") or os.getenv("HONEYPOT_ALERT_QUEUE_URL") or ""
         urls = [u.strip() for u in raw.split(",") if u.strip()]
@@ -268,7 +274,7 @@ def run_service(workspace_id: str, config: Dict[str, Any], stop: threading.Event
     (a `compass serve` service, compass_core.captains.ServiceSpec)."""
     urls = queue_urls(config)
     if not urls:
-        logger.warning("no decoy alert queue configured (honeypot.alert_queue_url); alerts will not be consumed")
+        logger.warning("no decoy alert queue configured: run `compass connect`; alerts will not be consumed")
         return
     consumers = []
     threads = []

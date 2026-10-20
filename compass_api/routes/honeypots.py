@@ -934,7 +934,7 @@ def arm_honeytoken(request: Request, honeytoken_id: str) -> Dict[str, Any]:
         if session is not None and region and session.region_name != region:
             # the workspace's configured region wins in target(); pin the session to the placement's region
             session = sessions.with_region(session, region)
-        result = arm.verify_honeytoken(session, _to_native(token), placement)
+        result = arm.verify_honeytoken(session, _to_native(token), placement, config=get_workspace_config(request))
     except Exception as exc:
         result = {"ok": False, "checks": [{"name": "target_account_access", "ok": False, "detail": str(exc)[:300]}]}
     if not result["ok"]:

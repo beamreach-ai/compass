@@ -171,7 +171,7 @@ class Server:
 
     def _current_config(self) -> Dict[str, Any]:
         """The workspace config as it is now, with the ids serve resolved at start. Settings
-        written after serve started (init_alerts records the alert queue after `up -d`)
+        written after serve started (`connect` may record the alert queue after `up -d`)
         reach a service the next time it starts."""
         try:
             fresh = dict(workspace_config(self.workspace_id))

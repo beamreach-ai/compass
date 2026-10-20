@@ -118,19 +118,20 @@ def armed_decoy(stack, name: str, *, endpoints: Optional[List[str]] = None) -> D
 
 # ── the tests ───────────────────────────────────────────────────────────────
 
-def test_dec_1_init_alerts_creates_the_queue_and_the_daemon_consumes_it_without_a_restart(stack, mapped):
-    created = stack.cli("init_alerts")
-    assert created["queue_arn"] == f"arn:aws:sqs:{fixture.REGION}:{fixture.ACCOUNT}:{QUEUE}"
-    attributes = stack.aws_client("sqs").get_queue_attributes(QueueUrl=f"{stack.moto_url}/{fixture.ACCOUNT}/{QUEUE}", AttributeNames=["Policy"])
-    policy = json.loads(attributes["Attributes"]["Policy"])
-    assert {s["Sid"] for s in policy["Statement"]} == {"DecoyEventBridgeRules", "AccountPrincipals"}
+def test_dec_1_connect_created_the_queue_and_the_daemon_consumes_it(stack, mapped):
     config = json.loads(stack.read("config/local.json"))
-    assert config["honeypot"]["alert_queue_arn"] == created["queue_arn"]
-    # the quickstart runs init_alerts after `up -d`: the daemon must pick the queue up on its own
+    queue = config["aws"]["control"]["alert_queues"][fixture.REGION]
+    assert queue["arn"] == f"arn:aws:sqs:{fixture.REGION}:{fixture.ACCOUNT}:{QUEUE}"
+    attributes = stack.aws_client("sqs").get_queue_attributes(QueueUrl=f"{stack.moto_url}/{fixture.ACCOUNT}/{QUEUE}", AttributeNames=["All"])
+    policy = json.loads(attributes["Attributes"]["Policy"])
+    assert {s["Sid"] for s in policy["Statement"]} == {"TargetAccountDelivery", "DecoyEventBridgeRules", "BaseIdentityReads"}
+    assert attributes["Attributes"].get("SqsManagedSseEnabled") == "true"
     deadline = time.time() + 90
     while "consuming decoy alerts from" not in stack.compose("logs", "--no-color", "compass").stdout:
-        assert time.time() < deadline, "the daemon did not start consuming the new queue within 90s"
+        assert time.time() < deadline, "the daemon did not start consuming the queue within 90s"
         time.sleep(5)
+    replant = stack.cli("honeypot", "replant_alerts")
+    assert replant["pr_url"] is None and "already" in replant["reason"] or replant["reason"].endswith("nothing planted yet"), replant
 
 
 def test_dec_2_suggestions_appear_next_to_the_seeded_resources(stack, page, mapped):
