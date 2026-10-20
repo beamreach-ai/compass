@@ -4,10 +4,12 @@ Compass maps an AWS account to the Terraform and repositories that own it,
 then acts on the map: plants decoy credentials that trip when used, imports
 unmanaged resources into Terraform, and keeps the pull requests it opens alive.
 It runs on your machine: a dashboard and API, a daemon, and a local DynamoDB.
-Your credentials, your account.
+Compass reads your account through a role it creates once; it writes nothing
+without a pull request you merge.
 
-You need Docker, an AWS profile in `~/.aws` with read access to the account,
-and a GitHub token with `repo` scope (`gh auth token` prints yours).
+You need Docker, an AWS profile in `~/.aws` that can create IAM roles in the
+account (used once, by `connect`), and a GitHub token with `repo` scope
+(`gh auth token` prints yours).
 
 ## 1. Install
 
@@ -17,7 +19,7 @@ for f in docker-compose.yml nginx.conf .env.example; do
   curl -fsSO https://raw.githubusercontent.com/beamreach-ai/compass/main/$f
 done
 cp .env.example .env
-$EDITOR .env      # AWS_PROFILE, AWS_REGION, GITHUB_TOKEN; ANTHROPIC_API_KEY for Claude
+$EDITOR .env      # AWS_REGION, GITHUB_TOKEN; ANTHROPIC_API_KEY for Claude
 ```
 
 ## 2. A workspace
@@ -26,8 +28,22 @@ $EDITOR .env      # AWS_PROFILE, AWS_REGION, GITHUB_TOKEN; ANTHROPIC_API_KEY for
 docker compose run --rm compass init_config workspace=local region=us-east-1 \
     github_repo=<owner>/<infra-repo> terraform_root=<path to the root module>
 docker compose run --rm compass init_tables
+docker compose run --rm -v ~/.aws:/root/.aws:ro -e AWS_PROFILE=<profile> \
+    compass connect account=<account id> region=us-east-1
 docker compose up -d
 ```
+
+`connect` is the one command that uses your profile. It creates, in the
+account, a read role whose policy is generated from what the installed captains
+declare they read, an act role with no permissions (a response action gets its
+permission by a pull request you merge, never otherwise), the queue decoy
+alerts report to, and a runtime user whose only right is to assume those two
+roles. The user's key goes into `config/local.json`; the services run as it
+and refuse to start if a profile is in reach. Run `connect` again after
+installing a captain that reads more, to rotate the key (`connect rotate`), or
+to check the roles (`connect verify`). For an account you cannot reach from
+this machine, `connect template account=…` writes the roles as CloudFormation
+and Terraform. [docs/access.md](access.md) has the model.
 
 `init_config` prints a `login` block: the dashboard URL, user `admin` and a
 generated password (kept in `config/local.json`). Open **http://localhost:8080**
@@ -47,11 +63,10 @@ Every action in the dashboard is also a command:
 
 ## 3. Decoys
 
-Decoys report to an SQS queue in the account. Create it once, enable a
-response, then plant:
+Decoys report to the alert queue `connect` created. Enable a response, then
+plant:
 
 ```sh
-docker compose run --rm compass init_alerts         # creates compass-decoy-alerts-local; needs write access once
 docker compose run --rm compass honeypot action_set action_type=iam_deactivate_key mode=autopilot risk_max=2
 docker compose run --rm compass honeypot create honeytoken_class=aws_credential name=svc_nightly_backup region=us-east-1
 ```
@@ -74,7 +89,11 @@ trail logging management events in the account. Classes: `aws_credential`,
 `action_set`'s `mode` is `off` (recommend only), `approve` (wait for a human)
 or `autopilot`: autopilot runs the action — deactivate the decoy key, restart
 the task that leaked it — only when its deterministic risk is at or below
-`risk_max`. In the config, `prs.watcher.mode` and `risk_max` work the same way
+`risk_max`. Allowing an action opens a pull request on your infra repo that
+gives Compass's act role exactly that permission; the action is armed once you
+have merged and applied it and Compass has read the role back (`compass access
+list` shows the state, Settings → Account → Access too). Arm responses before a
+decoy fires: nobody merges IAM pull requests mid-incident. In the config, `prs.watcher.mode` and `risk_max` work the same way
 for pull-request revisions.
 
 ## 4. Code-as-cloud

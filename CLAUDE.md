@@ -19,7 +19,7 @@ commit format and the DCO sign-off.
 - Do not add a dependency without saying why in the pull request; the
   runtime image is `python:3.12-slim` plus Terraform and the list in
   `pyproject.toml`.
-- Do not run `honeypot respond`, `honeypot fire`, `init_alerts` or anything
+- Do not run `honeypot respond`, `honeypot fire`, `connect` or anything
   that writes to an AWS account unless the user named the account and asked.
   `mapper run` and `iac import` read; everything else that touches AWS says
   so in its docstring.

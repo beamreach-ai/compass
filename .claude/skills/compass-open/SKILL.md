@@ -11,21 +11,28 @@ stack is five containers (six with the opt-in `updater`): `dynamodb`, `compass` 
 compass <captain> <command> key=value …` and print JSON; an unknown command, a
 missing config or a bad argument is one line on stderr with exit 2.
 
-Before step 1, confirm with the user: which AWS profile in `~/.aws` (read
-access to the account to map; write access only for `init_alerts`), which
-GitHub repository pull requests should go to, and whether they want decoys
-applied (an IAM user and an EventBridge rule in their account).
+Before step 1, confirm with the user: which AWS profile in `~/.aws` (`connect`
+uses it once to create two IAM roles, a queue and a runtime user; nothing else
+ever sees it), which GitHub repository pull requests should go to, and whether
+they want decoys applied (an IAM user and an EventBridge rule in their account).
 
 Order, and what to check after each step:
 
 1. An empty directory (not this checkout) with `docker-compose.yml`,
    `nginx.conf` and `.env` (from `.env.example`) copied from the repository
-   root: `AWS_PROFILE`, `AWS_REGION`, `GITHUB_TOKEN` (use `gh auth token` if
-   logged in), optionally `ANTHROPIC_API_KEY`.
+   root: `AWS_REGION`, `GITHUB_TOKEN` (use `gh auth token` if logged in),
+   optionally `ANTHROPIC_API_KEY`. No `AWS_PROFILE`: the services refuse to
+   start with one.
 2. `init_config …` — a `path`, `github_token: from …` (not `missing`), and a
    `login` block (URL, user, generated password). Give the user the login.
    If it says `warning`, sign-in is off: set `APP_PASSWORD` in `.env`.
 3. `init_tables` — seven tables `created` (or `present` on a re-run).
+3b. `docker compose run --rm -v ~/.aws:/root/.aws:ro -e AWS_PROFILE=<profile> compass connect account=<id> region=<region>`
+   — `steps` ending in `done`, `aws.roles.read` and `.act`, `aws.control.runtime_arn`,
+   and `verification.assumed.read.ok` true. A denied action in
+   `verification.denied` means the read policy did not apply; say so. It is the
+   only command that writes to the account on its own (two roles, a queue, a
+   user). A second run prints the same with nothing `created`.
 4. `docker compose up -d` — `docker compose ps` shows all five running;
    `curl -s localhost:8080/health` is `{"status":"ok"}`. Give the user
    http://localhost:8080 and the sign-in (`docker compose run --rm compass login`
@@ -37,8 +44,7 @@ Order, and what to check after each step:
    update copies the DynamoDB map into it once (`compass migrate` in the
    logs: `0.6.0-map-sqlite`); the table stays for a rollback
    (`COMPASS_MAP_STORE=dynamodb` in `.env`).
-6. Decoys: `init_alerts` (one SQS queue; write access), `honeypot action_set`,
-   then plant from the dashboard's Honeypots tab or `honeypot create …` — a
+6. Decoys: `honeypot action_set` (the queue exists since `connect`), then plant from the dashboard's Honeypots tab or `honeypot create …` — a
    pull request URL. The user merges and applies; then `honeypot arm` and,
    with the secret from the apply output, `honeypot fire`; incidents show in
    the dashboard and in `honeypot incidents`.

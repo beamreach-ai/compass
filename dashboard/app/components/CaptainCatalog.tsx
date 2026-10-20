@@ -5,6 +5,7 @@
 // that line. Paid captains without a public package link to their vendor.
 import axios from "axios";
 import React, { useCallback, useEffect, useState } from "react";
+import { WillUse, type PermissionsSummary } from "./WillUse";
 
 type CatalogEntry = {
   name: string;
@@ -17,6 +18,7 @@ type CatalogEntry = {
   homepage?: string | null;
   source?: string | null;
   tags: string[];
+  permissions?: PermissionsSummary | null;
   status: "installed" | "update" | "install" | "incompatible" | "vendor";
   installed_version?: string | null;
   licensed: boolean;
@@ -237,6 +239,7 @@ export default function CaptainCatalog({ readOnly = false, onChanged }: { readOn
                     {entry.pending_restart && <span className="inline-flex items-center rounded px-2 py-0.5 text-[11px] font-semibold bg-amber-100 text-amber-800">Waiting for restart</span>}
                   </div>
                   <p className="mt-1 text-sm text-gray-600">{entry.summary}</p>
+                  <WillUse permissions={entry.permissions} compact />
                   <p className="mt-1 text-xs text-gray-400">
                     {entry.author ? `by ${entry.author}` : ""}
                     {entry.source && (

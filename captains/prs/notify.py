@@ -12,6 +12,7 @@ import logging
 import os
 from typing import Any, Dict, List
 
+from compass_core import sessions
 from compass_core.events import emit_job_event
 from compass_core.keys import notification_endpoint_sort_key, workspace_pk
 from compass_core.tables import tables
@@ -54,9 +55,8 @@ def _load_endpoints(config: Dict[str, Any], workspace_id: str, endpoint_ids: Lis
     table_name = tables(config).items
     if not table_name or not endpoint_ids:
         return []
-    import boto3
 
-    table = boto3.resource("dynamodb", region_name=os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION")).Table(table_name)
+    table = sessions.control(region=os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION")).resource("dynamodb").Table(table_name)
     pk = workspace_pk(workspace_id)
     out = []
     for endpoint_id in endpoint_ids:

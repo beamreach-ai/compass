@@ -5,8 +5,9 @@ the prefix is what makes them this captain's."""
 
 from __future__ import annotations
 
+from captains.mapper.permissions import INVENTORY_READS
 from compass_core import __version__
-from compass_core.captains import CaptainManifest, TabSpec
+from compass_core.captains import AwsPermissions, CaptainManifest, Permissions, TabSpec
 
 MANIFEST = CaptainManifest(
     name="iac",
@@ -19,6 +20,8 @@ MANIFEST = CaptainManifest(
     tabs=(TabSpec(key="iac", label="IAC", group="cost", feature="iac"),),
     queue="iac-executions",
     depends_on=("mapper",),
+    # terraform plan refreshes what it imports: the inventory's reads and the state bucket
+    permissions=Permissions(aws=AwsPermissions(read=INVENTORY_READS), github=("contents:write", "pull_requests:write"), egress=("api.github.com",)),
     requires_core=">=0.1,<1",
     version=__version__,
 )

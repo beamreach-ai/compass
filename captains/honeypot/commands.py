@@ -199,14 +199,14 @@ def arm(payload: Dict[str, Any]) -> Dict[str, Any]:
     from captains.honeypot import arm as arming
     from captains.honeypot.catalog import epoch_ms
     from captains.honeypot.placement import to_native
-    from compass_core.aws import build_target_session
+    from compass_core import sessions
 
     workspace, config, table, key, item = _token_item(payload)
     token = to_native(item)
     placement = token.get("placement") or None
     region = str(payload.get("region") or token.get("region") or (config.get("aws") or {}).get("region") or config.get("aws_region") or "us-east-1")
-    session = build_target_session(config, capability="read", region=region)
-    result = arming.verify_honeytoken(session, token, placement)
+    session = sessions.target("read", region=region, config=config)
+    result = arming.verify_honeytoken(session, token, placement, config=config)
     if not result.get("ok"):
         return {"status": "not_ready", "honeytoken_id": token["honeytoken_id"], **result}
     names = {"#st": "status"}
@@ -252,6 +252,15 @@ def fire(payload: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
+def replant_alerts(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """One pull request that points every planted decoy at the alert queues `compass connect` created
+    (only each module's alert_queue_arn input changes). Opens a PR on the decoy repository."""
+    from captains.honeypot.captain import HoneypotCaptain
+
+    workspace = resolve(payload)
+    return HoneypotCaptain(config=captain_config(payload, workspace), workspace_id=workspace.workspace_id).run_replant_alerts(payload=payload)
+
+
 COMMANDS = {
     "create": create,
     "incidents": incidents,
@@ -266,6 +275,7 @@ COMMANDS = {
     "investigate": investigate,
     "respond": respond,
     "responder_pr": responder_pr,
+    "replant_alerts": replant_alerts,
 }
 
 dispatch.register("honeypot", COMMANDS)

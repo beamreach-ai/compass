@@ -21,6 +21,7 @@ import type { QueueEvent, QueueJob, SettingsBootstrap, SettingsSaveParticipant, 
 import { ALL_WORKSPACE_TABS, SETTINGS_VIEWS, TAB_ALIASES, asWorkspaceTab, resolveEnabledTabs, settingsSectionId } from "../lib/tabs";
 import type { DashboardTab, WorkspaceTab } from "../lib/tabs";
 import SlackIntegrationCard from "./SlackIntegrationCard";
+import { AccessSection } from "./AccessSection";
 
 const resolveTab = (
   params: ReturnType<typeof useSearchParams>,
@@ -81,16 +82,15 @@ export default function DashboardClient() {
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [targetConfigured, setTargetConfigured] = useState<boolean | null>(null);
   const [tabResolved, setTabResolved] = useState(false);
-  const [awsMode, setAwsMode] = useState<"assume_role" | "access_key" | "local_iam">("assume_role");
+  // A role made outside `compass connect` (its template, or by hand): the form under "Use a role you made"
   const [awsRoleAccountId, setAwsRoleAccountId] = useState("");
   const [awsRoleName, setAwsRoleName] = useState("");
+  const [awsActRoleName, setAwsActRoleName] = useState("");
   const [awsExternalId, setAwsExternalId] = useState("");
-  const [awsAccessKeyId, setAwsAccessKeyId] = useState("");
-  const [awsSecretAccessKey, setAwsSecretAccessKey] = useState("");
-  const [awsSessionToken, setAwsSessionToken] = useState("");
   const [awsDirty, setAwsDirty] = useState(false);
   const awsDirtyRef = useRef(false);
-  const [showDifferentAccount, setShowDifferentAccount] = useState(false);
+  const [showOwnRole, setShowOwnRole] = useState(false);
+  const [awsVerifying, setAwsVerifying] = useState(false);
   const [awsSaving, setAwsSaving] = useState(false);
   const [awsTesting, setAwsTesting] = useState(false);
   const [awsSuccess, setAwsSuccess] = useState<string | null>(null);
@@ -121,28 +121,15 @@ export default function DashboardClient() {
 
   const applySettingsBootstrap = useCallback((bootstrap: SettingsBootstrap) => {
     setSettingsBootstrap(bootstrap);
-    // local_iam: the account is whatever the credentials belong to; configured is enough.
-    const canAccessTabs =
-      bootstrap.app?.mode === "demo" ||
-      Boolean(bootstrap.aws?.account_id) ||
-      (bootstrap.aws?.mode === "local_iam" && bootstrap.aws?.configured === true);
+    // connected once `compass connect` (or a recorded role) left a read role in the config
+    const canAccessTabs = bootstrap.app?.mode === "demo" || bootstrap.aws?.connected === true || Boolean(bootstrap.aws?.roles?.read);
     setTargetConfigured(canAccessTabs);
 
     if (!awsDirtyRef.current) {
-      const nextMode =
-        bootstrap.aws?.mode === "access_key"
-          ? "access_key"
-          : bootstrap.aws?.mode === "local_iam"
-            ? "local_iam"
-            : "assume_role";
-      setAwsMode(nextMode);
-      setShowDifferentAccount(nextMode !== "local_iam" && Boolean(bootstrap.aws?.configured));
       setAwsRoleAccountId(bootstrap.aws?.account_id || "");
-      setAwsRoleName(bootstrap.aws?.role_name || bootstrap.aws?.suggested_role_name || "BeamreachCompassRole");
+      setAwsRoleName(bootstrap.aws?.role_name || bootstrap.aws?.suggested_role_name || "");
+      setAwsActRoleName(bootstrap.aws?.roles?.act ? bootstrap.aws.roles.act.split("/").pop() || "" : "");
       setAwsExternalId(bootstrap.aws?.external_id || "");
-      setAwsAccessKeyId("");
-      setAwsSecretAccessKey("");
-      setAwsSessionToken("");
       setAwsDirty(false);
     }
   }, []);
@@ -218,84 +205,35 @@ export default function DashboardClient() {
   const infraScan = settingsBootstrap?.infra_scan || null;
   const infraScanned = infraScan?.scanned === true;
   const infraScanIntegrationsReady = infraScan?.integrations_ready === true;
-  const effectiveRoleName =
-    awsRoleName.trim() || settingsBootstrap?.aws?.suggested_role_name || "BeamreachCompassRole";
-  const externalIdForSetup = awsExternalId.trim() || settingsBootstrap?.aws?.external_id || "";
-  const externalIdDisplay = externalIdForSetup || (settingsLoading ? "Generating..." : "");
-  const terraformRoleSnippet = useMemo(
-    () =>
-      `resource "aws_iam_role" "beamreach_compass" {
-  name = "${effectiveRoleName}"
+  const buildAwsPayload = () => ({
+    mode: "assume_role" as const,
+    assume_role: {
+      account_id: awsRoleAccountId.trim(),
+      role_name: awsRoleName.trim(),
+      external_id: awsExternalId.trim() || null,
+      act_role_name: awsActRoleName.trim() || null,
+    },
+  });
 
-  # ${COMPANY_NAME} assumes this role from account ${beamreachAwsAccountId}.
-  # In production that call comes from the ECS task role in that account.
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect = "Allow"
-      Principal = {
-        AWS = "arn:aws:iam::${beamreachAwsAccountId}:root"
-      }
-      Action = "sts:AssumeRole"
-      Condition = {
-        StringEquals = {
-          "sts:ExternalId" = "${externalIdForSetup}"
-        }
-      }
-    }]
-  })
-}
-
-resource "aws_iam_role_policy_attachment" "beamreach_compass_readonly" {
-  role       = aws_iam_role.beamreach_compass.name
-  policy_arn = "arn:aws:iam::aws:policy/ReadOnlyAccess"
-}`,
-    [beamreachAwsAccountId, effectiveRoleName, externalIdForSetup],
-  );
-  const cloudFormationRoleSnippet = useMemo(
-    () =>
-      `Resources:
-  BeamreachCompassRole:
-    Type: AWS::IAM::Role
-    Properties:
-      RoleName: ${effectiveRoleName}
-      # ${COMPANY_NAME} assumes this role from account ${beamreachAwsAccountId}.
-      # In production that call comes from the ECS task role in that account.
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              AWS: arn:aws:iam::${beamreachAwsAccountId}:root
-            Action: sts:AssumeRole
-            Condition:
-              StringEquals:
-                sts:ExternalId: ${externalIdForSetup}
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/ReadOnlyAccess`,
-    [beamreachAwsAccountId, effectiveRoleName, externalIdForSetup],
-  );
-
-  const buildAwsPayload = () =>
-    awsMode === "local_iam"
-      ? { mode: "local_iam" as const }
-      : awsMode === "assume_role"
-        ? {
-            mode: "assume_role" as const,
-            assume_role: {
-              account_id: awsRoleAccountId.trim(),
-              role_name: awsRoleName.trim(),
-              external_id: awsExternalId.trim() || null,
-            },
-          }
-        : {
-            mode: "access_key" as const,
-            access_key: {
-              access_key_id: awsAccessKeyId.trim(),
-              secret_access_key: awsSecretAccessKey.trim(),
-              session_token: awsSessionToken.trim() || null,
-            },
-          };
+  const [awsVerification, setAwsVerification] = useState<Record<string, any> | null>(null);
+  const handleVerifyAws = async () => {
+    if (awsVerifying) return;
+    setAwsVerifying(true);
+    setAwsError(null);
+    setAwsSuccess(null);
+    try {
+      const response = await axios.post("/api/settings/aws/verify", {});
+      setAwsVerification(response.data?.verification || null);
+      setAwsSuccess(response.data?.ok ? "The roles work: assumed as the runtime identity." : "Verification found a problem; see below.");
+      const bootstrapResponse = await axios.get("/api/settings/bootstrap");
+      applySettingsBootstrap(bootstrapResponse.data as SettingsBootstrap);
+    } catch (error: any) {
+      const raw = error?.response?.data?.detail;
+      setAwsError(typeof raw === "string" ? raw : error?.message || "Verification failed");
+    } finally {
+      setAwsVerifying(false);
+    }
+  };
 
   const saveAwsSettings = useCallback(
     async (options?: { showSuccess?: boolean }) => {
@@ -341,7 +279,7 @@ resource "aws_iam_role_policy_attachment" "beamreach_compass_readonly" {
         setAwsSaving(false);
       }
     },
-    [applySettingsBootstrap, awsSaving, awsAccessKeyId, awsMode, awsRoleAccountId, awsRoleName, awsSecretAccessKey, awsSessionToken, awsExternalId],
+    [applySettingsBootstrap, awsSaving, awsRoleAccountId, awsRoleName, awsExternalId, awsActRoleName],
   );
 
   const handleTestAwsSettings = async () => {
@@ -693,11 +631,11 @@ resource "aws_iam_role_policy_attachment" "beamreach_compass_readonly" {
               The AWS account Compass maps, the GitHub it opens pull requests on, and where it sends alerts.
             </SettingsHeading>
 
-            {awsIntegrationEnabled && <section className={`bg-white border rounded-lg shadow-sm p-6 space-y-4 ${!settingsBootstrap?.aws?.configured ? "border-amber-400 ring-2 ring-amber-300" : ""}`}>
+            {awsIntegrationEnabled && <section className={`bg-white border rounded-lg shadow-sm p-6 space-y-4 ${!settingsBootstrap?.aws?.connected ? "border-amber-400 ring-2 ring-amber-300" : ""}`}>
               <div className="space-y-1">
-                <h2 className="text-lg font-semibold">AWS access {!settingsBootstrap?.aws?.configured && <span className="ml-2 inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800 border border-amber-300">Required</span>}</h2>
+                <h2 className="text-lg font-semibold">AWS access {!settingsBootstrap?.aws?.connected && <span className="ml-2 inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800 border border-amber-300">Required</span>}</h2>
                 <p className="text-sm text-gray-600">
-                  The target account is the AWS account Compass will scan and optimize. Choose which account to connect to.
+                  Compass reads the account through a role it creates once; it writes nothing without a pull request you merge.
                 </p>
               </div>
               {awsError && (
@@ -710,240 +648,142 @@ resource "aws_iam_role_policy_attachment" "beamreach_compass_readonly" {
                   {awsSuccess}
                 </div>
               )}
-              <button
-                type="button"
-                onClick={() => {
-                  markAwsDirty();
-                  setAwsMode("local_iam");
-                  setShowDifferentAccount(false);
-                }}
-                className={`w-full text-left rounded-md px-4 py-3 text-sm font-semibold transition ${
-                  awsMode === "local_iam"
-                    ? "bg-black text-white"
-                    : "bg-blue-600 text-white hover:bg-black"
-                }`}
-              >
-                <div className="flex items-center justify-between gap-4">
-                  <div className="space-y-0.5">
-                    <div className="font-semibold">
-                      Target the same account Compass is deployed in
-                      {beamreachAwsAccountId && (
-                        <span className="ml-2 font-mono font-normal opacity-75">{beamreachAwsAccountId}</span>
-                      )}
+              {settingsBootstrap?.aws?.connected ? (
+                <div className="rounded border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700 space-y-2">
+                  <div>
+                    Account <span className="font-semibold text-gray-900">{settingsBootstrap.aws.account_id || "unknown"}</span> is connected
+                    {settingsBootstrap.aws.region ? ` (${(settingsBootstrap.aws.regions || [settingsBootstrap.aws.region]).join(", ")})` : ""}
+                    {settingsBootstrap.aws.account_name ? ` · ${settingsBootstrap.aws.account_name}` : ""}
+                  </div>
+                  <dl className="grid gap-x-6 gap-y-1 text-xs text-gray-600 sm:grid-cols-[auto_1fr]">
+                    <dt className="font-medium text-gray-700">Read role</dt>
+                    <dd className="font-mono break-all">{settingsBootstrap.aws.roles?.read}</dd>
+                    <dt className="font-medium text-gray-700">Act role</dt>
+                    <dd className="font-mono break-all">{settingsBootstrap.aws.roles?.act || "none: a response action needs a merged pull request first"}</dd>
+                    <dt className="font-medium text-gray-700">Runs as</dt>
+                    <dd className="font-mono break-all">
+                      {settingsBootstrap.aws.runtime_arn || "not recorded"}
+                      {settingsBootstrap.aws.credential_source === "access_key" ? " (a runtime user; its key is in config/local.json)" : settingsBootstrap.aws.credential_source === "ambient" ? " (this machine's own role)" : ""}
+                    </dd>
+                    <dt className="font-medium text-gray-700">Verified</dt>
+                    <dd>
+                      {settingsBootstrap.aws.verified_at ? `${settingsBootstrap.aws.verified_at}${settingsBootstrap.aws.verification?.simulated === false ? " (assumed; the policy simulation was not available)" : ""}` : "not yet"}
+                    </dd>
+                    {Object.keys(settingsBootstrap.aws.alert_queues || {}).length > 0 && (
+                      <>
+                        <dt className="font-medium text-gray-700">Alert queues</dt>
+                        <dd className="font-mono break-all">{Object.values(settingsBootstrap.aws.alert_queues || {}).join(", ")}</dd>
+                      </>
+                    )}
+                  </dl>
+                  {awsVerification?.denied?.length ? (
+                    <div className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                      The read role cannot: {awsVerification.denied.map((d: any) => `${d.action}${d.resource ? ` on ${d.resource}` : ""}`).join(", ")}. Run <code>compass connect</code> again to re-apply the policy.
                     </div>
-                    <div className="text-xs opacity-75 font-normal">Compass uses its own IAM task role — no cross-account setup needed.</div>
-                  </div>
-                  {awsMode === "local_iam" && (
-                    <svg className="h-5 w-5 flex-shrink-0 text-white" viewBox="0 0 20 20" fill="currentColor">
-                      <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 10.5a.75.75 0 0 1-1.127.075l-4.5-4.5a.75.75 0 0 1 1.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 0 1 1.05-.143Z" clipRule="evenodd" />
-                    </svg>
-                  )}
-                </div>
-              </button>
-              {awsMode === "local_iam" && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    markAwsDirty();
-                    setAwsMode("assume_role");
-                    setShowDifferentAccount(true);
-                  }}
-                  className="text-xs text-gray-400 hover:text-gray-600 underline underline-offset-2 transition"
-                >
-                  Change target account
-                </button>
-              )}
-              <div className="flex items-center gap-3 my-1">
-                <div className="flex-1 border-t border-gray-200" />
-                <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide">or</span>
-                <div className="flex-1 border-t border-gray-200" />
-              </div>
-              <div className="rounded-lg overflow-hidden">
-                <button
-                  type="button"
-                  onClick={() => setShowDifferentAccount((prev) => !prev)}
-                  className="w-full flex items-center justify-between bg-blue-600 text-white px-4 py-2 text-sm font-semibold rounded-md transition hover:bg-black"
-                >
-                  <span>Target a different account</span>
-                  <svg
-                    className={`h-4 w-4 text-white transition-transform ${showDifferentAccount ? "rotate-180" : ""}`}
-                    viewBox="0 0 20 20"
-                    fill="currentColor"
-                  >
-                    <path fillRule="evenodd" d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z" clipRule="evenodd" />
-                  </svg>
-                </button>
-                {showDifferentAccount && (
-                  <div className="border border-gray-200 rounded-md mt-2 px-4 py-4 space-y-4">
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          markAwsDirty();
-                          setAwsMode("assume_role");
-                        }}
-                        className={`rounded-full px-3 py-1 text-sm font-semibold transition ${
-                          awsMode === "assume_role" ? "bg-gray-900 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                        }`}
-                      >
-                        Assume role
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          markAwsDirty();
-                          setAwsMode("access_key");
-                        }}
-                        className={`rounded-full px-3 py-1 text-sm font-semibold transition ${
-                          awsMode === "access_key" ? "bg-gray-900 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                        }`}
-                      >
-                        Access key fallback
-                      </button>
+                  ) : null}
+                  {awsVerification?.assumed && typeof awsVerification.assumed === "object" && Object.entries(awsVerification.assumed as Record<string, any>).some(([, v]) => v && v.ok === false) ? (
+                    <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
+                      {Object.entries(awsVerification.assumed as Record<string, any>).filter(([, v]) => v && v.ok === false).map(([k, v]) => `${k}: ${v.detail}`).join("; ")}
                     </div>
-                    {awsMode === "assume_role" ? (
-                <div className="space-y-4">
-                  <div className="rounded border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700">
-                    Create an IAM role in the target account that trusts the {COMPANY_NAME} account{" "}
-                    <span className="font-semibold text-gray-900">{beamreachAwsAccountId}</span>. The external ID is generated by Compass below. You do not get it from AWS.
-                  </div>
-                  <div className="grid gap-4 sm:grid-cols-2">
-                  <label className="space-y-1">
-                    <span className="text-sm font-medium text-gray-700">Target account ID</span>
-                    <input
-                      value={awsRoleAccountId}
-                      onChange={(event) => {
-                        markAwsDirty();
-                        setAwsRoleAccountId(event.target.value);
-                      }}
-                      placeholder="123456789012"
-                      className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none"
-                    />
-                  </label>
-                  <label className="space-y-1">
-                    <span className="text-sm font-medium text-gray-700">Role name</span>
-                    <input
-                      value={awsRoleName}
-                      onChange={(event) => {
-                        markAwsDirty();
-                        setAwsRoleName(event.target.value);
-                      }}
-                      placeholder="BeamreachCompassRole"
-                      className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none"
-                    />
-                  </label>
-                  </div>
-                  <label className="space-y-1">
-                    <span className="text-sm font-medium text-gray-700">External ID</span>
-                    <input
-                      value={externalIdDisplay}
-                      readOnly
-                      onFocus={(event) => event.target.select()}
-                      className="w-full rounded border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-700 focus:border-gray-500 focus:outline-none"
-                    />
-                    <span className="text-xs text-gray-500">
-                      Use this value directly if you are configuring the trust policy manually instead of using the snippets.
-                    </span>
-                  </label>
-                  <div className="space-y-3">
-                    <details className="rounded border border-gray-200 bg-gray-50 px-4 py-3">
-                      <summary className="cursor-pointer text-sm font-medium text-gray-700">
-                        Terraform snippet
-                      </summary>
-                      <div className="mt-3">
-                        {externalIdForSetup ? (
-                          <textarea
-                            value={terraformRoleSnippet}
-                            readOnly
-                            className="min-h-[260px] w-full rounded border border-gray-300 bg-white px-3 py-2 font-mono text-xs text-gray-700 focus:outline-none"
-                          />
-                        ) : (
-                          <div className="flex min-h-[120px] items-center justify-center rounded border border-gray-300 bg-white px-3 py-2 text-sm text-gray-500">
-                            Generating workspace external ID...
-                          </div>
-                        )}
-                      </div>
-                    </details>
-                    <details className="rounded border border-gray-200 bg-gray-50 px-4 py-3">
-                      <summary className="cursor-pointer text-sm font-medium text-gray-700">
-                        CloudFormation snippet
-                      </summary>
-                      <div className="mt-3">
-                        {externalIdForSetup ? (
-                          <textarea
-                            value={cloudFormationRoleSnippet}
-                            readOnly
-                            className="min-h-[260px] w-full rounded border border-gray-300 bg-white px-3 py-2 font-mono text-xs text-gray-700 focus:outline-none"
-                          />
-                        ) : (
-                          <div className="flex min-h-[120px] items-center justify-center rounded border border-gray-300 bg-white px-3 py-2 text-sm text-gray-500">
-                            Generating workspace external ID...
-                          </div>
-                        )}
-                      </div>
-                    </details>
-                  </div>
+                  ) : null}
                 </div>
               ) : (
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <label className="space-y-1">
-                    <span className="text-sm font-medium text-gray-700">Access key ID</span>
-                    <input
-                      value={awsAccessKeyId}
-                      onChange={(event) => {
-                        markAwsDirty();
-                        setAwsAccessKeyId(event.target.value);
-                      }}
-                      placeholder="AKIA..."
-                      className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none"
-                    />
-                  </label>
-                  <label className="space-y-1">
-                    <span className="text-sm font-medium text-gray-700">Secret access key</span>
-                    <input
-                      type="password"
-                      value={awsSecretAccessKey}
-                      onChange={(event) => {
-                        markAwsDirty();
-                        setAwsSecretAccessKey(event.target.value);
-                      }}
-                      placeholder="Paste the AWS secret access key"
-                      className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none"
-                    />
-                  </label>
-                  <label className="space-y-1 sm:col-span-2">
-                    <span className="text-sm font-medium text-gray-700">Session token (only for temporary STS credentials)</span>
-                    <input
-                      value={awsSessionToken}
-                      onChange={(event) => {
-                        markAwsDirty();
-                        setAwsSessionToken(event.target.value);
-                      }}
-                      placeholder="Leave blank for standard long-lived access keys"
-                      className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none"
-                    />
-                  </label>
+                <div className="rounded border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700 space-y-2">
+                  <div>
+                    {settingsBootstrap?.aws?.migrated_from
+                      ? "This install used your AWS profile. From this release Compass reads through a role of its own: run connect once, with the profile, in the install directory."
+                      : "Run this once in the install directory, with your AWS profile. It creates two IAM roles in the account, the queue decoy alerts report to, and a runtime user that may only assume those roles; the services never see the profile."}
+                  </div>
+                  <pre className="overflow-x-auto rounded border border-gray-300 bg-white px-3 py-2 font-mono text-xs text-gray-800">{settingsBootstrap?.aws?.connect_command || "docker compose run --rm -v ~/.aws:/root/.aws:ro -e AWS_PROFILE=<profile> compass connect account=<account id> region=<region>"}</pre>
+                  <div className="text-xs text-gray-500">Then <code>docker compose up -d</code>. For an account you cannot reach from this machine, <code>compass connect template</code> writes the roles as CloudFormation and Terraform.</div>
                 </div>
               )}
+              <details className="rounded border border-gray-200 px-4 py-3" open={showOwnRole} onToggle={(event) => setShowOwnRole((event.target as HTMLDetailsElement).open)}>
+                <summary className="cursor-pointer text-sm font-medium text-gray-700">Use a role you made</summary>
+                <div className="mt-3 space-y-3">
+                  <p className="text-xs text-gray-500">
+                    A read role made from <code>compass connect template</code> or by hand. Its trust policy must name the runtime identity above with the external id.
+                  </p>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <label className="space-y-1">
+                      <span className="text-sm font-medium text-gray-700">Target account ID</span>
+                      <input
+                        value={awsRoleAccountId}
+                        onChange={(event) => {
+                          markAwsDirty();
+                          setAwsRoleAccountId(event.target.value);
+                        }}
+                        placeholder="123456789012"
+                        className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none"
+                      />
+                    </label>
+                    <label className="space-y-1">
+                      <span className="text-sm font-medium text-gray-700">Read role name</span>
+                      <input
+                        value={awsRoleName}
+                        onChange={(event) => {
+                          markAwsDirty();
+                          setAwsRoleName(event.target.value);
+                        }}
+                        placeholder="service/svc-inventory-reader-k3f9a2"
+                        className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none"
+                      />
+                    </label>
+                    <label className="space-y-1">
+                      <span className="text-sm font-medium text-gray-700">Act role name (optional)</span>
+                      <input
+                        value={awsActRoleName}
+                        onChange={(event) => {
+                          markAwsDirty();
+                          setAwsActRoleName(event.target.value);
+                        }}
+                        placeholder="service/svc-ops-responder-k3f9a2"
+                        className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none"
+                      />
+                    </label>
+                    <label className="space-y-1">
+                      <span className="text-sm font-medium text-gray-700">External ID</span>
+                      <input
+                        value={awsExternalId}
+                        onChange={(event) => {
+                          markAwsDirty();
+                          setAwsExternalId(event.target.value);
+                        }}
+                        placeholder={settingsBootstrap?.aws?.external_id || "the external id in the trust policy"}
+                        className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none"
+                      />
+                    </label>
                   </div>
-                )}
-              </div>
+                </div>
+              </details>
               <div className="flex items-center justify-between gap-4 flex-wrap">
                 <div className="text-xs text-gray-500">
-                  {settingsBootstrap?.aws?.configured
+                  {settingsBootstrap?.aws?.connected
                     ? `Current target: ${settingsBootstrap.aws.account_id || "Unknown"}`
-                    : "No AWS target configured yet."}
+                    : "No AWS target connected yet."}
                 </div>
-                <button
-                  type="button"
-                  onClick={handleTestAwsSettings}
-                  disabled={awsTesting || settingsLoading}
-                  className="rounded border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {awsTesting ? "Testing..." : "Test AWS access"}
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={handleVerifyAws}
+                    disabled={awsVerifying || settingsLoading || !settingsBootstrap?.aws?.connected}
+                    className="rounded border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {awsVerifying ? "Verifying..." : "Verify now"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleTestAwsSettings}
+                    disabled={awsTesting || settingsLoading || !awsDirty}
+                    className="rounded border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {awsTesting ? "Testing..." : "Test the role"}
+                  </button>
+                </div>
               </div>
             </section>}
+
+            {awsIntegrationEnabled && settingsBootstrap?.aws?.connected && <AccessSection readOnly={isReadOnly} />}
 
             {githubIntegrationEnabled && <section className={`bg-white border rounded-lg shadow-sm p-6 space-y-4 ${!settingsBootstrap?.github?.connected ? "border-amber-400 ring-2 ring-amber-300" : ""}`}>
               <div className="space-y-1">

@@ -118,19 +118,20 @@ def armed_decoy(stack, name: str, *, endpoints: Optional[List[str]] = None) -> D
 
 # ── the tests ───────────────────────────────────────────────────────────────
 
-def test_dec_1_init_alerts_creates_the_queue_and_the_daemon_consumes_it_without_a_restart(stack, mapped):
-    created = stack.cli("init_alerts")
-    assert created["queue_arn"] == f"arn:aws:sqs:{fixture.REGION}:{fixture.ACCOUNT}:{QUEUE}"
-    attributes = stack.aws_client("sqs").get_queue_attributes(QueueUrl=f"{stack.moto_url}/{fixture.ACCOUNT}/{QUEUE}", AttributeNames=["Policy"])
-    policy = json.loads(attributes["Attributes"]["Policy"])
-    assert {s["Sid"] for s in policy["Statement"]} == {"DecoyEventBridgeRules", "AccountPrincipals"}
+def test_dec_1_connect_created_the_queue_and_the_daemon_consumes_it(stack, mapped):
     config = json.loads(stack.read("config/local.json"))
-    assert config["honeypot"]["alert_queue_arn"] == created["queue_arn"]
-    # the quickstart runs init_alerts after `up -d`: the daemon must pick the queue up on its own
+    queue = config["aws"]["control"]["alert_queues"][fixture.REGION]
+    assert queue["arn"] == f"arn:aws:sqs:{fixture.REGION}:{fixture.ACCOUNT}:{QUEUE}"
+    attributes = stack.aws_client("sqs").get_queue_attributes(QueueUrl=f"{stack.moto_url}/{fixture.ACCOUNT}/{QUEUE}", AttributeNames=["All"])
+    policy = json.loads(attributes["Attributes"]["Policy"])
+    assert {s["Sid"] for s in policy["Statement"]} == {"TargetAccountDelivery", "DecoyEventBridgeRules", "BaseIdentityReads"}
+    assert attributes["Attributes"].get("SqsManagedSseEnabled") == "true"
     deadline = time.time() + 90
     while "consuming decoy alerts from" not in stack.compose("logs", "--no-color", "compass").stdout:
-        assert time.time() < deadline, "the daemon did not start consuming the new queue within 90s"
+        assert time.time() < deadline, "the daemon did not start consuming the queue within 90s"
         time.sleep(5)
+    replant = stack.cli("honeypot", "replant_alerts")
+    assert replant["pr_url"] is None and "already" in replant["reason"] or replant["reason"].endswith("nothing planted yet"), replant
 
 
 def test_dec_2_suggestions_appear_next_to_the_seeded_resources(stack, page, mapped):
@@ -246,16 +247,34 @@ def test_dec_5_an_alert_opens_an_incident_with_its_blast_radius_and_notifies_the
     stack.records["alerting"] = decoy
 
 
+def _apply_grants(stack) -> None:
+    """A response runs only once its grant is armed: merged, applied, verified (compass_core.grants).
+    The suite cannot run Terraform against moto, so "the operator applies" is writing the act
+    policy the module renders into moto, then verifying, as the apply and the tick would."""
+    module = stack.api.get("/api/access/module").json()
+    stack.aws_client("iam").put_role_policy(RoleName=module["act_role"]["name"], PolicyName="ops", PolicyDocument=json.dumps(module["act_policy"]))
+    verified = stack.api.post("/api/access/verify")
+    assert verified.status_code == 200, verified.text
+
+
 def _action(stack, mode: str) -> str:
+    action_id = None
     for row in stack.api.get("/api/honeypots/actions").json()["actions"]:
         if row.get("action_type") == "iam_deactivate_key":
-            stack.api.put(f"/api/honeypots/actions/{row['action_id']}", json={"mode": mode, "risk_max": 5, "enabled": True}).raise_for_status()
-            return row["action_id"]
-    # decoy users live under /service/ (the module's aws_iam_user path): the action may act on them and only them
-    created = stack.api.post("/api/honeypots/actions", json={"action_type": "iam_deactivate_key", "mode": mode, "risk_max": 5,
-                                                             "scope": {"user_path_prefixes": ["/service/"]}})
-    assert created.status_code == 200, created.text
-    return created.json()["action_id"]
+            stack.api.put(f"/api/honeypots/actions/{row['action_id']}", json={"mode": mode, "risk_max": 5, "enabled": mode != "off"}).raise_for_status()
+            action_id = row["action_id"]
+            break
+    if action_id is None:
+        # decoy users live under /service/ (the module's aws_iam_user path): the action may act on them and only them
+        created = stack.api.post("/api/honeypots/actions", json={"action_type": "iam_deactivate_key", "mode": mode, "risk_max": 5,
+                                                                 "scope": {"user_path_prefixes": ["/service/"]}})
+        assert created.status_code == 200, created.text
+        action_id = created.json()["action_id"]
+    if mode != "off":
+        _apply_grants(stack)
+        rows = {r["action_id"]: r for r in stack.api.get("/api/honeypots/actions").json()["actions"]}
+        assert rows[action_id]["armed"], rows[action_id]
+    return action_id
 
 
 def _key_status(stack, decoy) -> str:

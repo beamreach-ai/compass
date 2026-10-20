@@ -87,7 +87,7 @@ class IACImportJob:
         from captains.iac.github_pr_writer import _IAC_BRANCH_PREFIX, GitHubPRWriter, _content_branch_suffix
         from captains.iac.import_pipeline import ImportPipeline
         from captains.iac.pr_body import import_pr_body
-        from compass_core.aws import target_credentials_env
+        from compass_core import sessions
         from compass_core.github import resolve_github_token
 
         token = resolve_github_token(self.config, capability="write")
@@ -102,7 +102,7 @@ class IACImportJob:
         # Global services (S3, IAM, Route 53) carry region "global" in the map; the
         # provider needs a real one, so prefer a regional resource's, then the workspace's.
         region = next((r.region for r in importable if r.region and r.region != "global"), None) or resolve_target_region(self.config) or "us-east-1"
-        target_credentials = target_credentials_env(self.config, capability="read", region=region)
+        target_credentials = sessions.target_env("read", region=region, config=self.config)
         if not target_credentials:
             logger.warning(
                 "no target-account credentials resolved; terraform will authenticate as the worker "

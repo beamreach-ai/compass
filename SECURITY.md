@@ -26,9 +26,13 @@ same address but they are handled separately.
 
 ## How Compass handles credentials
 
-- AWS credentials are never stored by Compass. The container reads your
-  `~/.aws` profile read-only; `init_alerts` is the only command that needs
-  write access, and it creates one SQS queue.
+- Your AWS profile is used by one command, `compass connect`, which creates two
+  IAM roles, an alert queue and a runtime user, once; the running services
+  never see it and refuse to start with one in reach. The runtime user's key is
+  the one AWS credential Compass stores (`config/local.json`); its only right
+  is to assume the two roles. Compass reads the account through the read role,
+  narrowed per captain to what its manifest declares, and writes nothing
+  without a pull request you merge (docs/access.md).
 - The GitHub token and the dashboard password live in `config/local.json` and
   `.env` in the directory you installed into — mode 600, never in a repository,
   never sent anywhere but github.com and your own browser.

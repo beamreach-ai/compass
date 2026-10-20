@@ -27,10 +27,10 @@ from compass_api.infra_scan import mark_infra_scan_pending
 from compass_api.routes._app_config import ensure_settings_enabled, get_app_config
 from compass_api.routes._infra_scan import current_infra_scan_summary, enqueue_full_infra_scan
 from compass_api.routes._workspace import get_workspace_config, get_workspace_context, save_config
-from compass_core import captain_admin
+from compass_core import captain_admin, sessions
 from compass_core import captains as _captains
 from compass_core import updates as _updates
-from compass_core.aws import build_target_session, resolve_target_account_id, resolve_target_region
+from compass_core.aws import resolve_target_account_id, resolve_target_region
 from compass_core.github import (
     api_url as github_api_url,
 )
@@ -64,9 +64,8 @@ def compass_account_id() -> str:
     if _compass_account_id_cache:
         return _compass_account_id_cache
     try:
-        import boto3
 
-        _compass_account_id_cache = str(boto3.client("sts").get_caller_identity()["Account"])
+        _compass_account_id_cache = str(sessions.control().client("sts").get_caller_identity()["Account"])
     except Exception:
         _compass_account_id_cache = ""
     return _compass_account_id_cache
@@ -91,60 +90,48 @@ def _public_origin(request: Request) -> str:
 
 
 def _aws_summary(config: Dict[str, Any]) -> Dict[str, Any]:
+    """The target as the Connect card shows it: the roles `compass connect` created, the
+    runtime identity, when it was verified, and the command to run when it has not."""
     aws_cfg = config.get("aws") or {}
     if not isinstance(aws_cfg, dict):
         aws_cfg = {}
-
-    assume_cfg = aws_cfg.get("assume_role") if isinstance(aws_cfg.get("assume_role"), dict) else None
-    credentials_cfg = aws_cfg.get("credentials") if isinstance(aws_cfg.get("credentials"), dict) else None
-    stored_auth_mode = _strip_or_none(aws_cfg.get("auth_mode"))
-    mode: Optional[str] = None
-    if stored_auth_mode == "local_iam":
-        mode = "local_iam"
-    elif assume_cfg:
-        mode = "assume_role"
-    elif credentials_cfg:
-        mode = "access_key"
-
-    access_key_id = None
-    if credentials_cfg:
-        access_key_id = _strip_or_none(
-            credentials_cfg.get("access_key_id") or credentials_cfg.get("aws_access_key_id")
-        )
-
+    roles = aws_cfg.get("roles") if isinstance(aws_cfg.get("roles"), dict) else {}
+    control = aws_cfg.get("control") if isinstance(aws_cfg.get("control"), dict) else {}
+    connected = bool(roles.get("read"))
+    region = _strip_or_none(aws_cfg.get("region") or config.get("aws_region"))
+    account_id = _strip_or_none(aws_cfg.get("account_id") or resolve_target_account_id(config))
+    read_role_name = str(roles.get("read") or "").rsplit("/", 1)[-1] or None
     return {
-        "configured": mode is not None and (mode == "local_iam" or bool(assume_cfg or credentials_cfg)),
-        "mode": mode,
-        "region": _strip_or_none(aws_cfg.get("region") or config.get("aws_region")),
-        "account_id": _strip_or_none(aws_cfg.get("account_id") or resolve_target_account_id(config)),
+        "configured": connected,
+        "connected": connected,
+        "mode": "roles" if connected else None,
+        "region": region,
+        "regions": [str(r) for r in aws_cfg.get("regions") or ([region] if region else [])],
+        "account_id": account_id,
         "account_name": _strip_or_none(aws_cfg.get("account_name")),
-        "role_name": _strip_or_none((assume_cfg or {}).get("role_name")),
-        "external_id": _strip_or_none((assume_cfg or {}).get("external_id")) or _strip_or_none(aws_cfg.get("generated_external_id")),
-        "external_id_configured": bool(_strip_or_none((assume_cfg or {}).get("external_id"))),
-        "access_key_id_hint": f"...{access_key_id[-4:]}" if access_key_id and len(access_key_id) >= 4 else None,
-        "last_validated_at": _strip_or_none(aws_cfg.get("last_validated_at")),
+        "install_id": _strip_or_none(aws_cfg.get("install_id")),
+        "roles": {"read": roles.get("read"), "act": roles.get("act")},
+        "role_name": read_role_name,
+        "external_id": _strip_or_none(aws_cfg.get("external_id")),
+        "external_id_configured": bool(_strip_or_none(aws_cfg.get("external_id"))),
+        "source_identity": bool(aws_cfg.get("source_identity")),
+        "runtime_arn": _strip_or_none(control.get("runtime_arn")),
+        "credential_source": _strip_or_none(control.get("credential_source")),
+        "alert_queues": {str(r): (q or {}).get("arn") for r, q in (control.get("alert_queues") or {}).items()},
+        "state_buckets": [str(b) for b in aws_cfg.get("state_buckets") or []],
+        "connected_at": _strip_or_none(aws_cfg.get("connected_at")),
+        "verified_at": _strip_or_none(aws_cfg.get("verified_at")),
+        "verification": aws_cfg.get("verification") if isinstance(aws_cfg.get("verification"), dict) else None,
+        "migrated_from": _strip_or_none(aws_cfg.get("migrated_from")),
+        "last_validated_at": _strip_or_none(aws_cfg.get("verified_at")),
+        "connect_command": (
+            "docker compose run --rm -v ~/.aws:/root/.aws:ro -e AWS_PROFILE=<profile> "
+            f"compass connect account={account_id or '<account id>'} region={region or 'us-east-1'}"
+        ),
         "beamreach_account_id": compass_account_id(),
         "compass_account_id": compass_account_id(),
-        "worker_role_name": (os.getenv("COMPASS_WORKER_ROLE_NAME") or f"compass-worker-task-{os.getenv('COMPASS_ENV') or os.getenv('BEAMREACH_ENV') or 'local'}"),
-        "suggested_role_name": _strip_or_none((assume_cfg or {}).get("role_name")) or DEFAULT_ASSUME_ROLE_NAME,
+        "suggested_role_name": read_role_name or DEFAULT_ASSUME_ROLE_NAME,
     }
-
-
-def _resolve_local_account(config: Dict[str, Any]) -> bool:
-    """In local_iam mode the account is whichever the ambient credentials belong to: look it
-    up once with STS and keep it in the config. Returns True when the config changed."""
-    aws_cfg = config.get("aws") if isinstance(config.get("aws"), dict) else None
-    if not aws_cfg or _strip_or_none(aws_cfg.get("auth_mode")) != "local_iam" or _strip_or_none(aws_cfg.get("account_id")):
-        return False
-    try:
-        session = build_target_session(config, capability="read", region=resolve_target_region(config) or "us-east-1")
-        account_id = session.client("sts").get_caller_identity()["Account"]
-    except Exception as exc:  # noqa: BLE001 - no credentials yet is a normal state on a fresh install
-        logger.debug("cannot resolve the local account: %s", exc)
-        return False
-    aws_cfg["account_id"] = str(account_id)
-    aws_cfg.setdefault("account_name", str(account_id))
-    return True
 
 
 def _github_summary(config: Dict[str, Any]) -> Dict[str, Any]:
@@ -169,80 +156,61 @@ def _github_summary(config: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _ensure_generated_external_id(config: Dict[str, Any]) -> str:
-    aws_cfg = config.setdefault("aws", {})
-    if not isinstance(aws_cfg, dict):
-        aws_cfg = {}
-        config["aws"] = aws_cfg
-
-    assume_cfg = aws_cfg.get("assume_role")
-    if isinstance(assume_cfg, dict):
-        existing_assume_external_id = _strip_or_none(assume_cfg.get("external_id"))
-        if existing_assume_external_id:
-            aws_cfg["generated_external_id"] = existing_assume_external_id
-            return existing_assume_external_id
-
-    generated_external_id = _strip_or_none(aws_cfg.get("generated_external_id"))
-    if generated_external_id:
-        return generated_external_id
-
-    generated_external_id = f"beamreach-compass-{secrets.token_urlsafe(18)}"
-    aws_cfg["generated_external_id"] = generated_external_id
-    return generated_external_id
-
-
 def _aws_validation_error_detail(payload: "AwsSettingsPayload", exc: Exception, *, stage: str) -> str:
-    if payload.mode == "assume_role" and payload.assume_role is not None:
-        role_arn = f"arn:aws:iam::{payload.assume_role.account_id}:role/{payload.assume_role.role_name}"
-        if isinstance(exc, ClientError):
-            error = exc.response.get("Error") or {}
-            code = _strip_or_none(error.get("Code"))
-            message = _strip_or_none(error.get("Message")) or str(exc)
-            detail = f"Failed to assume AWS role {role_arn}: "
-            if code:
-                detail += f"{code}: "
-            detail += message
-            if code == "AccessDenied":
-                detail += (
-                    ". Verify the current AWS credentials allow sts:AssumeRole and the role trust policy permits this principal."
-                )
-            return detail
-        return f"Failed to assume AWS role {role_arn} during {stage}: {exc}"
-
-    return f"Failed to validate AWS credentials: {exc}"
+    role_arn = _read_role_arn(payload)
+    if isinstance(exc, ClientError):
+        error = exc.response.get("Error") or {}
+        code = _strip_or_none(error.get("Code"))
+        message = _strip_or_none(error.get("Message")) or str(exc)
+        detail = f"Failed to assume AWS role {role_arn}: "
+        if code:
+            detail += f"{code}: "
+        detail += message
+        if code == "AccessDenied":
+            detail += (
+                ". Verify the runtime identity (aws.control.runtime_arn) may call sts:AssumeRole and the role's trust policy "
+                "names it with this external id; `compass connect` writes both."
+            )
+        return detail
+    return f"Failed to assume AWS role {role_arn} during {stage}: {exc}"
 
 
-def _validate_aws_access(payload: "AwsSettingsPayload") -> Dict[str, Any]:
-    aws_config: Dict[str, Any] = {}
+def _read_role_arn(payload: "AwsSettingsPayload") -> str:
+    assume_role = payload.assume_role
+    if assume_role is None:
+        raise HTTPException(status_code=400, detail="assume_role details are required")
+    return f"arn:aws:iam::{assume_role.account_id}:role/{assume_role.role_name}"
+
+
+def _candidate_config(payload: "AwsSettingsPayload", base: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """The aws block a manual role entry describes: the roles and the external id, on top of
+    what connect may have written (the runtime identity, the queues)."""
+    assume_role = payload.assume_role
+    if assume_role is None:
+        raise HTTPException(status_code=400, detail="assume_role details are required")
+    aws_cfg: Dict[str, Any] = dict((base or {}).get("aws") or {}) if isinstance((base or {}).get("aws"), dict) else {}
+    roles = dict(aws_cfg.get("roles") or {})
+    roles["read"] = _read_role_arn(payload)
+    if _strip_or_none(assume_role.act_role_name):
+        roles["act"] = f"arn:aws:iam::{assume_role.account_id}:role/{assume_role.act_role_name}"
+    aws_cfg["roles"] = roles
+    aws_cfg["account_id"] = assume_role.account_id
+    external_id = _strip_or_none(assume_role.external_id) or _strip_or_none(aws_cfg.get("external_id"))
+    if external_id:
+        aws_cfg["external_id"] = external_id
     if payload.region:
-        aws_config["region"] = payload.region
+        aws_cfg["region"] = payload.region
+    for stale in ("auth_mode", "assume_role", "assume_role_read", "assume_role_write", "assume_role_respond", "credentials", "generated_external_id"):
+        aws_cfg.pop(stale, None)
+    return {**(base or {}), "aws": aws_cfg, "aws_region": payload.region or (base or {}).get("aws_region")}
 
-    if payload.mode == "assume_role":
-        assume_role = payload.assume_role
-        if assume_role is None:
-            raise HTTPException(status_code=400, detail="assume_role details are required")
-        aws_config["assume_role"] = {
-            "account_id": assume_role.account_id,
-            "role_name": assume_role.role_name,
-            **({"external_id": assume_role.external_id} if assume_role.external_id else {}),
-        }
-    elif payload.mode == "access_key":
-        credentials = payload.access_key
-        if credentials is None:
-            raise HTTPException(status_code=400, detail="access_key credentials are required")
-        aws_config["credentials"] = {
-            "access_key_id": credentials.access_key_id,
-            "secret_access_key": credentials.secret_access_key,
-            **({"session_token": credentials.session_token} if credentials.session_token else {}),
-        }
-    # local_iam: use the task role — no extra aws_config needed
 
+def _validate_aws_access(payload: "AwsSettingsPayload", base: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Assume the read role as the runtime identity, the way every scan will."""
+    candidate = _candidate_config(payload, base)
     try:
-        session = build_target_session(
-            {"aws": aws_config, "aws_region": payload.region},
-            capability="read",
-            allow_default=payload.mode == "local_iam",
-        )
+        sessions.clear_cache()
+        session = sessions.target("read", captain=sessions.CORE, config=candidate, job_id="settings")
     except (BotoCoreError, ClientError, KeyError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=_aws_validation_error_detail(payload, exc, stage="session creation")) from exc
 
@@ -261,8 +229,9 @@ def _validate_aws_access(payload: "AwsSettingsPayload") -> Dict[str, Any]:
 
     return {
         "account_id": account_id,
-        "region": payload.region or resolve_target_region({"aws": aws_config}),
+        "region": payload.region or resolve_target_region(candidate),
         "caller_arn": str(identity.get("Arn") or ""),
+        "roles": candidate["aws"]["roles"],
     }
 
 
@@ -270,20 +239,17 @@ class AwsAssumeRolePayload(BaseModel):
     account_id: str = Field(..., min_length=12, max_length=12)
     role_name: str = Field(..., min_length=1)
     external_id: Optional[str] = None
-
-
-class AwsAccessKeyPayload(BaseModel):
-    access_key_id: str = Field(..., min_length=16)
-    secret_access_key: str = Field(..., min_length=20)
-    session_token: Optional[str] = None
+    act_role_name: Optional[str] = None
 
 
 class AwsSettingsPayload(BaseModel):
-    mode: Literal["assume_role", "access_key", "local_iam"]
+    """A role made outside `compass connect` (its template, or by hand): the read role to use.
+    The profile and static keys are no longer ways in."""
+
+    mode: Literal["assume_role"] = "assume_role"
     region: Optional[str] = Field(default=None)
     account_name: Optional[str] = Field(default=None)
     assume_role: Optional[AwsAssumeRolePayload] = None
-    access_key: Optional[AwsAccessKeyPayload] = None
 
 
 # `triage`, `billing` and `infra_scan` each make their own round trip to
@@ -338,15 +304,6 @@ def get_settings_bootstrap(request: Request) -> Dict[str, Any]:
     ctx = get_workspace_context(request)
     config = get_workspace_config(request)
     app = get_app_config(config)
-    before_external_id = _strip_or_none(((config.get("aws") or {}).get("generated_external_id")))
-    if app["settings_enabled"]:
-        generated_external_id = _ensure_generated_external_id(config)
-    else:
-        generated_external_id = before_external_id
-    if app["settings_enabled"] and generated_external_id != before_external_id:
-        save_config(request, config)
-    if app["settings_enabled"] and _resolve_local_account(config):
-        save_config(request, config)
     extensions.run_bootstrap_hooks(config, ctx, request)
     sections = _bootstrap_sections(config, request, ctx.workspace_id)
     return {
@@ -371,9 +328,9 @@ def get_settings_bootstrap(request: Request) -> Dict[str, Any]:
 
 
 @router.post("/api/settings/aws/test")
-def test_aws_settings(payload: AwsSettingsPayload) -> Dict[str, Any]:
+def test_aws_settings(payload: AwsSettingsPayload, request: Request) -> Dict[str, Any]:
     ensure_settings_enabled()
-    validation = _validate_aws_access(payload)
+    validation = _validate_aws_access(payload, get_workspace_config(request))
     return {
         "ok": True,
         "aws": validation,
@@ -382,70 +339,29 @@ def test_aws_settings(payload: AwsSettingsPayload) -> Dict[str, Any]:
 
 @router.post("/api/settings/aws")
 def update_aws_settings(payload: AwsSettingsPayload, request: Request) -> Dict[str, Any]:
+    """Record a read role made outside `compass connect` (its template, or by hand), after
+    assuming it once. `connect` itself writes the config directly; this is the other door."""
     ensure_settings_enabled()
     config = get_workspace_config(request)
-    validation = _validate_aws_access(payload)
-
-    aws_cfg = config.setdefault("aws", {})
-    if not isinstance(aws_cfg, dict):
-        aws_cfg = {}
-        config["aws"] = aws_cfg
-
+    validation = _validate_aws_access(payload, config)
+    candidate = _candidate_config(payload, config)
+    aws_cfg = candidate["aws"]
     region = _strip_or_none(payload.region)
     if region:
-        aws_cfg["region"] = region
         config["aws_region"] = region
-    else:
-        aws_cfg.pop("region", None)
-        config.pop("aws_region", None)
-
     account_name = _strip_or_none(payload.account_name)
-    aws_cfg["account_id"] = validation["account_id"]
     if account_name:
         aws_cfg["account_name"] = account_name
-    else:
-        aws_cfg.pop("account_name", None)
-
-    aws_cfg["last_validated_at"] = datetime.now(timezone.utc).isoformat()
-    aws_cfg["last_validated_caller_arn"] = validation["caller_arn"]
-
-    if payload.mode == "assume_role":
-        assume_role = payload.assume_role
-        assert assume_role is not None
-        generated_external_id = _ensure_generated_external_id(config)
-        aws_cfg["assume_role"] = {
-            "account_id": assume_role.account_id,
-            "role_name": assume_role.role_name,
-        }
-        external_id = _strip_or_none(assume_role.external_id) or generated_external_id
-        if external_id:
-            aws_cfg["assume_role"]["external_id"] = external_id
-        aws_cfg.pop("credentials", None)
-    elif payload.mode == "access_key":
-        access_key = payload.access_key
-        assert access_key is not None
-        aws_cfg["credentials"] = {
-            "access_key_id": access_key.access_key_id,
-            "secret_access_key": access_key.secret_access_key,
-        }
-        session_token = _strip_or_none(access_key.session_token)
-        if session_token:
-            aws_cfg["credentials"]["session_token"] = session_token
-        aws_cfg.pop("assume_role", None)
-        aws_cfg.pop("assume_role_read", None)
-        aws_cfg.pop("assume_role_write", None)
-    else:
-        # local_iam: task role — clear any stored credentials
-        aws_cfg.pop("credentials", None)
-        aws_cfg.pop("assume_role", None)
-        aws_cfg.pop("assume_role_read", None)
-        aws_cfg.pop("assume_role_write", None)
-
-    aws_cfg["auth_mode"] = payload.mode
+    now = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    aws_cfg.setdefault("connected_at", now)
+    aws_cfg["verified_at"] = now
+    aws_cfg["verification"] = {"ok": True, "assumed": {"read": {"ok": True, "arn": validation["caller_arn"]}}, "simulated": None, "denied": []}
+    config["aws"] = aws_cfg
     config["provider"] = "aws"
     mark_infra_scan_pending(config, reason="aws_settings_updated")
 
     save_config(request, config)
+    sessions.clear_cache()
     jobs = extensions.run_aws_saved_hooks(request, config)
     mapper_job = enqueue_full_infra_scan(request, config=config, trigger="aws_settings_saved")
     return {
@@ -454,6 +370,25 @@ def update_aws_settings(payload: AwsSettingsPayload, request: Request) -> Dict[s
         "infra_scan": current_infra_scan_summary(request, config=config),
         "mapper": mapper_job,
     }
+
+
+@router.post("/api/settings/aws/verify")
+def verify_aws_settings(request: Request) -> Dict[str, Any]:
+    """`compass connect verify` from the dashboard: assume the roles as the runtime identity
+    and simulate the read policy; record the result."""
+    from compass_core import connect as _connect
+
+    ensure_settings_enabled()
+    config = get_workspace_config(request)
+    aws_cfg = config.get("aws") if isinstance(config.get("aws"), dict) else {}
+    if not (aws_cfg.get("roles") or {}).get("read"):
+        raise HTTPException(status_code=400, detail="no roles yet: run `compass connect` first")
+    verification = _connect.verify_with(config, None)
+    aws_cfg["verified_at"] = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z") if verification.get("ok") else None
+    aws_cfg["verification"] = verification
+    config["aws"] = aws_cfg
+    save_config(request, config)
+    return {"ok": bool(verification.get("ok")), "verification": verification, "aws": _aws_summary(config)}
 
 
 class GithubTokenPayload(BaseModel):

@@ -8,7 +8,9 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from moto import mock_aws
 
+from compass_api.middleware.sessions import SessionContextMiddleware
 from compass_api.routes import honeypot_actions, honeypots
+from compass_core import sessions
 from compass_core.keys import honeypot_audit_sort_key, workspace_pk
 
 PK = workspace_pk("ws-a")
@@ -34,11 +36,16 @@ def env(monkeypatch):
             honeypot_actions,
             "get_workspace_config",
             lambda request: {
-                "aws": {"account_id": "123456789012", "region": "us-east-1"},
-                "honeypot": {"responder": {"trust_principal_arns": ["arn:aws:iam::123456789012:role/radio-task"], "external_id": "ext"}},
+                "workspace_id": "ws-a",
+                "aws": {"account_id": "123456789012", "region": "us-east-1", "external_id": "ext",
+                        "roles": {"read": "arn:aws:iam::123456789012:role/service/svc-inventory-reader-k3f9a2",
+                                  "act": "arn:aws:iam::123456789012:role/service/svc-ops-responder-k3f9a2"},
+                        "control": {"runtime_arn": "arn:aws:iam::123456789012:user/service/svc-compass-runtime-k3f9a2"}},
+                "github": {"iac_repo": "o/r"},
             },
         )
         app = FastAPI()
+        app.add_middleware(SessionContextMiddleware)  # the request runs as the honeypot captain, as in the real app
         app.include_router(honeypot_actions.router)
         yield TestClient(app), table
 
@@ -50,17 +57,25 @@ def test_create_list_update_delete(env):
     row = r.json()
     assert row["action_id"].startswith("act-") and row["enabled"] is True and row["catalog"]["title"]
     assert row["created_by"] == "u1"
+    assert row["grant_status"] == "pr_open" and row["armed"] is False, "allowed means accepted: the pull request is queued; it runs once merged and applied"
 
     listed = client.get("/api/honeypots/actions").json()
     assert [a["action_id"] for a in listed["actions"]] == [row["action_id"]]
     assert {c["action_type"] for c in listed["catalog"]} == {"ecs_restart_task", "iam_deactivate_key"}
 
-    r = client.put(f"/api/honeypots/actions/{row['action_id']}", json={"mode": "approve", "enabled": False})
-    assert r.json()["mode"] == "approve" and r.json()["enabled"] is False
+    r = client.put(f"/api/honeypots/actions/{row['action_id']}", json={"risk_max": 3})
+    assert r.json()["risk_max"] == 3 and r.json()["grant_status"] == "pr_open", "the cap changes in place"
+    r = client.put(f"/api/honeypots/actions/{row['action_id']}", json={"enabled": False})
+    assert r.json()["enabled"] is False and r.json()["grant_status"] == "disarmed" and r.json()["mode"] == "off"
 
-    assert client.delete(f"/api/honeypots/actions/{row['action_id']}").json() == {"deleted": row["action_id"]}
-    assert client.get("/api/honeypots/actions").json()["actions"] == []
-    assert client.delete(f"/api/honeypots/actions/{row['action_id']}").status_code == 404
+    gone = client.delete(f"/api/honeypots/actions/{row['action_id']}").json()
+    assert gone["deleted"] is False and gone["disarmed"] == row["action_id"], "the permission is still in AWS: the row stays until the revoke PR is applied"
+    assert client.get("/api/honeypots/actions").json()["actions"][0]["grant_status"] == "disarmed"
+
+    proposed = client.post("/api/honeypots/actions", json={"action_type": "ecs_restart_task", "scope": {"service_arns": [SERVICE]}, "mode": "off"}).json()
+    assert proposed["grant_status"] == "proposed" and proposed["enabled"] is False
+    assert client.delete(f"/api/honeypots/actions/{proposed['action_id']}").json() == {"deleted": proposed["action_id"]}
+    assert client.delete(f"/api/honeypots/actions/{proposed['action_id']}").status_code == 404
 
 
 def test_validation(env):
@@ -76,12 +91,12 @@ def test_responder_module_preview_reflects_enabled_rows(env):
     client.post("/api/honeypots/actions", json={"action_type": "ecs_restart_task", "scope": {"service_arns": [SERVICE]}, "mode": "autopilot"})
     client.post("/api/honeypots/actions", json={"action_type": "iam_deactivate_key", "scope": {"user_path_prefixes": ["/service/"]}, "enabled": False})
     module = client.get("/api/honeypots/actions/responder-module").json()
-    assert module["role_arn"] == "arn:aws:iam::123456789012:role/service/svc-ops-responder"
+    assert module["role_arn"] == "arn:aws:iam::123456789012:role/service/svc-ops-responder-k3f9a2"
     assert module["enabled_action_types"] == ["ecs_restart_task"]
-    actions = {a for s in module["policy"]["Statement"] for a in s["Action"]}
-    assert "ecs:StopTask" in actions and "iam:UpdateAccessKey" not in actions
+    actions = {a for s in module["policy"]["Statement"] for a in (s["Action"] if isinstance(s["Action"], list) else [s["Action"]])}
+    assert "ecs:StopTask" in actions and "iam:UpdateAccessKey" not in actions, "a proposed row is not in the module"
     assert "trust" not in module
-    assert "services/_responder/main.tf" in module["files"]
+    assert "services/_ops_access/main.tf" in module["files"]
 
 
 def test_audits_newest_first(env):
@@ -93,10 +108,40 @@ def test_audits_newest_first(env):
     assert "pk" not in audits[0]
 
 
-def test_check_requires_respond_credentials(env):
+def test_check_reads_the_role_back_and_arms_what_it_holds(env, monkeypatch):
+    from compass_core import grants
+
     client, _ = env
+    row = client.post("/api/honeypots/actions", json={"action_type": "ecs_restart_task", "scope": {"service_arns": [SERVICE]}, "mode": "autopilot"}).json()
+
+    class Iam:
+        def __init__(self, statements):
+            self.statements = statements
+
+        def list_role_policies(self, RoleName):
+            return {"PolicyNames": ["ops"] if self.statements else []}
+
+        def get_role_policy(self, RoleName, PolicyName):
+            return {"PolicyDocument": {"Statement": self.statements}}
+
+        def list_attached_role_policies(self, RoleName):
+            return {"AttachedPolicies": []}
+
+        def simulate_principal_policy(self, **kw):
+            return {"EvaluationResults": [{"EvalActionName": a, "EvalDecision": "allowed"} for a in kw["ActionNames"]]}
+
+    monkeypatch.setattr(grants, "_iam_client", lambda config: Iam([]))
+    not_yet = client.post("/api/honeypots/actions/check").json()
+    assert not_yet["ok"] is False and not_yet["denied"][0]["grant_id"] == row["action_id"] and not_yet["results"] == []
+    statements = grants.statements_for(row, honeypot_actions.get_workspace_config(None))
+    monkeypatch.setattr(grants, "_iam_client", lambda config: Iam(statements))
+    armed = client.post("/api/honeypots/actions/check").json()
+    assert armed["ok"] is True and [c["to"] for c in armed["results"]] == ["armed"] and armed["simulated"] is True
+    assert client.get("/api/honeypots/actions").json()["actions"][0]["armed"] is True
+
+    monkeypatch.setattr(honeypot_actions, "get_workspace_config", lambda request: {"aws": {"region": "us-east-1"}})
     r = client.post("/api/honeypots/actions/check")
-    assert r.status_code == 400 and "assume_role_respond" in r.json()["detail"]
+    assert r.status_code == 400 and "aws.roles.act" in r.json()["detail"]
 
 
 def test_rollback_reactivates_a_deactivated_key_once(env, monkeypatch):
@@ -106,7 +151,7 @@ def test_rollback_reactivates_a_deactivated_key_once(env, monkeypatch):
         iam.create_user(UserName="svc-reporting", Path="/service/")
         key = iam.create_access_key(UserName="svc-reporting")["AccessKey"]["AccessKeyId"]
         iam.update_access_key(UserName="svc-reporting", AccessKeyId=key, Status="Inactive")
-        monkeypatch.setattr(honeypot_actions, "build_target_session", lambda *a, **k: boto3.Session(region_name="us-east-1"))
+        monkeypatch.setattr(sessions, "target", lambda *a, **k: boto3.Session(region_name="us-east-1"))
         audit = {
             "audit_id": "1-abc", "incident_id": "9-inc", "action_type": "iam_deactivate_key", "status": "verified",
             "target": {"region": "us-east-1", "user_arn": "arn:aws:iam::123456789012:user/service/svc-reporting", "access_key_id": key},

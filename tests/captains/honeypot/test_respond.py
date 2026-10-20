@@ -9,16 +9,17 @@ import pytest
 from captains.honeypot import incidents
 from captains.honeypot.choose import applicable_rows, choose_actions
 from captains.honeypot.respond import approve_pending_action, context_from_incident, respond_to_incident
-from compass_core.keys import honeypot_action_sort_key
+from compass_core.keys import honeypot_action_prefix, honeypot_action_sort_key
 
 CLUSTER = "arn:aws:ecs:us-east-1:1:cluster/web"
 SERVICE = "arn:aws:ecs:us-east-1:1:service/web/web"
 TASK = "arn:aws:ecs:us-east-1:1:task/web/old"
 PK = "WORKSPACE#ws"
 
-ROW_RESTART = {"action_id": "a-restart", "action_type": "ecs_restart_task", "scope": {"service_arns": [SERVICE]}, "mode": "autopilot", "risk_max": 2, "enabled": True}
-ROW_KEY = {"action_id": "a-key", "action_type": "iam_deactivate_key", "scope": {"user_path_prefixes": ["/service/"]}, "mode": "autopilot", "risk_max": 2, "enabled": True}
-ROW_OTHER = {"action_id": "a-other", "action_type": "ecs_restart_task", "scope": {"service_arns": ["arn:aws:ecs:us-east-1:1:service/other/api"]}, "mode": "autopilot", "risk_max": 2, "enabled": True}
+# every row is an armed grant: a merged, applied and verified pull request (compass_core.grants)
+ROW_RESTART = {"action_id": "a-restart", "action_type": "ecs_restart_task", "scope": {"service_arns": [SERVICE]}, "mode": "autopilot", "risk_max": 2, "enabled": True, "grant_status": "armed"}
+ROW_KEY = {"action_id": "a-key", "action_type": "iam_deactivate_key", "scope": {"user_path_prefixes": ["/service/"]}, "mode": "autopilot", "risk_max": 2, "enabled": True, "grant_status": "armed"}
+ROW_OTHER = {"action_id": "a-other", "action_type": "ecs_restart_task", "scope": {"service_arns": ["arn:aws:ecs:us-east-1:1:service/other/api"]}, "mode": "autopilot", "risk_max": 2, "enabled": True, "grant_status": "armed"}
 
 INCIDENT = {
     "incident_id": "1-abc", "status": "open", "source_ip": "10.42.1.49",
@@ -34,7 +35,7 @@ class _Table:
         self.audits = {}
 
     def query(self, **kw):
-        return {"Items": [i for k, i in self.items.items() if k.startswith("HONEYPOT#ACTION#")]}
+        return {"Items": [i for k, i in self.items.items() if k.startswith(honeypot_action_prefix())]}
 
     def put_item(self, Item):
         (self.audits if Item["sk"].startswith("HONEYPOT#AUDIT#") else self.items)[Item["sk"]] = dict(Item)
@@ -158,7 +159,32 @@ def test_risk_above_cap_waits_and_no_credentials_is_recorded(env):
     assert out["action"]["decisions"][0]["decision"] == "wait_for_approval"
     table = _Table([ROW_RESTART])
     out = respond_to_incident(table=table, pk=PK, incident_id="1-abc", region="us-east-1", session_factory=lambda: None)
-    assert out["action"]["decisions"][0]["decision"] == "skipped" and "assume_role_respond" in out["action"]["decisions"][0]["reason"]
+    assert out["action"]["decisions"][0]["decision"] == "skipped" and "aws.roles.act" in out["action"]["decisions"][0]["reason"]
+
+
+def test_a_row_that_is_not_armed_waits_for_its_grant_whatever_its_mode_says(env):
+    marked = env
+    table = _Table([dict(ROW_RESTART, grant_status="pr_open", grant_pr="https://github.com/o/r/pull/42"), ROW_KEY])
+    session = _Session()
+    out = respond_to_incident(table=table, pk=PK, incident_id="1-abc", region="us-east-1", session_factory=lambda row=None: session)
+    by_type = {d["action_type"]: d for d in out["action"]["decisions"]}
+    assert by_type["ecs_restart_task"]["decision"] == "wait_for_grant" and "pull/42" in by_type["ecs_restart_task"]["reason"]
+    assert session.ecs.stopped == [] and session.iam.status == "Inactive", "autopilot on an unarmed row runs nothing; the armed one ran"
+    assert marked["action_started_at"]
+    with pytest.raises(ValueError, match="not pending"):
+        # it never reached pending: an unarmed row is not parked for approval, it waits for its grant
+        approve_pending_action(table=table, pk=PK, incident_id="1-abc", action_id="a-restart", region="us-east-1", session_factory=lambda row=None: session, approved_by="ilia")
+
+
+def test_the_session_factory_gets_the_row_so_each_action_is_narrowed(env):
+    seen = []
+
+    def factory(row):
+        seen.append(row["action_id"])
+        return _Session()
+
+    respond_to_incident(table=_Table([ROW_RESTART, ROW_KEY]), pk=PK, incident_id="1-abc", region="us-east-1", session_factory=factory)
+    assert seen == ["a-restart", "a-key"], "one act session per action"
 
 
 def test_nothing_applicable_is_recommend_only(env):

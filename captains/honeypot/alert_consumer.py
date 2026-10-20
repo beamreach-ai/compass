@@ -22,9 +22,8 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-import boto3
-
 from captains.honeypot.ingestion import record_alert
+from compass_core import sessions
 from compass_core.tables import tables
 
 logger = logging.getLogger("honeypot-alert-consumer")
@@ -78,7 +77,7 @@ class AlertConsumer:
         self.queue_region = _region_from_queue_url(self.queue_url) or self.region
 
         self._sqs = sqs_client or (
-            boto3.client("sqs", region_name=self.queue_region) if self.queue_url else None
+            sessions.control(region=self.queue_region).client("sqs") if self.queue_url else None
         )
         self._stop = False
 
@@ -123,7 +122,7 @@ class AlertConsumer:
             logger.error("Workspace %s has no table configured; leaving message for retry", workspace_id)
             return False
 
-        table = boto3.resource("dynamodb", region_name=self.region).Table(table_name)
+        table = sessions.control(region=self.region).resource("dynamodb").Table(table_name)
 
         from captains.honeypot.placement import get_placement, placement_summary, to_native
         from compass_core.queue import job_queue
@@ -254,10 +253,16 @@ if __name__ == "__main__":
 
 
 def queue_urls(config: Dict[str, Any]) -> List[str]:
-    """The alert queues a workspace consumes: ``honeypot.alert_queue_urls`` or
-    ``honeypot.alert_queue_url``, else ``HONEYPOT_ALERT_QUEUE_URL(S)``."""
+    """The alert queues a workspace consumes: the ones `compass connect` created in the
+    control account (``aws.control.alert_queues``), else the decoy captain's own keys
+    (``honeypot.alert_queue_urls`` / ``alert_queue_url``, the queue `init_alerts` made in
+    the target account, honoured for one release), else ``HONEYPOT_ALERT_QUEUE_URL(S)``."""
+    from compass_core.aws import alert_queues
+
+    urls = [q["url"] for q in alert_queues(config).values() if q.get("url")]
     hp = config.get("honeypot") if isinstance(config.get("honeypot"), dict) else {}
-    urls = hp.get("alert_queue_urls") or ([hp["alert_queue_url"]] if hp.get("alert_queue_url") else [])
+    if not urls:
+        urls = hp.get("alert_queue_urls") or ([hp["alert_queue_url"]] if hp.get("alert_queue_url") else [])
     if not urls:
         raw = os.getenv("HONEYPOT_ALERT_QUEUE_URLS") or os.getenv("HONEYPOT_ALERT_QUEUE_URL") or ""
         urls = [u.strip() for u in raw.split(",") if u.strip()]
@@ -269,7 +274,7 @@ def run_service(workspace_id: str, config: Dict[str, Any], stop: threading.Event
     (a `compass serve` service, compass_core.captains.ServiceSpec)."""
     urls = queue_urls(config)
     if not urls:
-        logger.warning("no decoy alert queue configured (honeypot.alert_queue_url); alerts will not be consumed")
+        logger.warning("no decoy alert queue configured: run `compass connect`; alerts will not be consumed")
         return
     consumers = []
     threads = []

@@ -6,8 +6,9 @@ import threading
 import time
 from typing import Any, Dict, Optional, Tuple
 
-import boto3
 from botocore.exceptions import BotoCoreError, ClientError
+
+from compass_core import sessions
 
 _CACHE_LOCK = threading.Lock()
 _SECRET_CACHE: Dict[str, Tuple[float, Dict[str, Any]]] = {}
@@ -34,9 +35,7 @@ def _strip_or_none(value: Any) -> Optional[str]:
 
 
 def _secrets_client():
-    region = (os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION") or "").strip()
-    kwargs = {"region_name": region} if region else {}
-    return boto3.client("secretsmanager", **kwargs)
+    return sessions.control().client("secretsmanager")
 
 
 def _parse_secret_payload(secret_id: str, response: Dict[str, Any]) -> Dict[str, Any]:

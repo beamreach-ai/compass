@@ -33,6 +33,23 @@ type ActionRow = {
   risk_max: number;
   enabled: boolean;
   catalog: CatalogEntry | null;
+  grant_status?: string | null;
+  grant_pr?: string | null;
+  armed?: boolean;
+};
+
+const GRANT_BADGE: Record<string, string> = {
+  armed: "bg-green-100 text-green-800",
+  proposed: "bg-gray-100 text-gray-700",
+  pr_open: "bg-amber-100 text-amber-800",
+  merged: "bg-sky-50 text-sky-700",
+  applied: "bg-sky-100 text-sky-800",
+  verified: "bg-green-50 text-green-700",
+  disarmed: "bg-red-50 text-red-700",
+  revoke_pr_open: "bg-red-50 text-red-700",
+  revoke_merged: "bg-red-50 text-red-700",
+  revoked: "bg-gray-100 text-gray-500",
+  declined: "bg-gray-100 text-gray-500",
 };
 
 type Audit = {
@@ -270,12 +287,12 @@ export default function HoneypotActions() {
         <div>
           <h2 className="text-lg font-semibold text-gray-900">What Compass may do</h2>
           <p className="text-sm text-gray-600">
-            When a honeytoken trips, the agent picks from these actions only. The responder role in your account is built from this list.
+            When a honeytoken trips, the agent picks from these actions only. Each is a grant: a pull request you merge gives the act role exactly that permission, and an action runs only once it is armed.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <button onClick={openPr} {...writeProps(readOnly)} className={BTN_OUTLINE}>
-            Open responder role PR
+            Open the access PR
           </button>
           <button onClick={() => setAdding(true)} {...writeProps(readOnly)} className="rounded bg-gray-900 px-3 py-1.5 text-sm text-white hover:bg-gray-800 disabled:opacity-50">
             + Allow an action
@@ -294,7 +311,7 @@ export default function HoneypotActions() {
               <th className="px-3 py-2">Scope</th>
               <th className="px-3 py-2">Mode</th>
               <th className="px-3 py-2">Risk max</th>
-              <th className="px-3 py-2">Enabled</th>
+              <th className="px-3 py-2">Grant</th>
               <th className="px-3 py-2" />
             </tr>
           </thead>
@@ -344,8 +361,12 @@ export default function HoneypotActions() {
                     className="w-16 rounded border border-gray-300 px-2 py-1 text-sm"
                   />
                 </td>
-                <td data-label="Enabled" className="px-3 py-2">
-                  <input type="checkbox" checked={row.enabled} onChange={(e) => patch(row, { enabled: e.target.checked })} {...writeProps(readOnly)} />
+                <td data-label="Grant" className="px-3 py-2 text-xs">
+                  <span className={`inline-flex rounded-full px-2 py-0.5 font-semibold ${GRANT_BADGE[row.grant_status || "proposed"] || "bg-gray-100 text-gray-700"}`}>{row.grant_status || "proposed"}</span>
+                  {row.grant_pr && (
+                    <div><a href={row.grant_pr} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">pull request ↗</a></div>
+                  )}
+                  {!row.armed && row.mode !== "off" && <div className="text-gray-500">runs once its pull request is merged and applied</div>}
                 </td>
                 <td className="rt-block px-3 py-2 text-right">
                   <button onClick={() => remove(row)} {...writeProps(readOnly)} className={BTN_QUIET_DANGER_SM}>

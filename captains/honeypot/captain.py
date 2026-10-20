@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from captains.honeypot.classes import normalize_class
 from captains.honeypot.honeytoken_material import default_cover_name
+from compass_core import sessions
 from compass_core.events import emit_job_event
 from compass_core.tables import dynamo_table, tables
 
@@ -206,12 +207,18 @@ class HoneypotCaptain:
         return inputs
 
     def _alert_queue_arn(self, honeytoken: Dict[str, Any]) -> str:
-        """ARN of the Compass alert queue the plant PR points rules at.
+        """ARN of the alert queue the plant PR points rules at: the one `compass connect`
+        created in the control account for the token's region (EventBridge cannot deliver
+        across regions), then the token's own, the decoy captain's older keys, the environment."""
+        from compass_core.aws import alert_queues, resolve_target_region
 
-        Looked up on the token, then workspace config, then the environment."""
+        queues = alert_queues(self.config)
+        region = str(honeytoken.get("region") or resolve_target_region(self.config) or "")
         cfg = self.config.get("honeypot") or {}
         arn = (
-            honeytoken.get("alert_queue_arn")
+            (queues.get(region) or {}).get("arn")
+            or (next(iter(queues.values()))["arn"] if queues else None)   # connect's queues win over older keys
+            or honeytoken.get("alert_queue_arn")
             or cfg.get("alert_queue_arn")
             or self.config.get("beamreach_honeypot_alert_queue_arn")
             or os.getenv("HONEYPOT_ALERT_QUEUE_ARN")
@@ -219,10 +226,38 @@ class HoneypotCaptain:
         )
         if not arn:
             raise RuntimeError(
-                "No alert queue ARN configured (honeypot.alert_queue_arn or HONEYPOT_ALERT_QUEUE_ARN); "
-                "a plant PR cannot deliver alerts without it."
+                f"No alert queue for region {region or '?'}: run `compass connect regions={region or '<region>'}` "
+                "(it creates one per region decoys live in); a plant PR cannot deliver alerts without it."
             )
+        if queues and region and region not in queues:
+            logger.warning("no alert queue in %s; the decoy will report to %s, which EventBridge may not reach from %s", region, arn, region)
         return str(arn)
+
+    # ── Replant alerts: every planted module reports to connect's queues ─────
+
+    def run_replant_alerts(self, *, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """One pull request that points every planted decoy module (and the account
+        module's delivery role) at the alert queues `compass connect` created, touching
+        only the `alert_queue_arn` input of each. Decoys planted before `connect` report
+        to the old queue until this is merged and applied."""
+        from captains.honeypot.pr_writer import HoneypotPRWriter
+        from compass_core.aws import alert_queues
+
+        queues = alert_queues(self.config)
+        if not queues:
+            raise RuntimeError("no alert queues in the config: run `compass connect` first")
+        hp_cfg = self.config.get("honeypot") or {}
+        writer = HoneypotPRWriter(self.config)
+        result = writer.create_replant_alerts_pr(
+            queues_by_region={region: q["arn"] for region, q in queues.items() if q.get("arn")},
+            resolved_repo=str(payload.get("repo") or hp_cfg.get("repo") or "") or None,
+            resolved_module_path=str(payload.get("module_path") or hp_cfg.get("terraform_root") or "") or None,
+        )
+        if result.get("pr_url"):
+            self._register_pr("replant_alerts", pr_url=result["pr_url"], honeytoken={"name": "alert queues"},
+                              module_path=hp_cfg.get("terraform_root") or None, title="Decoy alerts: report to the Compass queues")
+            emit_job_event(f"Replant-alerts PR: {result['pr_url']}", event_type="progress", status="completed")
+        return result
 
     # ── Decommission (remove honeytoken and open removal PR) ────────────
 
@@ -309,7 +344,7 @@ class HoneypotCaptain:
         record it on the incident. Runs after the first alert has gone out."""
 
         from captains.honeypot.investigate import investigate_incident, load_map_store_for_config
-        from compass_core.aws import build_target_session, resolve_target_region
+        from compass_core.aws import resolve_target_region
         from compass_core.keys import workspace_pk
 
         incident_id = str(payload.get("incident_id") or "")
@@ -322,7 +357,7 @@ class HoneypotCaptain:
 
         target_region = str(payload.get("region") or resolve_target_region(self.config) or "us-east-1")
         try:
-            session = build_target_session(self.config, capability="read", region=target_region)
+            session = sessions.target("read", region=target_region, config=self.config)
         except Exception as exc:  # noqa: BLE001 - investigate what we can without AWS
             emit_job_event(f"No target AWS access for correlation: {exc}", event_type="warning", status="running")
             session = None
@@ -434,49 +469,15 @@ class HoneypotCaptain:
     # ── Responder role PR (HP-27) ──────────────────────────────────────────
 
     def run_responder_pr(self, *, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """Turn the enabled whitelist rows into the responder IAM role, delivered
-        as a PR against the honeypot repository like plants are."""
+        """The access pull request: both Compass roles regenerated from the manifests and the
+        grants (compass_core.access_pr). Kept under this name for the page and the CLI."""
+        from compass_core.access_pr import open_pr
 
-        from captains.honeypot.pr_writer import HoneypotPRWriter
-        from captains.honeypot.respond import load_action_rows
-        from captains.honeypot.responder_role import MODULE_DIR, MODULE_NAME, generate_responder_module
-        from compass_core.aws import resolve_target_account_id, resolve_target_region
-        from compass_core.keys import workspace_pk
-
-        emit_job_event("Generating the responder role", event_type="progress", status="running")
-        table = dynamo_table(tables(self.config).items)
-        rows = load_action_rows(table, workspace_pk(self.workspace_id))
-        hp_cfg = self.config.get("honeypot") if isinstance(self.config.get("honeypot"), dict) else {}
-        responder = hp_cfg.get("responder") if isinstance(hp_cfg.get("responder"), dict) else {}
-        trust = list(responder.get("trust_principal_arns") or [])
-        if not trust:
-            raise RuntimeError("honeypot.responder.trust_principal_arns is not configured")
-        account_id = responder.get("account_id") or resolve_target_account_id(self.config, "respond") or resolve_target_account_id(self.config, "read") or ""
-        region = responder.get("region") or resolve_target_region(self.config) or "us-east-1"
-        module = generate_responder_module(
-            rows, account_id=account_id, region=region, trust_principal_arns=trust,
-            external_id=responder.get("external_id") or None, role_name=responder.get("role_name") or "svc-ops-responder",
-        )
-        if not module["enabled_action_types"]:
-            raise RuntimeError("no enabled response actions; nothing to grant")
-
-        writer = HoneypotPRWriter(self.config)
-        repo = payload.get("repo") or self._resolve_default_repo(org_id=str(self.config.get("org_id") or ""))
-        body = (
-            "Operations responder role generated from the enabled response actions "
-            f"({', '.join(module['enabled_action_types'])}). The role is assumed by the "
-            "operations tooling with an external id and may do nothing beyond the listed actions.\n\n"
-            "Review the policy in `services/_responder/main.tf`."
-        )
-        pr_url = writer.create_module_pr(
-            module_name=MODULE_NAME, module_dir=MODULE_DIR, files=module["files"],
-            outputs={"responder_role_arn": "role_arn"}, branch_suffix="responder-role",
-            title="Operations responder role", body=body, resolved_repo=repo,
-            resolved_module_path=hp_cfg.get("terraform_root") or None,
-        )
-        self._register_pr("responder_pr", pr_url=pr_url, honeytoken={"name": "responder role"}, module_path=hp_cfg.get("terraform_root") or None, title="Operations responder role", module_name=MODULE_NAME, module_dir=MODULE_DIR, branch_suffix="responder-role", branch=_published_branch(writer))
-        emit_job_event(f"Responder role PR: {pr_url}", event_type="progress", status="completed")
-        return {"pr_url": pr_url, "role_arn": module["role_arn"], "enabled_action_types": module["enabled_action_types"]}
+        emit_job_event("Generating the access module", event_type="progress", status="running")
+        out = open_pr(self.config, workspace_id=self.workspace_id, actor=str(payload.get("requested_by") or payload.get("user_id") or "") or None,
+                      reason=str(payload.get("reason") or "requested from the decoys settings"))
+        emit_job_event(f"Access PR: {out['pr_url']}", event_type="progress", status="completed")
+        return out
 
     def run_dispatch_runbook(self, *, payload: Dict[str, Any]) -> Dict[str, Any]:
         from captains.honeypot.alert_dispatcher import dispatch_alert
@@ -695,7 +696,6 @@ class HoneypotCaptain:
 
     def _update_placement(self, honeytoken_id: str, fields: Dict[str, Any]) -> None:
         """Record on the token's placement what the plant PR edited (tf_address, env_vars, pr_url, repo)."""
-        import boto3
 
         from compass_core.keys import honeytoken_sort_key, workspace_pk
 
@@ -704,7 +704,7 @@ class HoneypotCaptain:
         if not table_name or not fields:
             return
         region = os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION")
-        table = boto3.resource("dynamodb", region_name=region).Table(table_name)
+        table = sessions.control(region=region).resource("dynamodb").Table(table_name)
         names = {f"#f{i}": k for i, k in enumerate(fields)}
         values = {f":v{i}": v for i, v in enumerate(fields.values())}
         try:
@@ -721,8 +721,6 @@ class HoneypotCaptain:
     def _update_honeytoken_pr_url(self, honeytoken_id: str, pr_url: str) -> None:
         import time
 
-        import boto3
-
         from compass_core.keys import honeytoken_sort_key, workspace_pk
 
         table_name = tables(self.config).items
@@ -731,7 +729,7 @@ class HoneypotCaptain:
             return
 
         region = os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION")
-        table = boto3.resource("dynamodb", region_name=region).Table(table_name)
+        table = sessions.control(region=region).resource("dynamodb").Table(table_name)
         pk = workspace_pk(self.workspace_id)
 
         try:

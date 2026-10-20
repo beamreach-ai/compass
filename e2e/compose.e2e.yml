@@ -9,6 +9,10 @@
 x-e2e-env: &e2e-env
   # every AWS call goes to moto, except DynamoDB, which stays on Compass's own dynamodb-local
   AWS_ENDPOINT_URL: http://moto:5000
+  # moto's keys are "the operator's profile" for `connect`; the services themselves run as the
+  # runtime user connect creates in moto, whose key is in config/local.json
+  AWS_ACCESS_KEY_ID: testing
+  AWS_SECRET_ACCESS_KEY: testing
   GITHUB_API_URL: http://fakes:9000/github
   GITHUB_GIT_URL: http://fakes:9000/git
   COMPASS_UPDATE_URL: http://fakes:9000/feed/releases.json

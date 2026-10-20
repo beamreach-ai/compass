@@ -14,8 +14,9 @@ from captains.honeypot.responder_role import generate_responder_module, responde
 SERVICE = "arn:aws:ecs:us-east-1:1:service/web/web"
 CLUSTER = "arn:aws:ecs:us-east-1:1:cluster/web"
 ROWS = [
-    {"action_id": "a1", "action_type": "ecs_restart_task", "scope": {"service_arns": [SERVICE]}, "mode": "autopilot", "risk_max": 2, "enabled": True},
-    {"action_id": "a2", "action_type": "iam_deactivate_key", "scope": {"user_path_prefixes": ["/service/"]}, "mode": "autopilot", "risk_max": 2, "enabled": True},
+    # armed grants: a merged, applied and verified pull request (compass_core.grants); the executor refuses anything else
+    {"action_id": "a1", "action_type": "ecs_restart_task", "scope": {"service_arns": [SERVICE]}, "mode": "autopilot", "risk_max": 2, "enabled": True, "grant_status": "armed"},
+    {"action_id": "a2", "action_type": "iam_deactivate_key", "scope": {"user_path_prefixes": ["/service/"]}, "mode": "autopilot", "risk_max": 2, "enabled": True, "grant_status": "armed"},
     {"action_id": "a3", "action_type": "iam_deactivate_key", "scope": {"user_arns": ["arn:aws:iam::1:user/admin"]}, "mode": "off", "risk_max": 2, "enabled": False},
 ]
 

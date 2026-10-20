@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from compass_core import __version__
-from compass_core.captains import CaptainManifest, ServiceSpec, TabSpec
+from compass_core.captains import CaptainManifest, Permissions, ServiceSpec, TabSpec
 from compass_core.policy import MODES
 
 CONFIG_SCHEMA = {
@@ -56,6 +56,7 @@ MANIFEST = CaptainManifest(
     services=(ServiceSpec(name="prs-tick", start="captains.prs.scheduler:run_service", interval=300, interval_setting="prs_tick"),),
     config_schema=CONFIG_SCHEMA,
     settings_component="prs",
+    permissions=Permissions(github=("contents:write", "pull_requests:write", "issues:write"), egress=("api.github.com",)),
     requires_core=">=0.1,<1",
     version=__version__,
 )

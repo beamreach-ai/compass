@@ -4,6 +4,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
+from compass_core.actions import Action
+
 
 class ScopeError(ValueError):
     """The target of an action is outside the whitelist row's scope."""
@@ -100,35 +102,15 @@ def cluster_name_of(cluster_arn: str) -> str:
     return p["resource"].split("/", 1)[1] if p and "/" in p["resource"] else ""
 
 
-class ResponseAction:
-    """Catalog entry. Subclasses implement the five steps.
+class ResponseAction(Action):
+    """A decoy response: a ``compass_core.actions.Action`` whose scope is an
+    ``ActionScope`` and whose context an ``ActionContext``. Subclasses implement
+    the whitelist pair and the four steps.
 
     The executor always runs ``snapshot`` → ``execute`` → ``verify`` and writes
     an audit record; ``rollback`` is offered to the user afterwards when
     ``rollback_supported`` is true.
     """
-
-    action_type: str = ""
-    title: str = ""
-    description: str = ""
-    change_type: str = ""
-    rollback_supported: bool = False
-    rollback_automatic: bool = False
-    verify_timeout_seconds: int = 300
-
-    def describe(self) -> Dict[str, Any]:
-        return {
-            "action_type": self.action_type,
-            "title": self.title,
-            "description": self.description,
-            "change_type": self.change_type,
-            "rollback_supported": self.rollback_supported,
-            "rollback_automatic": self.rollback_automatic,
-            "scope_fields": self.scope_fields(),
-        }
-
-    def scope_fields(self) -> List[str]:
-        return []
 
     # --- whitelist -----------------------------------------------------------
     def iam_statements(self, scope: ActionScope, *, account_id: str, region: str) -> List[Dict[str, Any]]:

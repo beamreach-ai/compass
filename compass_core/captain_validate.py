@@ -7,7 +7,9 @@ install would, loads each manifest and checks what tests/test_captain_manifests.
 checks for the shipped captains: the manifest's own rules, compatibility with
 this core, the commands module registering the captain, routers and services
 resolving, every route under a declared prefix, a valid config schema, no clash
-with an installed captain, the packaging matching the manifest.
+with an installed captain, the packaging matching the manifest, and the
+permissions block: present, rendering to a session policy, and covering every
+AWS call the code makes (compass_core.permissions).
 """
 
 from __future__ import annotations
@@ -102,6 +104,29 @@ def validate(project: str) -> Dict[str, Any]:
                 _check(results, f"{m.name}: service {spec.name} resolves", ok, spec.start)
             except Exception as exc:  # noqa: BLE001
                 _check(results, f"{m.name}: service {spec.name} resolves", False, f"{spec.start}: {type(exc).__name__}: {exc}")
+        _check(results, f"{m.name}: declares permissions", m.permissions is not None,
+               "" if m.permissions is not None else "add permissions=Permissions(...) to the manifest: what it reads in AWS and what it may propose (docs/writing_a_captain.md)")
+        if m.permissions is not None:
+            from compass_core import permissions as _permissions
+
+            try:
+                policy = _permissions.session_policy(m.permissions, {"aws": {"account_id": "123456789012", "state_buckets": ["example"]}})
+                _check(results, f"{m.name}: permissions render to a session policy", policy is not None,
+                       "" if policy is not None else "the read block is over 2,048 characters inline; it will need a managed policy")
+            except Exception as exc:  # noqa: BLE001
+                _check(results, f"{m.name}: permissions render to a session policy", False, f"{type(exc).__name__}: {exc}")
+            declared_actions = list(m.permissions.aws.actions) if m.permissions.aws else []
+            if declared_actions:
+                from compass_core import actions as _actions
+
+                unregistered = [a for a in declared_actions if _actions.captain_of(a) != m.name]
+                _check(results, f"{m.name}: declared action types are registered", not unregistered,
+                       "register them with compass_core.actions.register in the commands module: " + ", ".join(unregistered) if unregistered else ", ".join(declared_actions))
+            package_dir = root / "captains" / m.name
+            if package_dir.is_dir():
+                missing = _permissions.uncovered(m.permissions, _permissions.aws_calls(package_dir))
+                _check(results, f"{m.name}: the code calls only what the manifest declares", not missing,
+                       "declare or remove: " + ", ".join(str(c) for c in missing[:12]) if missing else "")
         if m.config_schema:
             try:
                 import jsonschema

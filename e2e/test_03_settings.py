@@ -7,18 +7,21 @@ import json
 from e2e import fixture
 
 
-def test_set_1_aws_local_iam_saves_the_account_and_a_bad_entry_saves_nothing(stack, page):
-    saved = stack.api.post("/api/settings/aws", json={"mode": "local_iam", "region": fixture.REGION})
-    assert saved.status_code == 200, saved.text
+def test_set_1_connect_left_the_roles_and_a_bad_entry_saves_nothing(stack, page):
     aws = stack.api.get("/api/settings/bootstrap").json()["aws"]
-    assert aws["mode"] == "local_iam" and aws["account_id"] == fixture.ACCOUNT
+    assert aws["connected"] and aws["account_id"] == fixture.ACCOUNT and aws["mode"] == "roles"
+    assert aws["roles"]["read"].startswith(f"arn:aws:iam::{fixture.ACCOUNT}:role/service/svc-inventory-reader-")
+    assert aws["runtime_arn"].startswith(f"arn:aws:iam::{fixture.ACCOUNT}:user/service/svc-compass-runtime-")
+    assert stack.records["connect_again"]["steps"] and not any(s.get("created") for s in stack.records["connect_again"]["steps"]), "a second connect changes nothing"
+    verified = stack.api.post("/api/settings/aws/verify")
+    assert verified.status_code == 200 and verified.json()["verification"]["assumed"]["read"]["ok"], verified.text
 
     refused = stack.api.post("/api/settings/aws/test", json={"mode": "assume_role", "assume_role": {"account_id": "1234", "role_name": "x"}})
     assert refused.status_code == 422
-    assert stack.api.get("/api/settings/bootstrap").json()["aws"]["mode"] == "local_iam", "nothing saved"
+    assert stack.api.get("/api/settings/bootstrap").json()["aws"]["roles"] == aws["roles"], "nothing saved"
 
     page.open("/workspace?tab=settings")
-    page.get_by_text(f"Current target: {fixture.ACCOUNT}", exact=False).wait_for()
+    page.get_by_text(f"Account {fixture.ACCOUNT} is connected", exact=False).wait_for()
 
 
 def test_set_2_github_shows_the_token_s_login_and_a_rejected_token_changes_nothing(stack, page):
