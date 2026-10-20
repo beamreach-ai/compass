@@ -31,8 +31,39 @@ def _map_to_sqlite(config: Dict[str, Any]) -> None:
     step_0_6_0(config)
 
 
+def _access_model(config: Dict[str, Any]) -> None:
+    """0.7.0: the `aws` block names roles, not credentials (docs/specs/access-model.md §12).
+    An install that assumed roles keeps them as `roles.read` / `roles.act`; one that used
+    the profile (`local_iam`) or static keys gets no roles and the Connect card, and runs
+    nothing against a target until `compass connect` has run."""
+    from compass_core.config import save_workspace_config
+
+    aws = config.get("aws") if isinstance(config.get("aws"), dict) else None
+    if not aws or isinstance(aws.get("roles"), dict):
+        return
+    roles: Dict[str, str] = {}
+    for key, kind in (("assume_role_read", "read"), ("assume_role", "read"), ("assume_role_respond", "act")):
+        legacy = aws.get(key)
+        if isinstance(legacy, dict) and legacy.get("account_id") and legacy.get("role_name") and kind not in roles:
+            roles[kind] = f"arn:aws:iam::{legacy['account_id']}:role/{legacy['role_name']}"
+            if legacy.get("external_id") and not aws.get("external_id"):
+                aws["external_id"] = str(legacy["external_id"])
+            aws.setdefault("account_id", str(legacy["account_id"]))
+    if aws.get("generated_external_id") and not aws.get("external_id"):
+        aws["external_id"] = str(aws["generated_external_id"])
+    aws["roles"] = roles
+    aws["migrated_from"] = aws.get("auth_mode") or ("assume_role" if roles else ("access_key" if aws.get("credentials") else None))
+    for stale in ("auth_mode", "assume_role", "assume_role_read", "assume_role_write", "assume_role_respond", "credentials",
+                  "credentials_read", "credentials_write", "credentials_respond", "static_credentials", "generated_external_id"):
+        aws.pop(stale, None)
+    workspace_id = str(config.get("workspace_id") or "")
+    if workspace_id:
+        save_workspace_config(workspace_id, config)
+
+
 # 0.6.0: the map moves from DynamoDB to the SQLite file (infra_map.migrate); the table stays for rollback
-STEPS: List[Step] = [("0.6.0-map-sqlite", _map_to_sqlite)]
+# 0.7.0: the aws block names roles, not credentials; `compass connect` creates them
+STEPS: List[Step] = [("0.6.0-map-sqlite", _map_to_sqlite), ("0.7.0-access-model", _access_model)]
 
 
 def sort_key(version: str) -> str:

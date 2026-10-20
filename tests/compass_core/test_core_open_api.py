@@ -7,7 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from compass_core import config as core_config
-from compass_core import dispatch, queue, sessions
+from compass_core import dispatch, queue
 
 
 @pytest.fixture
@@ -148,25 +148,3 @@ def test_open_app_takes_the_sign_in_from_the_config_file(tmp_path, monkeypatch):
     finally:
         queue.set_job_queue(previous)
 
-
-def test_local_iam_account_is_looked_up_once_and_kept(monkeypatch):
-    from compass_api.routes import settings as open_settings
-
-    class _Sts:
-        calls = 0
-
-        def get_caller_identity(self):
-            _Sts.calls += 1
-            return {"Account": "123456789012"}
-
-    class _Session:
-        def client(self, name):
-            assert name == "sts"
-            return _Sts()
-
-    monkeypatch.setattr(sessions, "target", lambda *a, **k: _Session())
-    cfg = {"aws": {"auth_mode": "local_iam", "region": "us-east-1"}}
-    assert open_settings._resolve_local_account(cfg) is True
-    assert cfg["aws"]["account_id"] == "123456789012"
-    assert open_settings._resolve_local_account(cfg) is False and _Sts.calls == 1, "already known: no second lookup"
-    assert open_settings._resolve_local_account({"aws": {"assume_role": {"account_id": "1"}}}) is False

@@ -20,7 +20,8 @@ def test_init_config_writes_a_complete_workspace_file(tmp_path, monkeypatch):
     out = tmp_path / "local.json"
     result = commands.init_config({"workspace": "local", "region": "eu-west-1", "github_repo": "acme/infra", "terraform_root": "envs/prod", "out": str(out)})
     cfg = json.loads(out.read_text())
-    assert cfg["aws"] == {"auth_mode": "local_iam", "region": "eu-west-1"}
+    assert cfg["aws"]["region"] == "eu-west-1" and len(cfg["aws"]["install_id"]) == 6 and "auth_mode" not in cfg["aws"]
+    assert result["aws_account"].startswith("not connected yet: run `compass connect"), "the profile is for connect; init_config reads no account"
     assert cfg["github"]["token"] == "ghp_test" and cfg["github"]["login"] == "octocat" and cfg["github"]["honeypot_repo"] == "acme/infra" and cfg["github"]["org"] == "acme"
     assert cfg["honeypot"]["terraform_root"] == "envs/prod"
     assert cfg["dynamodb_config"]["map"] == "compass_map_local" and cfg["dynamodb_config"]["items"] == "compass_items_local"

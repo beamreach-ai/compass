@@ -16,7 +16,7 @@ nothing leaves.
 
 ## Install
 
-You need Docker, an AWS profile in `~/.aws` with read access to the account,
+You need Docker, an AWS profile in `~/.aws` that can create two IAM roles (used once),
 and a GitHub token with `repo` scope (`gh auth token` prints yours).
 
 ```sh
@@ -24,7 +24,7 @@ mkdir compass && cd compass
 for f in docker-compose.yml nginx.conf .env.example; do
   curl -fsSO https://raw.githubusercontent.com/beamreach-ai/compass/main/$f
 done
-cp .env.example .env && $EDITOR .env        # AWS_PROFILE, AWS_REGION, GITHUB_TOKEN
+cp .env.example .env && $EDITOR .env        # AWS_REGION, GITHUB_TOKEN
 
 docker compose run --rm compass init_config workspace=local region=us-east-1 \
     github_repo=<owner>/<infra-repo> terraform_root=<path to the root module>

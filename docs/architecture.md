@@ -14,7 +14,8 @@ your AWS account and your GitHub repository as the only things outside.
                                    DynamoDB (local) ◄── api    jobs, decoys, state
                                    the map (SQLite) ◄── api    one file on the map-data volume
                                            │
-                       AWS account (read; decoys write once) · GitHub (pull requests)
+        AWS account (read, through a role Compass narrows per captain;
+         writes only through an action a merged pull request granted) · GitHub (pull requests)
 ```
 
 Everything the dashboard starts — a scan, a decoy, an import — is a **job**:
@@ -73,10 +74,28 @@ it in place for a rollback). Keys are built in `compass_core.keys` and nowhere
 else. Locally the tables live in the `dynamodb-data` volume; point
 `AWS_ENDPOINT_URL_DYNAMODB` elsewhere to use a real one.
 
-The config file (`config/local.json`) is the workspace: AWS auth mode and
-region, the GitHub token and repositories, the decoy alert queue, PR-watcher
-policy, dashboard sign-in. `compass_core.config` reads it; the API writes it
-back when you change settings.
+The config file (`config/local.json`) is the workspace: the target account
+and the two roles `connect` created, the runtime identity and its key, the
+alert queues, the GitHub token and repositories, PR-watcher policy, dashboard
+sign-in. `compass_core.config` reads it; the API writes it back when you change
+settings.
+
+## Access
+
+Compass only reads a target account, and only what each captain declared. The
+operator's profile is used once, by `compass connect`, which creates two roles
+in the account: a **read role** whose policy is generated from the installed
+captains' manifests (`compass_core.permissions`), and an **act role** that
+starts with no permissions. The services run as a **base identity** that may
+only assume those roles: the machine's own role on AWS, elsewhere a runtime
+user `connect` creates whose key lives in the config. Every AWS session comes
+from one broker, `compass_core.sessions`: `control()` for the control side
+(DynamoDB, the alert queues, SES), `target("read")` or `target("act")` for the
+account, each named `compass-<captain>-<job>`, narrowed by a session policy to
+the captain's declaration, and carrying who asked as `SourceIdentity`. A
+response action gets its permission by a pull request a person merges, and a
+scheduled audit flags anything in either role that no manifest or grant
+explains. [docs/access.md](access.md) has the whole model.
 
 ## Where the seams are
 
@@ -90,7 +109,7 @@ model. Each seam is a module-level default plus an `install`/`set_*` hook:
 | Map store | `infra_map.graph_store.open_store`: the SQLite file | `set_graph_store_factory` |
 | Workspace config | the JSON file | `set_workspace_config_loader` / `saver` |
 | Events | the job store | `set_event_sink` |
-| AWS sessions | `compass_core.sessions`: the ambient credentials for the control side; static keys, `assume_role` or `local_iam` for the target, every session named `compass-<captain>-<job>` | `set_session_factory` |
+| AWS sessions | `compass_core.sessions`: the runtime identity for the control side; the two roles `connect` created for the target, every session named `compass-<captain>-<job>` and narrowed to the captain's declaration | `set_session_factory` |
 | Model | Anthropic (`ANTHROPIC_API_KEY`) or none | `set_model_factory` |
 | Email | SMTP endpoint you configure | `set_email_relay` |
 | API: workspace, status sections, bootstrap hooks, auth paths and scopes, tabs | one workspace, open sections, `/api/` gated | `compass_api.workspace.install`, `compass_api.extensions` |

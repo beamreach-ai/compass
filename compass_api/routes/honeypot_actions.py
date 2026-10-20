@@ -148,7 +148,7 @@ def check_responder(request: Request) -> Dict[str, Any]:
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=400, detail=f"cannot assume the responder role: {exc}") from exc
     if session is None:
-        raise HTTPException(status_code=400, detail="aws.assume_role_respond is not configured for this workspace")
+        raise HTTPException(status_code=400, detail="no act role (aws.roles.act) for this workspace: run `compass connect`")
     iam = session.client("iam", region_name=cfg["region"])
     results = simulate_actions(iam, module["role_arn"], module["policy"])
     denied = [r for r in results if r["decision"] != "allowed"]
@@ -306,7 +306,7 @@ def rollback_audit(request: Request, audit_id: str, body: RollbackPayload = Roll
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=400, detail=f"cannot assume the responder role: {exc}") from exc
     if session is None:
-        raise HTTPException(status_code=400, detail="aws.assume_role_respond is not configured for this workspace")
+        raise HTTPException(status_code=400, detail="no act role (aws.roles.act) for this workspace: run `compass connect`")
     out = rollback_response_action(
         session=session, audit=audit, ctx=ctx, audit_log=AuditLog(table, pk), requested_by=requested_by, action=action
     )

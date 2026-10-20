@@ -113,7 +113,7 @@ use `docker compose -f docker-compose.yml -f compose.e2e.yml logs` as on any ins
                   ├─ makes e2e/.work/compass-e2e: docker-compose.yml, nginx.conf, .env from .env.example
                   ├─ adds e2e/compose.e2e.yml:   moto (fake AWS)   fakes (fake GitHub, webhooks, release feed, catalog)
                   ├─ seeds both from e2e/fixture.py
-                  └─ runs the quickstart: init_config, init_tables, up -d
+                  └─ runs the quickstart: init_config, init_tables, connect (moto's keys as the profile), up -d
 
  Compass ── AWS_ENDPOINT_URL ──────► moto          (DynamoDB stays on the stack's own dynamodb-local)
          ── GITHUB_API_URL, GITHUB_GIT_URL ► fakes /github, /git

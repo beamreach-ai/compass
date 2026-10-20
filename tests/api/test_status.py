@@ -12,7 +12,8 @@ def _client(monkeypatch, *, jobs=None, break_honeypots=False):
     from compass_api import extensions
     from compass_core import registry
 
-    config = {"aws": {"auth_mode": "local_iam"}, "github": {"installation_id": 42, "account_login": "acme"}}
+    config = {"aws": {"roles": {"read": "arn:aws:iam::123456789012:role/service/svc-inventory-reader-k3f9a2"}, "account_id": "123456789012"},
+              "github": {"installation_id": 42, "account_login": "acme"}}
     registry.reset_memory_for_tests()
     monkeypatch.setattr(module, "get_actor_ids", lambda _r: {"workspace_id": "ws-1", "org_id": None, "user_id": "u"})
     monkeypatch.setattr(module, "get_workspace_config", lambda _r: config)

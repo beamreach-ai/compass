@@ -2,51 +2,72 @@ import { z } from "zod";
 import { defineTool } from "../core/registry.js";
 
 const accountInput = {
-  action: z.enum(["get", "test", "connect"]).describe("get: current target; test: validate credentials without saving; connect: validate and save, which also starts the first infra map and audits"),
-  mode: z.enum(["local_iam", "assume_role", "access_key"]).optional().describe("local_iam = the account Compass runs in; assume_role = cross-account role; access_key = static key (fallback)"),
-  account_id: z.string().length(12).optional().describe("Target account id (assume_role)"),
-  role_name: z.string().optional().describe("Role to assume; default BeamreachCompassRole"),
-  external_id: z.string().optional().describe("External id; defaults to the one Compass generated (see compass_settings get)"),
-  access_key_id: z.string().optional(),
-  secret_access_key: z.string().optional(),
-  session_token: z.string().optional(),
-  region: z.string().optional().describe("Default region for scans"),
+  action: z.enum(["get", "connect", "template", "verify", "test"]).describe(
+    "get: what is connected; connect: print the `compass connect` command to run with the profile (or, with mode assume_role, record a role made by hand); template: write the roles as CloudFormation/Terraform for an account out of reach; verify: assume the roles as the runtime identity and simulate the read policy; test: check a hand-made role without saving",
+  ),
+  mode: z.enum(["assume_role"]).optional().describe("assume_role: record a read role made outside `connect` (its template, or by hand)"),
+  account_id: z.string().length(12).optional().describe("Target account id"),
+  role_name: z.string().optional().describe("The read role to use (assume_role); default svc-inventory-reader-<install>"),
+  act_role_name: z.string().optional().describe("The act role, if one exists (assume_role)"),
+  external_id: z.string().optional().describe("External id in the trust policy; defaults to the one Compass recorded (aws.external_id)"),
+  base_identity: z.string().optional().describe("template: the identity Compass runs with (aws.runtime_arn from get, or the machine's role)"),
+  region: z.string().optional().describe("Target region"),
+  profile: z.string().optional().describe("connect: the AWS profile in ~/.aws to run it with (printed into the command)"),
+  state_bucket: z.string().optional().describe("connect: the Terraform state bucket the mapper may read"),
   account_name: z.string().optional().describe("Friendly name shown in the dashboard"),
 };
 
-function payloadFrom(args: z.infer<z.ZodObject<typeof accountInput>>) {
-  const mode = args.mode || (args.account_id ? "assume_role" : args.access_key_id ? "access_key" : "local_iam");
-  const payload: Record<string, unknown> = { mode, region: args.region, account_name: args.account_name };
-  if (mode === "assume_role") {
-    if (!args.account_id) throw new Error("account_id is required for assume_role");
-    payload.assume_role = { account_id: args.account_id, role_name: args.role_name || "BeamreachCompassRole", external_id: args.external_id };
-  }
-  if (mode === "access_key") {
-    if (!args.access_key_id || !args.secret_access_key) throw new Error("access_key_id and secret_access_key are required for access_key mode");
-    payload.access_key = { access_key_id: args.access_key_id, secret_access_key: args.secret_access_key, session_token: args.session_token };
-  }
-  return payload;
+function rolePayload(args: z.infer<z.ZodObject<typeof accountInput>>) {
+  if (!args.account_id) throw new Error("account_id is required for assume_role");
+  return {
+    mode: "assume_role",
+    region: args.region,
+    account_name: args.account_name,
+    assume_role: { account_id: args.account_id, role_name: args.role_name || "", external_id: args.external_id, act_role_name: args.act_role_name },
+  };
 }
 
 export const accountTool = defineTool({
   name: "compass_account",
   description:
-    "Target AWS account Compass scans. get = what is configured; test = STS check of a proposed configuration; connect = save it (admin). For a cross-account target, deploy the role first (compass_account_role_template) and pass account_id; the external id defaults to the one Compass generated.",
+    "Target AWS account Compass reads. Compass creates its own roles once with `compass connect`, run in the install directory with the operator's profile: connect prints that command. get = what is connected (roles, runtime identity, last verification); verify = check the roles as the runtime identity; template = the roles as CloudFormation/Terraform for an account out of reach; test/connect with mode assume_role = a role made by hand.",
   input: accountInput,
   scope: "admin",
   annotations: { readOnlyHint: false, idempotentHint: true },
-  cli: { command: "account", positionals: ["action"], summary: "get | test | connect the target AWS account" },
+  cli: { command: "account", positionals: ["action"], summary: "get | connect | template | verify | test the target AWS account" },
   handler: async (args, ctx) => {
     const client = ctx.client();
     if (args.action === "get") {
       const [target, bootstrap] = await Promise.all([client.get("/api/target"), client.get("/api/settings/bootstrap")]);
       return { target, aws: bootstrap?.aws, infra_scan: bootstrap?.infra_scan };
     }
-    const payload = payloadFrom(args);
-    if (args.action === "test") return client.post("/api/settings/aws/test", payload);
-    const result = await client.post("/api/settings/aws", payload);
-    ctx.log("AWS target saved. Compass queued the first infra map and audits.");
-    return result;
+    if (args.action === "verify") return client.post("/api/settings/aws/verify", {});
+    if (args.action === "template") {
+      const bootstrap = await client.get("/api/settings/bootstrap");
+      const base = args.base_identity || bootstrap?.aws?.runtime_arn;
+      const account = args.account_id || bootstrap?.aws?.account_id;
+      if (!account || !base) throw new Error("template needs account_id and base_identity (aws.runtime_arn from `compass account get`)");
+      return {
+        run_in_the_install_directory: `docker compose run --rm compass connect template account=${account} region=${args.region || bootstrap?.aws?.region || "us-east-1"} base_identity=${base}`,
+        note: "writes config/connect/<account>/compass-roles.yaml and main.tf; apply either in that account, then `compass account verify`",
+      };
+    }
+    if (args.action === "test") return client.post("/api/settings/aws/test", rolePayload(args));
+    if (args.mode === "assume_role") {
+      const result = await client.post("/api/settings/aws", rolePayload(args));
+      ctx.log("Read role recorded. Compass queued the first infra map.");
+      return result;
+    }
+    const bootstrap = await client.get("/api/settings/bootstrap");
+    const account = args.account_id || bootstrap?.aws?.account_id || "<account id>";
+    const region = args.region || bootstrap?.aws?.region || "us-east-1";
+    const extra = args.state_bucket ? ` state_bucket=${args.state_bucket}` : "";
+    return {
+      connected: Boolean(bootstrap?.aws?.connected),
+      run_in_the_install_directory: `docker compose run --rm -v ~/.aws:/root/.aws:ro -e AWS_PROFILE=${args.profile || "<profile>"} compass connect account=${account} region=${region}${extra}`,
+      then: "docker compose up -d",
+      note: "the one command that uses the profile: it creates two IAM roles, an alert queue and a runtime user, verifies them and records them in config/local.json",
+    };
   },
 });
 

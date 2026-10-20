@@ -5,6 +5,42 @@ workflow refuses a tag without one, and reads from it what the dashboard shows
 next to the Update button: the first paragraph is the summary, the bullets under
 `### After the update` are the notes an operator needs after applying it.
 
+## 0.7.0 — unreleased
+
+Compass only reads your account, through a role it creates once, and writes
+nothing without a pull request you merge. The operator's profile is used by
+one command, `compass connect`; the running services never see it.
+
+- `compass connect account=<id> region=<r>`, run once with your profile,
+  creates in the account a read role whose policy is generated from what the
+  installed captains declare they read, an act role with no permissions, the
+  queue decoy alerts report to (in the control account, SQS-managed
+  encryption), and, off AWS, a runtime user whose only right is to assume the
+  two roles. On AWS it trusts the machine's own role instead. `connect verify`,
+  `connect rotate` and `connect template` (CloudFormation and Terraform for an
+  account out of reach) complete it.
+- Every captain's manifest declares what it reads (`permissions`); `compass
+  validate` fails on a call the manifest does not cover. Each session is
+  narrowed to that declaration, so a captain cannot read more than it declared
+  whatever the role allows. `lambda:Get*` is never a read: it downloads code.
+- Every AWS session Compass makes comes from one broker, `compass_core.sessions`,
+  and is named `compass-<captain>-<job>` with `SourceIdentity` set to who asked,
+  so the target account's CloudTrail says which captain, which job, and whom.
+- The services refuse to start with `AWS_PROFILE` set or `~/.aws` mounted, or
+  as anything but the runtime identity `connect` recorded.
+- `local_iam` and static keys are gone as ways in; `init_alerts` is absorbed
+  into `connect`. The `aws` block of the config names roles, not credentials.
+
+### After the update
+
+- Run `docker compose run --rm -v ~/.aws:/root/.aws:ro -e AWS_PROFILE=<profile>
+  compass connect account=<id> region=<r>` once, then `docker compose up -d`.
+  Remove `AWS_PROFILE` from `.env` and the `~/.aws` mount from an edited
+  compose file. An install that assumed a role keeps it as the read role; one
+  that used the profile runs nothing against the account until `connect` has run.
+- Decoys planted before this release report to the old queue until
+  `honeypot replant-alerts` has opened and you have merged its pull request.
+
 ## 0.6.0 — unreleased
 
 The map moves from DynamoDB to a SQLite file and keeps its history: scans of a
@@ -19,13 +55,6 @@ and the map reads that took tens of seconds take milliseconds.
   edge is a version with the time it appeared and the time it went, so the map
   can later be read as it was and two scans compared (the API for that comes
   in a later release).
-- Every AWS session Compass makes comes from one broker, `compass_core.sessions`,
-  and is named `compass-<captain>-<job>` (`compass-mapper-<job id>` for a scan,
-  `compass-honeypot-api-<request>` for an action run from the dashboard), so the
-  target account's CloudTrail says which captain and which job made a call. With
-  `aws.source_identity: true`, once the role's trust policy allows
-  `sts:SetSourceIdentity`, the trail also records who asked. Nothing else changes:
-  credentials are resolved exactly as before.
 - Every reader of the map goes through one interface, `GraphStore`
   (`infra_map.graph_store`), with `set_graph_store_factory` for a deployment
   that brings its own store. A Postgres store implements it too:

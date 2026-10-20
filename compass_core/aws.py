@@ -1,10 +1,19 @@
-"""How the target account is configured: regions, static keys, the roles to assume. Sessions
-themselves are built by ``compass_core.sessions``."""
+"""How the target account is configured, read from the workspace config's ``aws`` block
+(docs/specs/access-model.md §12). Sessions themselves are built by ``compass_core.sessions``.
+
+    aws:
+      account_id, region, regions[]           the target
+      roles: {read, act}                      the two roles `compass connect` created
+      external_id, session_prefix, source_identity
+      install_id                              names this installation's roles and runtime user
+      state_buckets[]                         the Terraform state the mapper may read
+      control: {account_id, credential_source, runtime_arn, credentials, alert_queues}
+"""
 
 from __future__ import annotations
 
 import os
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 
 def _aws_config(config: Any) -> Dict[str, Any]:
@@ -12,21 +21,6 @@ def _aws_config(config: Any) -> Dict[str, Any]:
         return {}
     aws_cfg = config.get("aws")
     return aws_cfg if isinstance(aws_cfg, dict) else {}
-
-
-def _local_iam_mode(config: Any) -> bool:
-    aws_cfg = _aws_config(config)
-    auth_mode = aws_cfg.get("auth_mode")
-    return isinstance(auth_mode, str) and auth_mode.strip().lower() == "local_iam"
-
-
-def _local_iam_runtime_enabled() -> bool:
-    # Opt-in for single-tenant/local deployments where the ambient credentials
-    # (task role, ~/.aws) belong to the target account. Must stay off in the
-    # shared multi-tenant service, where the ambient identity is the control
-    # plane's, not the tenant's.
-    # COMPASS_ALLOW_LOCAL_IAM; the older BEAMREACH_ name still works
-    return (os.getenv("COMPASS_ALLOW_LOCAL_IAM") or os.getenv("BEAMREACH_ALLOW_LOCAL_IAM") or "").strip().lower() in {"1", "true", "yes"}
 
 
 def resolve_target_region(config: Any, default: Optional[str] = None) -> Optional[str]:
@@ -44,89 +38,63 @@ def resolve_target_region(config: Any, default: Optional[str] = None) -> Optiona
     return region or None
 
 
-def resolve_static_credentials_config(config: Any, capability: str = "read") -> Optional[Dict[str, Any]]:
+def resolve_target_regions(config: Any) -> List[str]:
+    """Every region the target is watched in: ``aws.regions``, else the one region."""
     aws_cfg = _aws_config(config)
-
-    candidates = []
-    if capability == "respond":
-        # Explicit only; see resolve_assume_role_config.
-        candidate = aws_cfg.get("credentials_respond") or aws_cfg.get("static_credentials_respond")
-        return candidate if isinstance(candidate, dict) else None
-    if capability == "write":
-        candidates.extend(
-            [
-                aws_cfg.get("credentials_write"),
-                aws_cfg.get("static_credentials_write"),
-                aws_cfg.get("write_credentials"),
-            ]
-        )
-    else:
-        candidates.extend(
-            [
-                aws_cfg.get("credentials_read"),
-                aws_cfg.get("static_credentials_read"),
-                aws_cfg.get("read_credentials"),
-            ]
-        )
-    candidates.extend(
-        [
-            aws_cfg.get("credentials"),
-            aws_cfg.get("static_credentials"),
-            config.get("credentials") if isinstance(config, dict) else None,
-        ]
-    )
-
-    for candidate in candidates:
-        if isinstance(candidate, dict) and (
-            candidate.get("access_key_id")
-            or candidate.get("aws_access_key_id")
-            or candidate.get("secret_access_key")
-            or candidate.get("aws_secret_access_key")
-        ):
-            return candidate
-    return None
-
-
-def resolve_assume_role_config(config: Any, capability: str = "read") -> Optional[Dict[str, Any]]:
-    if not isinstance(config, dict):
-        return None
-
-    aws_cfg = _aws_config(config)
-    assume_cfg: Optional[Dict[str, Any]] = None
-    if capability == "respond":
-        # The honeypot responder role is scoped to the whitelisted actions and
-        # must be configured explicitly: never fall back to the read or write
-        # role, which would let a response action run with broader rights.
-        assume_cfg = aws_cfg.get("assume_role_respond") or config.get("assume_role_respond")
-        return assume_cfg if isinstance(assume_cfg, dict) else None
-    if capability == "write":
-        assume_cfg = aws_cfg.get("assume_role_write") or aws_cfg.get("assume_role")
-    else:
-        assume_cfg = aws_cfg.get("assume_role_read") or aws_cfg.get("assume_role")
-
-    if not assume_cfg:
-        top_level_key = "assume_role_write" if capability == "write" else "assume_role"
-        assume_cfg = config.get(top_level_key) or config.get("assume_role")
-
-    return assume_cfg if isinstance(assume_cfg, dict) else None
+    regions = aws_cfg.get("regions") if isinstance(aws_cfg.get("regions"), list) else []
+    found = [str(r).strip() for r in regions if str(r).strip()]
+    default = resolve_target_region(config)
+    if default and default not in found:
+        found.insert(0, default)
+    return found
 
 
 def resolve_target_account_id(config: Any, capability: str = "read") -> Optional[str]:
+    """The target account: ``aws.account_id``, else the account in the role ARN."""
     aws_cfg = _aws_config(config)
+    account = aws_cfg.get("account_id")
+    if isinstance(account, str) and account.strip():
+        return account.strip()
+    arn = role_arn(config, "act" if capability in ("act", "respond") else "read") or role_arn(config, "read")
+    return arn.split(":")[4] if arn and arn.count(":") >= 5 else None
 
-    for candidate in (
-        aws_cfg.get("account_id"),
-        (resolve_assume_role_config(config, capability) or {}).get("account_id"),
-        (resolve_static_credentials_config(config, capability) or {}).get("account_id"),
-    ):
-        if isinstance(candidate, str) and candidate.strip():
-            return candidate.strip()
-    return None
+
+def roles(config: Any) -> Dict[str, str]:
+    found = _aws_config(config).get("roles")
+    return {k: str(v) for k, v in found.items() if isinstance(v, str) and v.strip()} if isinstance(found, dict) else {}
+
+
+def role_arn(config: Any, capability: str) -> Optional[str]:
+    """The role a capability assumes: ``read`` → ``aws.roles.read``; ``act`` (or ``respond``)
+    → ``aws.roles.act``, explicit and never a fallback to the read role."""
+    key = "act" if capability in ("act", "respond") else "read"
+    return roles(config).get(key)
+
+
+def external_id(config: Any) -> Optional[str]:
+    value = _aws_config(config).get("external_id")
+    return str(value).strip() if isinstance(value, str) and value.strip() else None
+
+
+def control_config(config: Any) -> Dict[str, Any]:
+    found = _aws_config(config).get("control")
+    return found if isinstance(found, dict) else {}
+
+
+def alert_queues(config: Any) -> Dict[str, Dict[str, str]]:
+    """region → {arn, url} of the decoy alert queues: ``aws.control.alert_queues`` once
+    `connect` has run, else the queue `init_alerts` created in the target account under the
+    decoy captain's own keys (honoured for one release)."""
+    found = control_config(config).get("alert_queues")
+    if isinstance(found, dict) and found:
+        return {str(r): {"arn": str(q.get("arn") or ""), "url": str(q.get("url") or "")} for r, q in found.items() if isinstance(q, dict)}
+    legacy = config.get("honeypot") if isinstance(config, dict) and isinstance(config.get("honeypot"), dict) else {}
+    arn, url = legacy.get("alert_queue_arn"), legacy.get("alert_queue_url")
+    if isinstance(arn, str) and arn.count(":") >= 5:
+        return {arn.split(":")[3]: {"arn": arn, "url": str(url or "")}}
+    return {}
 
 
 def has_target_aws_access(config: Any, capability: str = "read") -> bool:
-    return bool(
-        resolve_static_credentials_config(config, capability)
-        or resolve_assume_role_config(config, capability)
-        or (_local_iam_mode(config) and _local_iam_runtime_enabled())
-    )
+    """Whether `compass connect` has run: the role for the capability is configured."""
+    return bool(role_arn(config, capability))

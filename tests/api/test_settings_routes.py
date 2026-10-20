@@ -40,12 +40,15 @@ def _build_client(monkeypatch, config):
 def test_settings_bootstrap_redacts_secrets(monkeypatch):
     config = {
         "aws": {
-            "credentials": {
-                "access_key_id": "AKIAIOSFODNN7EXAMPLE",
-                "secret_access_key": "secret-value",
-            },
             "account_id": "123456789012",
             "region": "eu-central-1",
+            "roles": {"read": "arn:aws:iam::123456789012:role/service/svc-inventory-reader-k3f9a2",
+                      "act": "arn:aws:iam::123456789012:role/service/svc-ops-responder-k3f9a2"},
+            "external_id": "ext-1",
+            "control": {"credential_source": "access_key", "runtime_arn": "arn:aws:iam::123456789012:user/service/svc-compass-runtime-k3f9a2",
+                        "credentials": {"access_key_id": "AKIAIOSFODNN7EXAMPLE", "secret_access_key": "secret-value"},
+                        "alert_queues": {"eu-central-1": {"arn": "arn:aws:sqs:eu-central-1:123456789012:compass-decoy-alerts-local", "url": "u"}}},
+            "verified_at": "2026-10-20T10:00:00Z",
         },
         "github": {
             "installation_id": 42,
@@ -66,9 +69,12 @@ def test_settings_bootstrap_redacts_secrets(monkeypatch):
 
     body = response.json()
     assert body["workspace"]["workspace_id"] == "user-123"
-    assert body["aws"]["configured"] is True
-    assert body["aws"]["access_key_id_hint"] == "...MPLE"
-    assert "secret_access_key" not in body["aws"]
+    assert body["aws"]["configured"] is True and body["aws"]["connected"] is True and body["aws"]["mode"] == "roles"
+    assert body["aws"]["roles"]["read"].endswith("svc-inventory-reader-k3f9a2") and body["aws"]["role_name"] == "svc-inventory-reader-k3f9a2"
+    assert body["aws"]["runtime_arn"].endswith("svc-compass-runtime-k3f9a2") and body["aws"]["credential_source"] == "access_key"
+    assert body["aws"]["alert_queues"] == {"eu-central-1": "arn:aws:sqs:eu-central-1:123456789012:compass-decoy-alerts-local"}
+    assert "secret-value" not in response.text and "AKIAIOSFODNN7EXAMPLE" not in response.text, "the runtime key never leaves the file"
+    assert body["aws"]["connect_command"].startswith("docker compose run --rm -v ~/.aws:/root/.aws:ro")
     assert body["github"]["connected"] is True
     assert body["github"]["login"] == "beamreach-ai"
     assert body["github"]["installation_id"] == 42
@@ -90,10 +96,11 @@ def test_update_aws_settings_persists_assume_role(monkeypatch):
     monkeypatch.setattr(
         module,
         "_validate_aws_access",
-        lambda payload: {
+        lambda payload, base=None: {
             "account_id": "123456789012",
             "region": "eu-central-1",
             "caller_arn": "arn:aws:sts::123456789012:assumed-role/TestRole/session",
+            "roles": {"read": "arn:aws:iam::123456789012:role/BeamreachCompassRole"},
         },
     )
 
@@ -117,9 +124,23 @@ def test_update_aws_settings_persists_assume_role(monkeypatch):
     assert stored["aws_region"] == "eu-central-1"
     assert stored["aws"]["account_id"] == "123456789012"
     assert stored["aws"]["account_name"] == "Production"
-    assert stored["aws"]["assume_role"]["role_name"] == "BeamreachCompassRole"
-    assert stored["aws"]["assume_role"]["external_id"] == "external-123"
-    assert "credentials" not in stored["aws"]
+    assert stored["aws"]["roles"] == {"read": "arn:aws:iam::123456789012:role/BeamreachCompassRole"}
+    assert stored["aws"]["external_id"] == "external-123" and stored["aws"]["verified_at"] and stored["aws"]["connected_at"]
+    assert "credentials" not in stored["aws"] and "assume_role" not in stored["aws"] and "auth_mode" not in stored["aws"]
+    assert response.json()["aws"]["connected"] is True
+
+
+def test_verify_runs_the_connect_check_and_records_it(monkeypatch):
+    config = {"aws": {"roles": {"read": "arn:aws:iam::123456789012:role/r", "act": "arn:aws:iam::123456789012:role/a"}, "region": "eu-central-1"}}
+    client, saved = _build_client(monkeypatch, config)
+    from compass_core import connect as connect_module
+
+    monkeypatch.setattr(connect_module, "verify_with", lambda cfg, profile, steps=None: {"ok": True, "assumed": {"read": {"ok": True}}, "simulated": False, "denied": []})
+    response = client.post("/api/settings/aws/verify")
+    assert response.status_code == 200 and response.json()["ok"] is True
+    assert saved["config"]["aws"]["verified_at"] and saved["config"]["aws"]["verification"]["simulated"] is False
+    client, _ = _build_client(monkeypatch, {"aws": {}})
+    assert client.post("/api/settings/aws/verify").status_code == 400
 
 
 def test_test_aws_settings_returns_400_for_assume_role_access_denied(monkeypatch):
@@ -157,8 +178,8 @@ def test_test_aws_settings_returns_400_for_assume_role_access_denied(monkeypatch
     assert response.json()["detail"].startswith(
         "Failed to assume AWS role arn:aws:iam::123456789012:role/BeamreachCompassRole: AccessDenied:"
     )
-    assert "sts:AssumeRole" in response.json()["detail"]
-    assert "trust policy permits this principal" in response.json()["detail"]
+    assert "sts:AssumeRole" in response.json()["detail"] and "compass connect" in response.json()["detail"]
+    assert "trust policy names it" in response.json()["detail"]
 
 
 def test_github_setup_persists_installation(monkeypatch):

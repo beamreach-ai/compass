@@ -158,7 +158,7 @@ def test_risk_above_cap_waits_and_no_credentials_is_recorded(env):
     assert out["action"]["decisions"][0]["decision"] == "wait_for_approval"
     table = _Table([ROW_RESTART])
     out = respond_to_incident(table=table, pk=PK, incident_id="1-abc", region="us-east-1", session_factory=lambda: None)
-    assert out["action"]["decisions"][0]["decision"] == "skipped" and "assume_role_respond" in out["action"]["decisions"][0]["reason"]
+    assert out["action"]["decisions"][0]["decision"] == "skipped" and "aws.roles.act" in out["action"]["decisions"][0]["reason"]
 
 
 def test_nothing_applicable_is_recommend_only(env):

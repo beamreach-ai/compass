@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from compass_core import captains as registry
-from compass_core import dispatch
+from compass_core import dispatch, sessions
 from compass_core.captains import CaptainManifest, ServiceSpec
 from compass_core.config import workspace_config
 from compass_core.workspace import captain_config, resolve
@@ -365,6 +365,7 @@ class Server:
 def serve(payload: Dict[str, Any]) -> Dict[str, Any]:
     workspace = resolve(payload)
     config = captain_config(payload, workspace)
+    sessions.assert_runtime(config)  # a profile in the container is a setup mistake; say so before anything runs
     intervals: Dict[str, int] = {}
     for manifest in registry.manifests():
         for spec in manifest.services:

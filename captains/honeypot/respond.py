@@ -119,7 +119,7 @@ def respond_to_incident(
         if session is None:
             session = session_factory()
         if session is None:
-            entry.update(decision="skipped", reason="no responder credentials (aws.assume_role_respond)")
+            entry.update(decision="skipped", reason="no act role (aws.roles.act): run `compass connect`")
             decisions.append(entry)
             continue
         if first_started is None:
@@ -187,7 +187,7 @@ def approve_pending_action(
     ctx = context_from_incident(incident, alerts, region=region, account_id=account_id)
     session = session_factory()
     if session is None:
-        raise RuntimeError("no responder credentials (aws.assume_role_respond)")
+        raise RuntimeError("no act role (aws.roles.act): run `compass connect`")
     action = get_action(row["action_type"])
     risk = score_action(action, ctx, {})
     audit = run_response_action(session=session, row=row, ctx=ctx, audit_log=AuditLog(table, pk), chosen_by="agent", approved_by=approved_by, risk=risk)

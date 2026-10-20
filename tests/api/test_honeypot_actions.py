@@ -99,7 +99,7 @@ def test_audits_newest_first(env):
 def test_check_requires_respond_credentials(env):
     client, _ = env
     r = client.post("/api/honeypots/actions/check")
-    assert r.status_code == 400 and "assume_role_respond" in r.json()["detail"]
+    assert r.status_code == 400 and "aws.roles.act" in r.json()["detail"]
 
 
 def test_rollback_reactivates_a_deactivated_key_once(env, monkeypatch):

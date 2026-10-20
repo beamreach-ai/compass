@@ -141,7 +141,8 @@ describe("compass CLI", () => {
         compass_version: "v1.2.0",
         workspace: { workspace_id: "ws-test" },
         app: { mode: "production", read_only: false },
-        target: { aws_connected: true, aws: { mode: "local_iam", account_id: "123456789012", region: "eu-central-1" }, github_connected: false },
+        target: { aws_connected: true, aws: { mode: "roles", account_id: "123456789012", region: "eu-central-1", verified_at: "2026-10-20T10:00:00Z" }, github_connected: false },
+        access: { actions_armed: 2, actions_total: 3, audited_at: "3h ago" },
         infra_scan: { scanned: true },
         findings: { by_domain: { security: { critical: 1, high: 2, medium: 0, low: 5 }, finops: { low: 3 } }, estimated_monthly_savings_usd: 120 },
         jobs: { active_count: 1, recent_failures: [] },
@@ -151,7 +152,7 @@ describe("compass CLI", () => {
         errors: {},
       },
     });
-    expect(r.stdout).toContain("AWS: connected (local_iam, account 123456789012, eu-central-1)");
+    expect(r.stdout).toContain("AWS: account 123456789012 (eu-central-1) · read ✓ · 2 of 3 actions armed · audited 3h ago");
     expect(r.stdout).toContain("Security findings: 1 critical, 2 high");
     expect(r.stdout).toContain("Honeypots: 3 (2 armed, 1 pending_pr), 0 active alerts");
   });
