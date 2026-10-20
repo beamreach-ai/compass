@@ -33,6 +33,23 @@ class PublishedPR:
     updated: bool = False
 
 
+def iac_repository(config: Any) -> Optional[str]:
+    """The repository infrastructure pull requests go to: ``github.iac_repo``, else the decoy repository."""
+    github_cfg = config.get("github") if isinstance(config, dict) and isinstance(config.get("github"), dict) else {}
+    repo = github_cfg.get("iac_repo") or github_cfg.get("honeypot_repo")
+    return str(repo) if repo else None
+
+
+def iac_terraform_root(config: Any) -> str:
+    """Where the root module lives in that repository, from the captains' settings; "" for the repository root."""
+    for section in ("iac", "honeypot"):
+        cfg = config.get(section) if isinstance(config, dict) and isinstance(config.get(section), dict) else {}
+        if cfg.get("terraform_root"):
+            return str(cfg["terraform_root"]).strip("/")
+    return ""
+
+
+
 def ensure_branch(gh_repo: Any, branch: str, base_branch: str) -> str:
     """Create `branch` from the head of `base_branch`; an existing branch is reused. Returns the base sha."""
     base_sha = gh_repo.get_branch(base_branch).commit.sha

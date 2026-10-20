@@ -21,6 +21,7 @@ import type { QueueEvent, QueueJob, SettingsBootstrap, SettingsSaveParticipant, 
 import { ALL_WORKSPACE_TABS, SETTINGS_VIEWS, TAB_ALIASES, asWorkspaceTab, resolveEnabledTabs, settingsSectionId } from "../lib/tabs";
 import type { DashboardTab, WorkspaceTab } from "../lib/tabs";
 import SlackIntegrationCard from "./SlackIntegrationCard";
+import { AccessSection } from "./AccessSection";
 
 const resolveTab = (
   params: ReturnType<typeof useSearchParams>,
@@ -781,6 +782,8 @@ export default function DashboardClient() {
                 </div>
               </div>
             </section>}
+
+            {awsIntegrationEnabled && settingsBootstrap?.aws?.connected && <AccessSection readOnly={isReadOnly} />}
 
             {githubIntegrationEnabled && <section className={`bg-white border rounded-lg shadow-sm p-6 space-y-4 ${!settingsBootstrap?.github?.connected ? "border-amber-400 ring-2 ring-amber-300" : ""}`}>
               <div className="space-y-1">

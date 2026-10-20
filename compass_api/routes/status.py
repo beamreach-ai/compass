@@ -63,6 +63,36 @@ def _target_section(request: Request, config: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _access_section(request: Request, config: Dict[str, Any]) -> Dict[str, Any]:
+    """What `compass status` prints on its account line: the roles, how many actions are
+    armed, when the access was last verified and audited (compass_core.grants, access_audit)."""
+    from compass_api.routes._workspace import get_workspace_dynamodb_config
+    from compass_core import grants
+    from compass_core.aws import roles
+    from compass_core.keys import workspace_pk
+    from compass_core.tables import dynamo_table, tables
+
+    aws = config.get("aws") if isinstance(config.get("aws"), dict) else {}
+    out: Dict[str, Any] = {"connected": bool(roles(config).get("read")), "roles": roles(config), "verified_at": aws.get("verified_at"),
+                           "actions_total": 0, "actions_armed": 0, "in_flight": 0, "waiting_on": [], "audited_at": None, "findings": 0}
+    name = tables(get_workspace_dynamodb_config(request)).items
+    if not name:
+        return out
+    table = dynamo_table(name)
+    pk = workspace_pk(get_actor_ids(request).get("workspace_id"))
+    summary = grants.summary(table, pk)
+    out.update(actions_total=summary["total"], actions_armed=summary["armed"], in_flight=summary["in_flight"], waiting_on=summary["waiting_on"])
+    try:
+        from compass_core import access_audit
+
+        last = access_audit.last_run(table, pk)
+        out["audited_at"] = (last or {}).get("at")
+        out["findings"] = len(access_audit.open_findings(table, pk))
+    except ImportError:
+        pass
+    return out
+
+
 def _jobs_section(jobs: List[Dict[str, Any]]) -> Dict[str, Any]:
     active = [j for j in jobs if str(j.get("status") or "").lower() in _ACTIVE_STATUSES]
     last_completed: Dict[str, Optional[int]] = {}
@@ -155,6 +185,7 @@ def get_status(request: Request) -> Dict[str, Any]:
         },
         "auth": _auth_section(request),
         "target": _section(errors, "target", lambda: _target_section(request, config), default={}),
+        "access": _section(errors, "access", lambda: _access_section(request, config), default={}),
         "infra_scan": _section(errors, "infra_scan", lambda: current_infra_scan_summary(request, config=config), default={}),
         "jobs": _section(errors, "jobs_summary", lambda: _jobs_section(jobs), default={}),
         "prs": _section(errors, "prs", lambda: _prs_section(jobs, _section(errors, "pr_registry", lambda: _pr_records(config, workspace_id), default=[])), default={}),

@@ -23,6 +23,7 @@ from captains.honeypot.choose import choose_actions
 from captains.honeypot.investigate import region_of_arns
 from captains.honeypot.policy import gate, score_action
 from captains.honeypot.responder import AuditLog, run_response_action
+from compass_core import grants
 from compass_core.keys import honeypot_action_prefix, honeypot_action_sort_key
 
 logger = logging.getLogger("honeypot-respond")
@@ -100,7 +101,6 @@ def respond_to_incident(
     decisions: List[Dict[str, Any]] = []
     audit_ids: List[str] = list(incident.get("audit_ids") or [])
     pending: List[Dict[str, Any]] = []
-    session = None
     first_started: Optional[str] = None
     verified_at: Optional[str] = None
     chosen_at = _now()
@@ -109,6 +109,11 @@ def respond_to_incident(
         row = by_id[action_id]
         action = get_action(row["action_type"])
         risk = score_action(action, ctx, {}, calibration_cfg=calibration_cfg)
+        if not grants.is_armed(row):
+            # the grant is checked before the gate: a merged pull request arms an action, nothing else does
+            decisions.append({"action_id": action_id, "action_type": row["action_type"], "risk": risk["risk"], "risk_max": row.get("risk_max"), "mode": row.get("mode"),
+                              "decision": "wait_for_grant", "reason": f"grant is {row.get('grant_status') or 'not granted'}" + (f" (waiting on {row['grant_pr']})" if row.get("grant_pr") else "")})
+            continue
         decision = gate(row.get("mode", "approve"), risk["risk"], int(row.get("risk_max", 2)))
         entry = {"action_id": action_id, "action_type": row["action_type"], "risk": risk["risk"], "risk_max": row.get("risk_max"), "mode": row.get("mode"), **decision}
         if decision["decision"] != "run":
@@ -116,8 +121,7 @@ def respond_to_incident(
                 pending.append({"action_id": action_id, "action_type": row["action_type"], "risk": risk["risk"], "reason": decision["reason"]})
             decisions.append(entry)
             continue
-        if session is None:
-            session = session_factory()
+        session = _session_for(session_factory, row)   # one session per action, narrowed to that action's grant
         if session is None:
             entry.update(decision="skipped", reason="no act role (aws.roles.act): run `compass connect`")
             decisions.append(entry)
@@ -183,9 +187,12 @@ def approve_pending_action(
     row = table.get_item(Key={"pk": pk, "sk": honeypot_action_sort_key(action_id)}).get("Item")
     if not row:
         raise ValueError("the whitelist row no longer exists")
+    if not grants.is_armed(row):
+        raise RuntimeError(f"{row.get('action_type')} is {row.get('grant_status') or 'not granted'}, not armed: merge its pull request first"
+                           + (f" ({row['grant_pr']})" if row.get("grant_pr") else ""))
     alerts = incidents.alerts_for_incident(table, pk, incident_id)
     ctx = context_from_incident(incident, alerts, region=region, account_id=account_id)
-    session = session_factory()
+    session = _session_for(session_factory, row)
     if session is None:
         raise RuntimeError("no act role (aws.roles.act): run `compass connect`")
     action = get_action(row["action_type"])
@@ -203,13 +210,27 @@ def approve_pending_action(
     return {"incident_id": incident_id, "audit": audit, **fields}
 
 
-def responder_session_factory(config: Dict[str, Any], region: str, *, approver: Optional[str] = None) -> Callable[[], Any]:
-    """An act session for the responder role, attributed to the person whose approval runs it."""
+def _session_for(session_factory: Callable[..., Any], row: Dict[str, Any]) -> Any:
+    """The factory takes the row (the session is narrowed to that grant); an older factory
+    that takes nothing is still called."""
+    try:
+        return session_factory(row)
+    except TypeError:
+        return session_factory()
+
+
+def responder_session_factory(config: Dict[str, Any], region: str, *, approver: Optional[str] = None) -> Callable[..., Any]:
+    """An act session for one armed grant: the act role, narrowed to that action's statements,
+    attributed to the person whose approval runs it. Never cached: one session per action."""
     from compass_core import sessions
 
-    def _make():
+    def _make(row: Optional[Dict[str, Any]] = None):
         try:
-            return sessions.target("act", region=region, config=config, approver=approver)
+            action = grants.narrowing(row, config) if row is not None else None
+            return sessions.target("act", region=region, config=config, approver=approver, action=action)
+        except grants.GrantError as exc:
+            logger.warning("%s", exc)
+            return None
         except Exception as exc:  # noqa: BLE001
             logger.warning("cannot build responder session: %s", exc)
             return None

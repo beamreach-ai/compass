@@ -7,7 +7,6 @@ of the responder role's permissions (``captains.honeypot.responder_role``).
 
 from __future__ import annotations
 
-import uuid
 from typing import Any, Dict, List, Optional
 
 from boto3.dynamodb.conditions import Key
@@ -17,11 +16,11 @@ from pydantic import BaseModel, Field
 from captains.honeypot.actions import ACTION_CATALOG, catalog, get_action
 from captains.honeypot.actions.base import ActionScope
 from captains.honeypot.policy import MODES
-from captains.honeypot.responder_role import DEFAULT_ROLE_NAME, generate_responder_module, simulate_actions
+from captains.honeypot.responder_role import DEFAULT_ROLE_NAME
 from compass_api.routes import honeypots as hp
 from compass_api.routes._app_config import write_guard
 from compass_api.routes._workspace import get_actor_ids, get_workspace_config
-from compass_core import sessions
+from compass_core import access_module, grants, sessions
 from compass_core.aws import resolve_target_account_id, resolve_target_region
 from compass_core.keys import (
     honeypot_action_prefix,
@@ -70,6 +69,12 @@ def _serialize(item: Dict[str, Any]) -> Dict[str, Any]:
         "created_by": item.get("created_by"),
         "updated_at": item.get("updated_at"),
         "catalog": get_action(item["action_type"]).describe() if item.get("action_type") in ACTION_CATALOG else None,
+        # the grant: a pull request a person merges gives the act role exactly this (compass_core.grants)
+        "grant_status": item.get("grant_status"),
+        "grant_pr": item.get("grant_pr"),
+        "armed": grants.is_armed(item),
+        "applied_at": item.get("applied_at"),
+        "verified_at": item.get("verified_at"),
     }
 
 
@@ -106,67 +111,44 @@ def get_catalog() -> List[Dict[str, Any]]:
 
 @router.get("/api/honeypots/actions/responder-module")
 def responder_module(request: Request) -> Dict[str, Any]:
-    """The Terraform the enabled rows translate to. HP-01's writer turns this
-    into a PR; here it is previewed."""
+    """The Terraform the grants translate to: the access module as the next pull request
+    would carry it (compass_core.access_module)."""
     table = hp._resolve_table(request)
     rows = _list_rows(table, hp._ws_pk(request))
-    cfg = _responder_config(request)
-    if not cfg["trust_principal_arns"]:
-        raise HTTPException(
-            status_code=400,
-            detail="honeypot.responder.trust_principal_arns is not configured (the Compass worker role that assumes the responder)",
-        )
-    module = generate_responder_module(
-        rows,
-        account_id=cfg["account_id"],
-        region=cfg["region"],
-        trust_principal_arns=cfg["trust_principal_arns"],
-        external_id=cfg["external_id"] or None,
-        role_name=cfg["role_name"],
-    )
-    module.pop("trust", None)
-    return module
+    rendered = access_module.render(get_workspace_config(request), rows)
+    rendered.pop("trust", None)
+    return {**rendered, "policy": rendered["act_policy"], "role_arn": rendered["act_role"]["arn"], "role_name": rendered["act_role"]["name"],
+            "enabled_action_types": sorted({str(r["action_type"]) for r in rows if grants.is_granted(r)})}
 
 
 @router.post("/api/honeypots/actions/check")
 def check_responder(request: Request) -> Dict[str, Any]:
-    """Ask IAM whether the applied responder role can do what the enabled rows
-    need. Runs against the real target account."""
-    table = hp._resolve_table(request)
-    rows = _list_rows(table, hp._ws_pk(request))
-    cfg = _responder_config(request)
-    module = generate_responder_module(
-        rows,
-        account_id=cfg["account_id"],
-        region=cfg["region"],
-        trust_principal_arns=cfg["trust_principal_arns"] or ["arn:aws:iam::000000000000:root"],
-        external_id=cfg["external_id"] or None,
-        role_name=cfg["role_name"],
-    )
-    try:
-        session = sessions.target("act", region=cfg["region"], config=cfg["workspace_config"], approver=get_actor_ids(request).get("user_id"))
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=400, detail=f"cannot assume the responder role: {exc}") from exc
-    if session is None:
+    """Read the act role back from IAM and move every in-flight grant as far as it allows:
+    `verify` for the decoy captain's grants. Runs against the real target account."""
+    config = get_workspace_config(request)
+    if not (config.get("aws") or {}).get("roles", {}).get("act"):
         raise HTTPException(status_code=400, detail="no act role (aws.roles.act) for this workspace: run `compass connect`")
-    iam = session.client("iam", region_name=cfg["region"])
-    results = simulate_actions(iam, module["role_arn"], module["policy"])
-    denied = [r for r in results if r["decision"] != "allowed"]
-    return {"role_arn": module["role_arn"], "ok": not denied, "results": results, "denied": denied}
+    table = hp._resolve_table(request)
+    pk = hp._ws_pk(request)
+    try:
+        result = grants.refresh(table, pk, config, captain="honeypot", actor=get_actor_ids(request).get("user_id"))
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=f"cannot read the act role: {exc}") from exc
+    rows = _list_rows(table, pk)
+    denied = [{"action": r["action_type"], "grant_id": r["action_id"], "decision": r.get("grant_status")} for r in rows if r.get("enabled", True) and not grants.is_armed(r)]
+    return {"role_arn": (config.get("aws") or {}).get("roles", {}).get("act"), "ok": not denied and not result["errors"], "results": result["changed"],
+            "denied": denied, "errors": result["errors"], "simulated": result["simulated"], "actions": [_serialize(r) for r in rows]}
 
 
 @router.post("/api/honeypots/actions/responder-pr")
 def open_responder_pr(request: Request) -> Dict[str, Any]:
-    """Queue the job that opens (or updates) the responder-role PR."""
+    """Queue the job that opens (or updates) the access pull request."""
     from compass_core.queue import job_queue
 
-    cfg = _responder_config(request)
-    if not cfg["trust_principal_arns"]:
-        raise HTTPException(status_code=400, detail="honeypot.responder.trust_principal_arns is not configured")
     actor = get_actor_ids(request)
     job = job_queue().enqueue(
-        captain="honeypot", command="responder_pr",
-        payload={"workspace_id": actor.get("workspace_id"), "requested_by": actor.get("user_id") or ""},
+        captain="core", command=grants.PR_COMMAND,
+        payload={"verb": "pr", "workspace_id": actor.get("workspace_id"), "user_id": actor.get("user_id") or "", "reason": "requested from the decoys settings"},
     )
     return {"queued": True, "job": job if isinstance(job, (str, dict)) else str(job)}
 
@@ -181,61 +163,73 @@ def list_actions(request: Request) -> Dict[str, Any]:
 
 @router.post("/api/honeypots/actions")
 def create_action(request: Request, body: ResponseActionPayload) -> Dict[str, Any]:
+    """Allow an action: a grant, proposed and, with a mode of approve or autopilot, accepted
+    (the pull request that grants it is queued). It runs only once that is merged, applied
+    and verified."""
     if body.action_type not in ACTION_CATALOG:
         raise HTTPException(status_code=400, detail=f"unknown action_type {body.action_type!r}")
     _validate_scope(body.action_type, body.scope)
     table = hp._resolve_table(request)
     pk = hp._ws_pk(request)
     actor = get_actor_ids(request)
-    action_id = f"act-{uuid.uuid4().hex[:12]}"
-    now = hp._epoch_ms()
-    item = {
-        "pk": pk,
-        "sk": honeypot_action_sort_key(action_id),
-        "action_id": action_id,
-        "action_type": body.action_type,
-        "scope": body.scope.model_dump(),
-        "mode": body.mode,
-        "risk_max": body.risk_max,
-        "enabled": body.enabled,
-        "created_at": now,
-        "updated_at": now,
-        "created_by": actor.get("user_id") or actor.get("email") or "",
-    }
-    table.put_item(Item=item)
+    config = get_workspace_config(request)
+    who = actor.get("user_id") or actor.get("email") or ""
+    try:
+        item = grants.propose(table, pk, captain="honeypot", action_type=body.action_type, scope=body.scope.model_dump(), mode=body.mode,
+                              risk_max=body.risk_max, actor=who)
+        if body.enabled and body.mode != "off":
+            item = grants.accept(table, pk, str(item["action_id"]), config=config, actor=who, mode=body.mode)
+    except grants.GrantError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return hp._to_native(_serialize(item))
 
 
 @router.put("/api/honeypots/actions/{action_id}")
 def update_action(request: Request, action_id: str, body: ResponseActionUpdatePayload) -> Dict[str, Any]:
+    """The row's knobs. A wider scope is a new grant (the old one stays armed until the new
+    one is); `off` or enabled=false removes; approve or autopilot on a removed row grants again."""
     table = hp._resolve_table(request)
     pk = hp._ws_pk(request)
     key = {"pk": pk, "sk": honeypot_action_sort_key(action_id)}
     item = table.get_item(Key=key).get("Item")
     if not item:
         raise HTTPException(status_code=404, detail="response action not found")
-    if body.scope is not None:
-        _validate_scope(item["action_type"], body.scope)
-        item["scope"] = body.scope.model_dump()
-    if body.mode is not None:
-        item["mode"] = body.mode
-    if body.risk_max is not None:
-        item["risk_max"] = body.risk_max
-    if body.enabled is not None:
-        item["enabled"] = body.enabled
-    item["updated_at"] = hp._epoch_ms()
-    table.put_item(Item=item)
+    config = get_workspace_config(request)
+    who = get_actor_ids(request).get("user_id") or ""
+    try:
+        if body.scope is not None and body.scope.model_dump() != item.get("scope"):
+            _validate_scope(item["action_type"], body.scope)
+            if grants.is_granted(item):
+                item = grants.widen(table, pk, action_id, scope=body.scope.model_dump(), config=config, actor=who)
+                action_id = str(item["action_id"])
+            else:
+                item["scope"] = body.scope.model_dump()
+                item["updated_at"] = hp._epoch_ms()
+                table.put_item(Item=item)
+        item = grants.set_mode(table, pk, action_id, config=config, actor=who, mode=body.mode, risk_max=body.risk_max, enabled=body.enabled)
+    except grants.GrantError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return hp._to_native(_serialize(item))
 
 
 @router.delete("/api/honeypots/actions/{action_id}")
 def delete_action(request: Request, action_id: str) -> Dict[str, Any]:
+    """Remove the action: disarmed at once, the revoke pull request queued. The row stays until
+    IAM no longer holds the permission; a row that never got one is deleted outright."""
     table = hp._resolve_table(request)
-    key = {"pk": hp._ws_pk(request), "sk": honeypot_action_sort_key(action_id)}
-    if not table.get_item(Key=key).get("Item"):
+    pk = hp._ws_pk(request)
+    key = {"pk": pk, "sk": honeypot_action_sort_key(action_id)}
+    item = table.get_item(Key=key).get("Item")
+    if not item:
         raise HTTPException(status_code=404, detail="response action not found")
-    table.delete_item(Key=key)
-    return {"deleted": action_id}
+    if str(item.get("grant_status") or "proposed") in ("proposed", "declined", "revoked"):
+        table.delete_item(Key=key)
+        return {"deleted": action_id}
+    try:
+        row = grants.remove(table, pk, action_id, config=get_workspace_config(request), actor=get_actor_ids(request).get("user_id"))
+    except grants.GrantError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"deleted": False, "disarmed": action_id, "grant_status": row.get("grant_status"), "grant_pr": row.get("grant_pr")}
 
 
 # ── audit ───────────────────────────────────────────────────────────────────
@@ -301,8 +295,12 @@ def rollback_audit(request: Request, audit_id: str, body: RollbackPayload = Roll
     )
     actor = get_actor_ids(request)
     requested_by = actor.get("user_id") or actor.get("workspace_id") or "unknown"
+    grant_row = table.get_item(Key={"pk": pk, "sk": honeypot_action_sort_key(str(audit.get("action_id") or ""))}).get("Item") if audit.get("action_id") else None
     try:
-        session = sessions.target("act", region=ctx.region, config=get_workspace_config(request), approver=actor.get("user_id"))
+        narrowing = grants.narrowing(dict(grant_row), get_workspace_config(request)) if grant_row else None
+        session = sessions.target("act", region=ctx.region, config=get_workspace_config(request), approver=actor.get("user_id"), action=narrowing)
+    except grants.GrantError as exc:
+        raise HTTPException(status_code=409, detail=f"the grant no longer allows it: {exc}") from exc
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=400, detail=f"cannot assume the responder role: {exc}") from exc
     if session is None:

@@ -61,9 +61,44 @@ def _access_model(config: Dict[str, Any]) -> None:
         save_workspace_config(workspace_id, config)
 
 
+def _grants(config: Dict[str, Any]) -> None:
+    """0.7.0: the decoy captain's whitelist rows are grants (compass_core.grants): the key moves
+    from HONEYPOT#ACTION#<id> to GRANT#honeypot#<id> and the row gets a lifecycle. An enabled row
+    whose responder role was applied is `applied`: the next verification tick arms it once IAM
+    holds and allows its statements; a disabled row is `revoked`. Nothing runs until then."""
+    from boto3.dynamodb.conditions import Key
+
+    from compass_core.keys import grant_sort_key, legacy_honeypot_action_prefix
+
+    name = tables(config).items
+    workspace_id = str(config.get("workspace_id") or "")
+    if not name or not workspace_id:
+        return
+    table = dynamo_table(name)
+    pk = workspace_pk(workspace_id)
+    kwargs: Dict[str, Any] = {"KeyConditionExpression": Key("pk").eq(pk) & Key("sk").begins_with(legacy_honeypot_action_prefix())}
+    moved = 0
+    while True:
+        page = table.query(**kwargs)
+        for item in page.get("Items", []):
+            row = dict(item)
+            grant_id = str(row.get("action_id") or str(row["sk"]).rsplit("#", 1)[-1])
+            enabled = bool(row.get("enabled", True)) and str(row.get("mode") or "off") != "off"
+            row.update(sk=grant_sort_key("honeypot", grant_id), action_id=grant_id, captain="honeypot",
+                       grant_status="applied" if enabled else "revoked", grant_pr=row.get("grant_pr"), applied_at=None, verified_at=None,
+                       policy_hash=None, grant_history=[{"from": None, "to": "applied" if enabled else "revoked", "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "by": "migration 0.7.0"}])
+            table.put_item(Item=row)
+            moved += 1
+        if not page.get("LastEvaluatedKey"):
+            break
+        kwargs["ExclusiveStartKey"] = page["LastEvaluatedKey"]
+    if moved:
+        logger.info("moved %d decoy whitelist rows to grants", moved)
+
+
 # 0.6.0: the map moves from DynamoDB to the SQLite file (infra_map.migrate); the table stays for rollback
-# 0.7.0: the aws block names roles, not credentials; `compass connect` creates them
-STEPS: List[Step] = [("0.6.0-map-sqlite", _map_to_sqlite), ("0.7.0-access-model", _access_model)]
+# 0.7.0: the aws block names roles, not credentials; `compass connect` creates them; the whitelist rows become grants
+STEPS: List[Step] = [("0.6.0-map-sqlite", _map_to_sqlite), ("0.7.0-access-model", _access_model), ("0.7.0-grants", _grants)]
 
 
 def sort_key(version: str) -> str:

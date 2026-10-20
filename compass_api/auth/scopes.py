@@ -33,6 +33,7 @@ _ADMIN_WRITE_PREFIXES = (
     "/api/honeypots/settings",
     "/api/honeypots/actions",
     "/api/prs/watcher",
+    "/api/access",
 )
 
 # Reads that reveal credentials or configuration, or list other tokens.

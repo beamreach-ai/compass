@@ -63,8 +63,9 @@ def test_the_core_commands_are_shorthand_and_update_takes_a_bare_verb():
     from compass_core import commands
 
     assert set(commands.COMMANDS) == cli.CORE_SHORTHAND
-    assert {"migrate", "update", "connect"} <= cli.CORE_SHORTHAND
-    assert cli.VERB_COMMANDS == {"update": ("check", "apply", "rollback"), "connect": ("template", "verify", "rotate")}
+    assert {"migrate", "update", "connect", "access"} <= cli.CORE_SHORTHAND
+    assert cli.VERB_COMMANDS == {"update": ("check", "apply", "rollback"), "connect": ("template", "verify", "rotate"),
+                                 "access": ("list", "accept", "decline", "remove", "verify", "audit", "pr")}
 
 
 def test_a_config_that_exists_is_a_message_not_a_traceback(capsys, tmp_path):

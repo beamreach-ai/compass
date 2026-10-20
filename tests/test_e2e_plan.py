@@ -42,7 +42,8 @@ def test_what_the_suite_reads_is_not_skipped_as_docs():
 
 def test_one_captain_runs_its_tests_and_the_smoke_tests():
     decoys = e2e_plan.plan(["captains/honeypot/terraform_generator.py"])
-    assert _files(decoys) == {"test_06_decoys.py", "test_00_install.py", "test_02_shell.py"} and _shards(decoys) == ["A", "C"]
+    assert _files(decoys) == {"test_06_decoys.py", "test_12_access.py", "test_08_prs.py", "test_00_install.py", "test_02_shell.py"} and _shards(decoys) == ["A", "C"], \
+        "the responses are grants: a decoy change runs the access tests, which merge through the watcher"
     prs = e2e_plan.plan(["captains/prs/sync.py"])
     assert {"test_07_iac.py", "test_08_prs.py"} <= _files(prs), "the watcher needs the pull request IAC-2 opens"
     assert decoys["compose_update"] is False

@@ -17,3 +17,5 @@ Honeytokens are planted through Terraform pull requests in the user's repo and a
 8. For single custom tokens, use `compass_honeypots_plant` with `honeytoken_class` and a name; the response contains the lure material once. Tell the user where to place it; never repeat the material in later messages.
 
 Mention: tokens show `pending_pr` until the PR is merged; the user can `compass_honeypots_manage arm` after merging, or Compass marks them armed when the alerting resources appear.
+
+Responses are grants: a response action runs only once its own pull request (the access module) is merged, applied and verified, whatever its mode says. `compass_access list` shows each one's state; an incident while a response is `pr_open` records `wait_for_grant` and does nothing. Say so before a drill, and never merge an access pull request yourself.

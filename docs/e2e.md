@@ -314,3 +314,16 @@ PRS-5 (a revision commit written by Claude) is out of this suite: it needs a mod
 
 75 tests. The multi-architecture image builds are checked by the release workflow,
 not here.
+
+### 4.13 Access: grants by pull request (`test_12_access.py`)
+
+| ID | Test | Via |
+|---|---|---|
+| ACC-1 | `connect` left the two roles; the act role starts empty; nothing is granted | API, moto |
+| ACC-2 | Allowing a response proposes a grant (`pr_open`) and the access job opens the pull request with the module: both roles, the grant's statements | API, fake GitHub |
+| ACC-3 | Merging it in the fake and "applying" (the test writes the act policy into moto) then verifying arms the grant; the status line counts it | API, moto |
+| ACC-4 | Removing disarms at once and the next access job opens the revoke pull request, the module without the grant; the grant stays `revoke_pr_open` while IAM holds it | API, fake GitHub |
+| ACC-5 | A statement added in the console is an `unexplained` finding of the self-audit; removing it clears the finding | API, moto |
+
+The suite cannot run Terraform against moto: "the operator applies" is the test writing the
+policy the module renders into moto, as the apply would.

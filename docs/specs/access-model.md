@@ -1166,3 +1166,35 @@ state bucket, `sts:GetCallerIdentity`. No DynamoDB lock table access.
 `captains/honeypot/alert_dispatcher.py`):
 DynamoDB (local), `sqs:ReceiveMessage`/`DeleteMessage`/`GetQueueAttributes`,
 `secretsmanager:GetSecretValue`, `ses:SendEmail`, `sts:GetCallerIdentity`.
+
+## Implementation notes (2026-10-20)
+
+Where the code differs from the sections above, and why. Each is small; none
+changes the model.
+
+- **Grant keys** are `GRANT#<captain>#<id>` (section 9.1 had the action type
+  in the key). The decoy routes look a row up by its id, and a key that needs
+  the type would turn every lookup into a query. The type is a field.
+- **Verification without IAM's simulation.** Where `SimulatePrincipalPolicy`
+  is unavailable (moto, so the e2e suite), a grant whose statements IAM holds
+  is marked `verified` with `verification.simulated: false`, and the page says
+  "statements present; IAM's simulation was not available". Real AWS always
+  simulates; the live checklist covers it.
+- **The access module's root file** is `access.tf`, next to the decoy
+  captain's `services.tf`, rather than a block inside it: the core does not
+  edit a captain's file.
+- **Arming checks the queue policy** from the control side instead of
+  sending a test event through the rule (section 14): a read role cannot
+  `events:PutEvents`, and the policy is what goes wrong.
+- **`honeypot replant_alerts`** (underscore, like every other command).
+- **The inbox (4.7)** is its own spec; findings show on Settings → Account →
+  Access and in `compass status` only.
+- **`cfn-lint`** was not added as a dependency; `connect template` is checked
+  for structure in the unit tests, and `aws cloudformation validate-template`
+  is on the live checklist.
+- **`connect` on an existing responder role** keeps the role `assume_role_respond`
+  named (the migration maps it to `roles.act`); a fresh install's act role
+  carries the installation suffix like the read role.
+- **The static manifest-versus-code pass** skips a captain's `actions/` and
+  `listener/` directories (the write actions are checked against their own
+  statements; the listener runs in the target account with its own role).

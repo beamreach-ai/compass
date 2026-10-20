@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Optional
 
 from compass_core import config as core_config
 from compass_core import dispatch, sessions
-from compass_core.tables import tables
+from compass_core.tables import dynamo_table, tables
 from compass_core.workspace import resolve
 
 logger = logging.getLogger("compass.commands")
@@ -269,6 +269,53 @@ def connect(payload: Dict[str, Any]) -> Dict[str, Any]:
     return _connect(payload)
 
 
+# ── access ───────────────────────────────────────────────────────────────────
+
+def access(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """list | accept id=<grant> [mode=approve|autopilot] | decline id= | remove id= | verify | audit | pr:
+    the actions Compass may run in the account and their grants. accept and remove open the pull
+    request that grants or revokes exactly that action (the `pr` verb is the job that opens it)."""
+    from compass_core import grants as _grants
+    from compass_core.keys import workspace_pk
+
+    workspace = resolve(payload)
+    config = dict(workspace.config)
+    config.setdefault("workspace_id", workspace.workspace_id)
+    verb = str(payload.get("verb") or "list").strip().lower()
+    table = dynamo_table(tables(config).items)
+    pk = workspace_pk(workspace.workspace_id)
+    actor = str(payload.get("user_id") or payload.get("actor") or "") or None
+    if verb == "list":
+        rows = _grants.list_grants(table, pk)
+        return {"workspace_id": workspace.workspace_id, "roles": config.get("aws", {}).get("roles"), "summary": _grants.summary(table, pk),
+                "grants": [{k: r.get(k) for k in ("action_id", "captain", "action_type", "scope", "mode", "risk_max", "grant_status", "grant_pr", "verified_at")} for r in rows]}
+    if verb == "verify":
+        return {"workspace_id": workspace.workspace_id, **_grants.refresh(table, pk, config, actor=actor)}
+    if verb == "pr":
+        from compass_core.access_pr import open_pr
+
+        return {"workspace_id": workspace.workspace_id, **open_pr(config, workspace_id=workspace.workspace_id, actor=actor, reason=str(payload.get("reason") or ""), table=table)}
+    if verb == "audit":
+        from compass_core import access_audit
+
+        return access_audit.run(config, workspace_id=workspace.workspace_id, table=table, actor=actor)
+    grant_id = str(payload.get("id") or payload.get("grant_id") or "")
+    if not grant_id:
+        raise ValueError(f"{verb} needs id=<grant id> (see `compass access list`)")
+    try:
+        if verb == "accept":
+            row = _grants.accept(table, pk, grant_id, config=config, actor=actor, mode=str(payload.get("mode") or "") or None)
+        elif verb == "decline":
+            row = _grants.decline(table, pk, grant_id, actor=actor)
+        elif verb == "remove":
+            row = _grants.remove(table, pk, grant_id, config=config, actor=actor)
+        else:
+            raise ValueError(f"unknown verb {verb!r}: access [list | accept | decline | remove | verify | audit | pr]")
+    except _grants.GrantError as exc:
+        raise ValueError(str(exc)) from exc
+    return {"workspace_id": workspace.workspace_id, "grant": {k: v for k, v in row.items() if k not in ("pk", "sk")}}
+
+
 # ── serve ────────────────────────────────────────────────────────────────────
 
 def serve(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -453,7 +500,7 @@ COMMANDS = {
     "init_config": init_config, "init_tables": init_tables, "serve": serve, "api": api, "login": login,
     "captains": captains, "enable": enable, "disable": disable, "configure": configure, "catalog": catalog,
     "install": install, "uninstall": uninstall, "validate": validate, "migrate": migrate, "update": update,
-    "connect": connect,
+    "connect": connect, "access": access,
 }
 
 dispatch.register("core", COMMANDS)

@@ -1,4 +1,5 @@
 import type { ToolDef } from "../core/registry.js";
+import { accessTool } from "./access.js";
 import { accountTool, githubTool } from "./account.js";
 import { captainsTool, extensionsTool } from "./captains.js";
 import { honeypotsDecommissionTool, honeypotsIncidentTool, honeypotsManageTool, honeypotsPlantTool, honeypotsRunbookTool, honeypotsTool } from "./honeypots.js";
@@ -15,6 +16,7 @@ export const TOOLS: ToolDef<any>[] = [
   statusTool,
   doctorTool,
   accountTool,
+  accessTool,
   githubTool,
   tokensTool,
   mapTool,

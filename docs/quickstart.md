@@ -89,7 +89,11 @@ trail logging management events in the account. Classes: `aws_credential`,
 `action_set`'s `mode` is `off` (recommend only), `approve` (wait for a human)
 or `autopilot`: autopilot runs the action — deactivate the decoy key, restart
 the task that leaked it — only when its deterministic risk is at or below
-`risk_max`. In the config, `prs.watcher.mode` and `risk_max` work the same way
+`risk_max`. Allowing an action opens a pull request on your infra repo that
+gives Compass's act role exactly that permission; the action is armed once you
+have merged and applied it and Compass has read the role back (`compass access
+list` shows the state, Settings → Account → Access too). Arm responses before a
+decoy fires: nobody merges IAM pull requests mid-incident. In the config, `prs.watcher.mode` and `risk_max` work the same way
 for pull-request revisions.
 
 ## 4. Code-as-cloud

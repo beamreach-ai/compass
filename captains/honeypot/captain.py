@@ -469,49 +469,15 @@ class HoneypotCaptain:
     # ── Responder role PR (HP-27) ──────────────────────────────────────────
 
     def run_responder_pr(self, *, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """Turn the enabled whitelist rows into the responder IAM role, delivered
-        as a PR against the honeypot repository like plants are."""
+        """The access pull request: both Compass roles regenerated from the manifests and the
+        grants (compass_core.access_pr). Kept under this name for the page and the CLI."""
+        from compass_core.access_pr import open_pr
 
-        from captains.honeypot.pr_writer import HoneypotPRWriter
-        from captains.honeypot.respond import load_action_rows
-        from captains.honeypot.responder_role import MODULE_DIR, MODULE_NAME, generate_responder_module
-        from compass_core.aws import resolve_target_account_id, resolve_target_region
-        from compass_core.keys import workspace_pk
-
-        emit_job_event("Generating the responder role", event_type="progress", status="running")
-        table = dynamo_table(tables(self.config).items)
-        rows = load_action_rows(table, workspace_pk(self.workspace_id))
-        hp_cfg = self.config.get("honeypot") if isinstance(self.config.get("honeypot"), dict) else {}
-        responder = hp_cfg.get("responder") if isinstance(hp_cfg.get("responder"), dict) else {}
-        trust = list(responder.get("trust_principal_arns") or [])
-        if not trust:
-            raise RuntimeError("honeypot.responder.trust_principal_arns is not configured")
-        account_id = responder.get("account_id") or resolve_target_account_id(self.config, "respond") or resolve_target_account_id(self.config, "read") or ""
-        region = responder.get("region") or resolve_target_region(self.config) or "us-east-1"
-        module = generate_responder_module(
-            rows, account_id=account_id, region=region, trust_principal_arns=trust,
-            external_id=responder.get("external_id") or None, role_name=responder.get("role_name") or "svc-ops-responder",
-        )
-        if not module["enabled_action_types"]:
-            raise RuntimeError("no enabled response actions; nothing to grant")
-
-        writer = HoneypotPRWriter(self.config)
-        repo = payload.get("repo") or self._resolve_default_repo(org_id=str(self.config.get("org_id") or ""))
-        body = (
-            "Operations responder role generated from the enabled response actions "
-            f"({', '.join(module['enabled_action_types'])}). The role is assumed by the "
-            "operations tooling with an external id and may do nothing beyond the listed actions.\n\n"
-            "Review the policy in `services/_responder/main.tf`."
-        )
-        pr_url = writer.create_module_pr(
-            module_name=MODULE_NAME, module_dir=MODULE_DIR, files=module["files"],
-            outputs={"responder_role_arn": "role_arn"}, branch_suffix="responder-role",
-            title="Operations responder role", body=body, resolved_repo=repo,
-            resolved_module_path=hp_cfg.get("terraform_root") or None,
-        )
-        self._register_pr("responder_pr", pr_url=pr_url, honeytoken={"name": "responder role"}, module_path=hp_cfg.get("terraform_root") or None, title="Operations responder role", module_name=MODULE_NAME, module_dir=MODULE_DIR, branch_suffix="responder-role", branch=_published_branch(writer))
-        emit_job_event(f"Responder role PR: {pr_url}", event_type="progress", status="completed")
-        return {"pr_url": pr_url, "role_arn": module["role_arn"], "enabled_action_types": module["enabled_action_types"]}
+        emit_job_event("Generating the access module", event_type="progress", status="running")
+        out = open_pr(self.config, workspace_id=self.workspace_id, actor=str(payload.get("requested_by") or payload.get("user_id") or "") or None,
+                      reason=str(payload.get("reason") or "requested from the decoys settings"))
+        emit_job_event(f"Access PR: {out['pr_url']}", event_type="progress", status="completed")
+        return out
 
     def run_dispatch_runbook(self, *, payload: Dict[str, Any]) -> Dict[str, Any]:
         from captains.honeypot.alert_dispatcher import dispatch_alert

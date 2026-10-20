@@ -28,6 +28,21 @@ one command, `compass connect`; the running services never see it.
 - Every AWS session Compass makes comes from one broker, `compass_core.sessions`,
   and is named `compass-<captain>-<job>` with `SourceIdentity` set to who asked,
   so the target account's CloudTrail says which captain, which job, and whom.
+- A response action is a grant: allowing it opens the pull request that gives
+  the act role exactly that permission, and it runs only once the pull request
+  is merged, applied and verified against IAM (`proposed → pr_open → merged →
+  applied → verified → armed`). Removing it disarms it at once and opens the
+  pull request that takes the permission away. Settings → Account → Access
+  shows every grant with its state and pull request; `compass access` lists,
+  accepts, removes and verifies them. Each action runs in its own session,
+  narrowed to that grant and attributed to the person who approved it.
+- Compass audits its own access every day and on demand (`compass access
+  audit`, Settings → Account → Access): both roles' trust, inline and attached
+  policies against what the manifests, the grants and the config explain. A
+  statement added in the console, an attached managed policy, a second
+  trusted principal, a grant that says armed but is not in the role, or a
+  role that no connected repository holds is a finding, with the time it was
+  first seen; the access pull request is its fix.
 - The services refuse to start with `AWS_PROFILE` set or `~/.aws` mounted, or
   as anything but the runtime identity `connect` recorded.
 - `local_iam` and static keys are gone as ways in; `init_alerts` is absorbed

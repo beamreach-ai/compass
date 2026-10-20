@@ -40,11 +40,11 @@ SHARDS: Dict[str, Dict[str, object]] = {
     "A": {"name": "install, sign-in, shell, settings",
           "files": ["test_00_install.py", "test_01_auth.py", "test_02_shell.py", "test_03_settings.py"]},
     "B": {"name": "captains, the map", "files": ["test_04_captains.py", "test_05_map.py"]},
-    "C": {"name": "decoys, code-as-cloud, pull requests", "files": ["test_06_decoys.py", "test_07_iac.py", "test_08_prs.py"]},
+    "C": {"name": "decoys, code-as-cloud, pull requests, access", "files": ["test_06_decoys.py", "test_07_iac.py", "test_08_prs.py", "test_12_access.py"]},
     "D": {"name": "jobs, updates, release", "files": ["test_09_jobs.py", "test_10_updates.py", "test_11_release.py"]},
 }
 SMOKE = ["test_00_install.py", "test_02_shell.py"]
-NEEDS = {"test_08_prs.py": ["test_07_iac.py"]}  # PRS tests watch the pull request IAC-2 opens
+NEEDS = {"test_08_prs.py": ["test_07_iac.py"], "test_12_access.py": ["test_08_prs.py"]}  # PRS tests watch the pull request IAC-2 opens; ACC merges through the watcher
 
 # Paths that do not change what runs in the stack.
 OUTSIDE = ["docs/*", "*.md", "cli/*", "tests/*", ".claude/*", ".vscode/*", "LICENSE", "CODEOWNERS", "SECURITY.md",
@@ -54,7 +54,7 @@ INSIDE_ANYWAY = ["tests/e2e/*", "README.md", "docs/quickstart.md", "CHANGELOG.md
 # A captain's own folder and the end-to-end files that test it. The mapper is not here:
 # every other captain reads the map, so a mapper change runs everything.
 CAPTAINS = {
-    "captains/honeypot/*": ["test_06_decoys.py"],
+    "captains/honeypot/*": ["test_06_decoys.py", "test_12_access.py"],
     "captains/iac/*": ["test_07_iac.py", "test_08_prs.py"],
     "captains/prs/*": ["test_07_iac.py", "test_08_prs.py"],
     "captains/librarian/*": [],
