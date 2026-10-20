@@ -5,6 +5,7 @@
 // asks first and retries with the flag the API wants.
 import axios from "axios";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { WillUse } from "./WillUse";
 import { openSettingsComponents } from "../lib/captains";
 import { productSettingsComponents } from "../lib/extensions";
 import { useShell } from "../lib/shell";
@@ -205,6 +206,7 @@ export default function CaptainsSection({ readOnly }: { readOnly: boolean }) {
                   <p className="mt-1 text-sm text-gray-600">{c.summary}</p>
                   {reason && <p className="mt-1 text-xs text-amber-700">{reason}</p>}
                   {c.depends_on.length > 0 && <p className="mt-1 text-xs text-gray-400">Needs: {c.depends_on.join(", ")}</p>}
+                  {!c.core && <WillUse permissions={c.permissions} compact />}
                   {!c.licensed && (upgradeUrl || contact) && (
                     <p className="mt-1 text-xs">
                       {upgradeUrl ? <a href={upgradeUrl} className="text-blue-600 underline">Get a licence</a> : <a href={`mailto:${contact}`} className="text-blue-600 underline">Ask about a licence</a>}

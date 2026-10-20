@@ -100,8 +100,8 @@ def permission_errors(permissions: Optional[Permissions]) -> List[str]:
         if len(rendered) > MANAGED_POLICY_LIMIT:
             problems.append(f"the read block renders to {len(rendered)} characters; the limit is {MANAGED_POLICY_LIMIT}")
         for action_type in aws.actions:
-            if not re.match(r"^[a-z][a-z0-9_]*$", action_type):
-                problems.append(f"action type {action_type!r} is not lower_snake_case")
+            if not re.match(r"^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)?$", action_type):
+                problems.append(f"action type {action_type!r} is not lower_snake_case (or <captain>.<name>)")
     for scope in permissions.github:
         if not re.match(r"^[a-z_]+:(read|write)$", scope):
             problems.append(f"github scope {scope!r} is not <permission>:read|write")
@@ -403,11 +403,13 @@ def describe(permissions: Optional[Permissions]) -> Dict[str, Any]:
                 reads[service].append(verb)
         if tuple(statement.resources) != ("*",):
             scoped.append({"actions": list(statement.actions), "resources": list(statement.resources)})
+    from compass_core import actions as _actions
+
     return {
         "declared": True,
         "reads": {service: sorted(verbs) for service, verbs in sorted(reads.items())},
         "scoped": scoped,
-        "actions": list(permissions.aws.actions) if permissions.aws else [],
+        "actions": [_actions.describe_action(a) for a in (permissions.aws.actions if permissions.aws else ())],
         "github": list(permissions.github),
         "egress": list(permissions.egress),
     }

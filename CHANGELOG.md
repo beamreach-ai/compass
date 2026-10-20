@@ -19,8 +19,10 @@ one command, `compass connect`; the running services never see it.
   two roles. On AWS it trusts the machine's own role instead. `connect verify`,
   `connect rotate` and `connect template` (CloudFormation and Terraform for an
   account out of reach) complete it.
-- Every captain's manifest declares what it reads (`permissions`); `compass
-  validate` fails on a call the manifest does not cover. Each session is
+- Every captain's manifest declares what it reads and the write actions it may
+  propose (`permissions`); `compass validate` fails on a call the manifest does
+  not cover or an action it does not register, and the Captains page shows the
+  block as "Will use" before anything is installed. Each session is
   narrowed to that declaration, so a captain cannot read more than it declared
   whatever the role allows. `lambda:Get*` is never a read: it downloads code.
 - Every AWS session Compass makes comes from one broker, `compass_core.sessions`,

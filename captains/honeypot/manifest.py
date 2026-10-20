@@ -67,6 +67,7 @@ PERMISSIONS = Permissions(
             # /api/honeypots/actions/check asks IAM what the responder role can do
             Statement(sid="ResponderCheck", actions=("iam:SimulatePrincipalPolicy",), resources=("{act_role_arn}",)),
         ),
+        actions=("iam_deactivate_key", "ecs_restart_task"),   # what it may propose; each needs a grant a person accepts and merges
     ),
     github=("contents:write", "pull_requests:write"),
     egress=("api.github.com",),

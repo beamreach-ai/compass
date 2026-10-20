@@ -159,6 +159,7 @@ export type CaptainSummary = {
   reason?: string | null;
   install_hint?: string | null;
   installed_from?: "page" | "env" | null;
+  permissions?: import("../components/WillUse").PermissionsSummary | null;
 };
 
 // The bootstrap's `update`: compass_core.updates.UpdateState.to_dict()

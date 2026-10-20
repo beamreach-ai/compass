@@ -115,6 +115,13 @@ def validate(project: str) -> Dict[str, Any]:
                        "" if policy is not None else "the read block is over 2,048 characters inline; it will need a managed policy")
             except Exception as exc:  # noqa: BLE001
                 _check(results, f"{m.name}: permissions render to a session policy", False, f"{type(exc).__name__}: {exc}")
+            declared_actions = list(m.permissions.aws.actions) if m.permissions.aws else []
+            if declared_actions:
+                from compass_core import actions as _actions
+
+                unregistered = [a for a in declared_actions if _actions.captain_of(a) != m.name]
+                _check(results, f"{m.name}: declared action types are registered", not unregistered,
+                       "register them with compass_core.actions.register in the commands module: " + ", ".join(unregistered) if unregistered else ", ".join(declared_actions))
             package_dir = root / "captains" / m.name
             if package_dir.is_dir():
                 missing = _permissions.uncovered(m.permissions, _permissions.aws_calls(package_dir))

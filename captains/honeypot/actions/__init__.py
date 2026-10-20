@@ -15,11 +15,14 @@ from typing import Dict, List, Type
 from captains.honeypot.actions.base import ActionContext, ActionScope, ResponseAction, ScopeError
 from captains.honeypot.actions.ecs_restart_task import EcsRestartTask
 from captains.honeypot.actions.iam_deactivate_key import IamDeactivateKey
+from compass_core import actions as _core_actions
 
 ACTION_CATALOG: Dict[str, Type[ResponseAction]] = {
     EcsRestartTask.action_type: EcsRestartTask,
     IamDeactivateKey.action_type: IamDeactivateKey,
 }
+# the core's registry: what the manifest's permissions.aws.actions names, and what a grant may run
+_core_actions.register("honeypot", ACTION_CATALOG)
 
 
 def get_action(action_type: str) -> ResponseAction:

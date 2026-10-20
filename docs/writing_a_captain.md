@@ -63,6 +63,18 @@ bucket), no `lambda:Get*` (it downloads code). `github` and `egress` are shown
 before install; nothing enforces them yet. A captain that reads nothing declares
 `Permissions()`: without the field, `compass validate` fails.
 
+A write is an **action**: a class deriving `compass_core.actions.Action` with
+the IAM statements it needs for a scope, a scope check, and the four steps
+(snapshot, execute, verify, rollback), registered by your commands module with
+`compass_core.actions.register("mycaptain", {"mycaptain.freeze": Freeze})` and
+named in `permissions.aws.actions`. Proposing one is all a captain can do: a
+person accepts it, Compass opens the pull request that grants exactly those
+statements to the act role, and the action runs only once that is merged,
+applied and verified. The Captains page shows the block before install as
+"Will use": reads by service, the actions with their change type and rollback,
+GitHub scopes, egress. A catalog entry may carry the same block (`permissions`,
+in the shape the page shows) so it is visible before the package is downloaded.
+
 ## 2. Discovery
 
 Declare an entry point in your distribution:
