@@ -29,6 +29,7 @@ from boto3.dynamodb.conditions import Key
 
 from compass_core import access_module, grants, sessions
 from compass_core.aws import control_config, external_id, role_arn
+from compass_core.errors import public as public_error
 from compass_core.keys import workspace_pk
 from compass_core.tables import dynamo_table, tables
 
@@ -200,7 +201,7 @@ def run(config: Dict[str, Any], *, workspace_id: str, table: Any = None, iam: An
         held = {role: _role_state(iam, arn) for role, arn in (("read", role_arn(config, "read")), ("act", role_arn(config, "act"))) if arn}
     except Exception as exc:  # noqa: BLE001
         logger.warning("access audit could not read the roles: %s", exc)
-        return {"at": at, "ok": False, "error": f"{type(exc).__name__}: {exc}", "findings": []}
+        return {"at": at, "ok": False, "error": public_error(exc, context="access audit"), "findings": []}
     want = expected(config, table, pk)
     coded = under_code(config, probe=code_probe)
     findings = diff(config, held, want, under_code=coded)

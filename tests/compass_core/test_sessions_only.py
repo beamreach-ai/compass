@@ -66,3 +66,13 @@ def test_the_walk_sees_the_shapes_it_must_refuse():
         "from boto3.dynamodb.conditions import Key  # fine: not a session\n"
     )
     assert [line for line, _ in offenders(source)] == [2, 3, 4, 5, 6, 7]
+
+
+def test_an_error_shown_to_a_caller_carries_the_class_and_the_aws_code_only():
+    from botocore.exceptions import ClientError
+
+    from compass_core.errors import public
+
+    denied = ClientError({"Error": {"Code": "AccessDenied", "Message": "User: arn:aws:iam::123456789012:user/x is not authorized"}}, "AssumeRole")
+    assert public(denied) == "ClientError: AccessDenied"
+    assert public(RuntimeError("/home/x/secret path\nTraceback ...")) == "RuntimeError"

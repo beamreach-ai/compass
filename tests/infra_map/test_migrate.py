@@ -91,6 +91,7 @@ def test_compass_migrate_runs_the_step_once_per_workspace(tmp_path, monkeypatch)
         monkeypatch.setattr(config_module, "save_workspace_config", lambda ws, c: saved.append((ws, dict(c))))
         table = session.resource("dynamodb").Table("compass_items_ws")
         first = migrations.run(config, workspace_id="ws", client=client, table=table)
-        assert first["migrations"] == ["0.6.0-map-sqlite"] and saved[-1][1]["map"]["store"] == "sqlite"
+        assert first["migrations"] == ["0.6.0-map-sqlite", "0.7.0-access-model", "0.7.0-grants"]
+        assert any(c.get("map", {}).get("store") == "sqlite" for _, c in saved), "the 0.6.0 step switched the map to the file"
         second = migrations.run(config, workspace_id="ws", client=client, table=table)
         assert second["migrations"] == []

@@ -38,6 +38,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from compass_core import config as core_config
 from compass_core import permissions, sessions
 from compass_core.aws import _aws_config, alert_queues, control_config, resolve_target_regions
+from compass_core.errors import public as public_error
 from compass_core.workspace import resolve
 
 logger = logging.getLogger("compass.connect")
@@ -368,7 +369,7 @@ def _wait_assume(config: Dict[str, Any], capability: str, *, steps: Optional[Lis
         except Exception as exc:  # noqa: BLE001 - AccessDenied until IAM has propagated
             last = exc
             time.sleep(2)
-    return {"ok": False, "detail": f"{type(last).__name__}: {last}"}
+    return {"ok": False, "detail": public_error(last, context=f"assuming the {capability} role")}
 
 
 def verify_with(config: Dict[str, Any], profile: Any, *, steps: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
@@ -405,7 +406,7 @@ def verify_with(config: Dict[str, Any], profile: Any, *, steps: Optional[List[Di
         result["simulated"], result["denied"] = True, denied
         result["ok"] = result["ok"] and not denied
     except Exception as exc:  # noqa: BLE001 - moto has no SimulatePrincipalPolicy; a real denial is in `denied`
-        result["simulated"], result["simulation_error"] = False, f"{type(exc).__name__}: {exc}"
+        result["simulated"], result["simulation_error"] = False, public_error(exc, context="simulating the read policy")
     if steps is not None:
         steps.append({"step": "simulate", "detail": "read policy simulated" if result["simulated"] else "simulation not available here", **{k: result[k] for k in ("simulated", "denied")}})
     return result

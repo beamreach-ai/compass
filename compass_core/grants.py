@@ -35,6 +35,7 @@ from boto3.dynamodb.conditions import Key
 from compass_core import actions as _actions
 from compass_core import sessions
 from compass_core.aws import resolve_target_account_id, resolve_target_region, role_arn
+from compass_core.errors import public as public_error
 from compass_core.keys import grant_prefix, grant_sort_key, workspace_pk
 from compass_core.tables import dynamo_table, tables
 
@@ -354,7 +355,7 @@ def simulate(iam: Any, role_arn_value: str, statements: Sequence[Dict[str, Any]]
                 if evaluation.get("EvalDecision") != "allowed":
                     denied.append({"action": evaluation.get("EvalActionName"), "resource": evaluation.get("EvalResourceName"), "decision": evaluation.get("EvalDecision")})
     except Exception as exc:  # noqa: BLE001
-        return {"simulated": False, "denied": [], "error": f"{type(exc).__name__}: {exc}"}
+        return {"simulated": False, "denied": [], "error": public_error(exc, context="IAM simulation")}
     return {"simulated": True, "denied": denied}
 
 
@@ -385,7 +386,7 @@ def refresh(table: Any, pk: str, config: Dict[str, Any], *, iam: Any = None, reg
         iam = iam or _iam_client(config)
         held = act_role_statements(config, iam=iam)
     except Exception as exc:  # noqa: BLE001 - no role yet, or no network
-        result["errors"].append(f"{type(exc).__name__}: {exc}")
+        result["errors"].append(public_error(exc, context="reading the act role"))
         return result
     arn = role_arn(config, "act") or ""
     for row in rows:

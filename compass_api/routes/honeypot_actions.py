@@ -22,6 +22,7 @@ from compass_api.routes._app_config import write_guard
 from compass_api.routes._workspace import get_actor_ids, get_workspace_config
 from compass_core import access_module, grants, sessions
 from compass_core.aws import resolve_target_account_id, resolve_target_region
+from compass_core.errors import public as public_error
 from compass_core.keys import (
     honeypot_action_prefix,
     honeypot_action_sort_key,
@@ -133,7 +134,7 @@ def check_responder(request: Request) -> Dict[str, Any]:
     try:
         result = grants.refresh(table, pk, config, captain="honeypot", actor=get_actor_ids(request).get("user_id"))
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=400, detail=f"cannot read the act role: {exc}") from exc
+        raise HTTPException(status_code=400, detail=f"cannot read the act role ({public_error(exc, context='responder check')})") from exc
     rows = _list_rows(table, pk)
     denied = [{"action": r["action_type"], "grant_id": r["action_id"], "decision": r.get("grant_status")} for r in rows if r.get("enabled", True) and not grants.is_armed(r)]
     return {"role_arn": (config.get("aws") or {}).get("roles", {}).get("act"), "ok": not denied and not result["errors"], "results": result["changed"],
