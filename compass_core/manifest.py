@@ -7,7 +7,7 @@ page), and the setup commands."""
 from __future__ import annotations
 
 from compass_core import __version__
-from compass_core.captains import CaptainManifest, TabSpec
+from compass_core.captains import AwsPermissions, CaptainManifest, Permissions, Statement, TabSpec
 
 MANIFEST = CaptainManifest(
     name="core",
@@ -29,6 +29,19 @@ MANIFEST = CaptainManifest(
         "compass_api.routes.updates:router",
     ),
     admin_write_prefixes=("/api/captains/", "/api/updates/"),
+    # the block every install needs: the self-audit reads the two Compass roles and nothing else
+    permissions=Permissions(
+        aws=AwsPermissions(
+            read=(
+                Statement(
+                    sid="SelfAudit",
+                    actions=("iam:GetRole", "iam:GetRolePolicy", "iam:ListRolePolicies", "iam:ListAttachedRolePolicies",
+                             "iam:GetPolicy", "iam:GetPolicyVersion", "iam:SimulatePrincipalPolicy"),
+                    resources=("{read_role_arn}", "{act_role_arn}"),
+                ),
+            ),
+        ),
+    ),
     tabs=(
         TabSpec(key="queue", label="Queue", group="platform", feature="queue"),
         TabSpec(key="settings", label="Settings", group="platform", feature="settings"),

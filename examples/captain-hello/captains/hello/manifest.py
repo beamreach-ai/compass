@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from compass_core.captains import CaptainManifest, TabSpec
+from compass_core.captains import CaptainManifest, Permissions, TabSpec
 
 __version__ = "0.1.0"
 
@@ -23,6 +23,7 @@ MANIFEST = CaptainManifest(
             "api_key": {"type": "string", "x-secret": True},
         },
     },
+    permissions=Permissions(),   # reads nothing in AWS, proposes nothing, calls out nowhere
     requires_core=">=0.2,<1",
     version=__version__,
 )

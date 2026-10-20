@@ -213,4 +213,10 @@ The catalog is a list of code that will run inside other people's Compass, with
 their AWS and GitHub access. A reviewer checks that the summary says what the
 captain does, the source is public and matches the tag, the pin is exact, the
 captain asks for no more access than it uses, and `compass validate` passes.
+The access is read from the manifest's `permissions` block, not from the code:
+`validate` has already checked that the code calls nothing the block does not
+declare, so the reviewer reads a list of IAM actions, the write actions the
+captain may propose, its GitHub scopes and the hosts it reaches, and asks
+whether each is needed for what the summary says. The same list is what the
+Captains page shows under "Will use" before anyone installs it.
 Keep the summary honest and the permissions small and the review is short.

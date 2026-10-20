@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from compass_core import __version__
-from compass_core.captains import CaptainManifest, ServiceSpec, TabSpec
+from compass_core.captains import AwsPermissions, CaptainManifest, Permissions, ServiceSpec, Statement, TabSpec
 
 CONFIG_SCHEMA = {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -43,6 +43,35 @@ CONFIG_SCHEMA = {
     },
 }
 
+# What arm, the investigation and the correlation read; the responses are actions (the whitelist)
+PERMISSIONS = Permissions(
+    aws=AwsPermissions(
+        read=(
+            Statement(
+                sid="DecoyReads",
+                actions=(
+                    "iam:GetUser", "iam:ListAccessKeys", "iam:ListUserTags",
+                    "iam:GetPolicy", "iam:GetPolicyVersion", "iam:GetRolePolicy",
+                    "iam:ListRolePolicies", "iam:ListAttachedRolePolicies",
+                    "events:DescribeRule", "events:ListTargetsByRule",
+                    "cloudtrail:DescribeTrails", "cloudtrail:GetTrailStatus", "cloudtrail:LookupEvents",
+                    "tag:GetResources",
+                    "ecs:Describe*", "ecs:List*",
+                    "ec2:DescribeNetworkInterfaces",
+                    "s3:ListAllMyBuckets",
+                    "secretsmanager:ListSecrets",
+                    "rds:DescribeDBInstances",
+                    "dynamodb:ListTables",
+                ),
+            ),
+            # /api/honeypots/actions/check asks IAM what the responder role can do
+            Statement(sid="ResponderCheck", actions=("iam:SimulatePrincipalPolicy",), resources=("{act_role_arn}",)),
+        ),
+    ),
+    github=("contents:write", "pull_requests:write"),
+    egress=("api.github.com",),
+)
+
 MANIFEST = CaptainManifest(
     name="honeypot",
     label="Decoys",
@@ -64,6 +93,7 @@ MANIFEST = CaptainManifest(
     services=(ServiceSpec(name="alert-consumer", start="captains.honeypot.alert_consumer:run_service"),),
     config_schema=CONFIG_SCHEMA,
     depends_on=("mapper",),
+    permissions=PERMISSIONS,
     requires_core=">=0.1,<1",
     version=__version__,
 )
