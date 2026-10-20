@@ -92,18 +92,25 @@ def open_pr(config: Dict[str, Any], *, workspace_id: str, actor: Optional[str] =
         "statements IAM holds and allows. " + (f"Reason: {reason}." if reason else "")
     )
     published = open_or_update_pr(gh_repo, branch=BRANCH, base_branch=base_branch, title="Compass access: the roles as they should be now", body=body)
-    for row in grants:
-        if str(row.get("grant_status")) in ("pr_open", "disarmed"):
+    from compass_core.grants import GrantConflict, _put, _transition, get_grant
+
+    for seen in grants:
+        if str(seen.get("grant_status")) not in ("pr_open", "disarmed"):
+            continue
+        for _attempt in range(5):
+            # the rows were read before the GitHub calls; the tick or a person may have moved one since
+            row = get_grant(table, pk, str(seen["action_id"]), captain=str(seen.get("captain") or "")) or {}
+            state = str(row.get("grant_status") or "")
+            if state not in ("pr_open", "disarmed"):
+                break
             row["grant_pr"] = published.url
-            if str(row.get("grant_status")) == "disarmed":
-                from compass_core.grants import _put, _transition
-
+            if state == "disarmed":
                 _transition(row, "revoke_pr_open", actor=actor or "pr")
+            try:
                 _put(table, row)
-            else:
-                from compass_core.grants import _put
-
-                _put(table, row)
+                break
+            except GrantConflict:
+                continue
     try:
         PRRegistry.from_config(config, workspace_id=workspace_id).record(
             url=published.url, pr_type=PR_TYPE, origin={"captain": "core", "command": "access", "workspace_id": workspace_id, "requested_by": actor or ""},

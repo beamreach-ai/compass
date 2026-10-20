@@ -261,3 +261,58 @@ def test_the_executor_refuses_an_unarmed_row_before_any_aws_call():
     row = {"action_id": "a", "action_type": "iam_deactivate_key", "scope": SCOPE, "mode": "autopilot", "risk_max": 2, "enabled": True, "grant_status": "pr_open"}
     audit = run_response_action(session=NoAws(), row=row, ctx=ctx, audit_log=log, chosen_by="agent")
     assert audit["status"] == "refused" and audit["error"].startswith("wait_for_grant") and len(log.rows) == 1
+
+
+def test_a_stale_copy_never_overwrites_a_newer_state(table):
+    """The race DEC-7 found: the PR job read the grant, verification armed it, and the job's
+    stale copy put it back to pr_open."""
+    row = grants.propose(table, PK, captain="honeypot", action_type="iam_deactivate_key", scope=SCOPE, mode="approve")
+    grants.accept(table, PK, row["action_id"], config=CONFIG, enqueue=lambda **kw: None)
+    stale = grants.get_grant(table, PK, row["action_id"])
+    grants.refresh(table, PK, CONFIG, iam=FakeIam(grants.statements_for(row, CONFIG)), registry=FakeRegistry())
+    assert grants.get_grant(table, PK, row["action_id"])["grant_status"] == "armed"
+    stale["grant_pr"] = "https://github.com/o/r/pull/1"
+    with pytest.raises(grants.GrantConflict):
+        grants._put(table, stale)
+    assert grants.get_grant(table, PK, row["action_id"])["grant_status"] == "armed", "the newer state stands"
+
+
+def test_the_pr_job_records_its_url_on_the_grant_as_it_is_now(table, monkeypatch):
+    """open_pr reads the grants, talks to GitHub, then writes: a grant armed meanwhile keeps
+    its state and gets the URL only if it is still waiting for one."""
+    row = grants.propose(table, PK, captain="honeypot", action_type="iam_deactivate_key", scope=SCOPE, mode="approve")
+    grants.accept(table, PK, row["action_id"], config=CONFIG, enqueue=lambda **kw: None)
+
+    def published_after_the_tick(*a, **k):
+        grants.refresh(table, PK, CONFIG, iam=FakeIam(grants.statements_for(row, CONFIG)), registry=FakeRegistry())
+        return SimpleNamespace(url="https://github.com/o/r/pull/3")
+
+    repo = SimpleNamespace(get_contents=lambda *a, **k: True)
+    monkeypatch.setattr(access_pr, "resolve_github_token", lambda *a, **k: "t")
+    monkeypatch.setattr(access_pr, "github_client", lambda token: SimpleNamespace(get_repo=lambda name: repo))
+    monkeypatch.setattr(access_pr, "ensure_branch", lambda *a, **k: None)
+    monkeypatch.setattr(access_pr, "commit_files", lambda *a, **k: None)
+    monkeypatch.setattr(access_pr, "open_or_update_pr", published_after_the_tick)
+    monkeypatch.setattr(access_pr.PRRegistry, "from_config", classmethod(lambda cls, config, workspace_id=None: SimpleNamespace(record=lambda **kw: None)))
+    access_pr.open_pr(CONFIG, workspace_id="ws", table=table)
+    assert grants.get_grant(table, PK, row["action_id"])["grant_status"] == "armed"
+
+
+def test_a_persons_action_retries_after_a_background_write(table, monkeypatch):
+    row = grants.propose(table, PK, captain="honeypot", action_type="iam_deactivate_key", scope=SCOPE, mode="approve")
+    grants.accept(table, PK, row["action_id"], config=CONFIG, enqueue=lambda **kw: None)
+    real_get = grants.get_grant
+    calls = {"n": 0}
+
+    def get_then_tick(*a, **k):
+        found = real_get(*a, **k)
+        calls["n"] += 1
+        if calls["n"] == 1:  # the tick writes between this read and remove's write
+            other = real_get(*a, **k)
+            other["note"] = "tick"
+            grants._put(table, other)
+        return found
+
+    monkeypatch.setattr(grants, "get_grant", get_then_tick)
+    removed = grants.remove(table, PK, row["action_id"], config=CONFIG, enqueue=lambda **kw: None)
+    assert removed["grant_status"] == "disarmed" and calls["n"] == 2, "the first attempt conflicted, the second won"

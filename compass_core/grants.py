@@ -83,9 +83,46 @@ def get_grant(table: Any, pk: str, grant_id: str, *, captain: Optional[str] = No
     return next((r for r in list_grants(table, pk) if r.get("action_id") == grant_id), None)
 
 
+class GrantConflict(GrantError):
+    """The row changed between this writer's read and its write: another writer won."""
+
+
 def _put(table: Any, row: Dict[str, Any]) -> Dict[str, Any]:
-    table.put_item(Item=_dynamo_safe(row))
+    """Write a grant only if nobody wrote it since this copy was read: every row carries a
+    revision, and the write is conditional on it. The PR job, the verification tick and a
+    person's click all read-modify-write the same row; a stale copy never wins."""
+    from boto3.dynamodb.conditions import Attr
+    from botocore.exceptions import ClientError
+
+    revision = row.get("rev")
+    condition = Attr("rev").not_exists() if revision is None else Attr("rev").eq(revision)
+    item = _dynamo_safe({**row, "rev": int(revision or 0) + 1})
+    try:
+        table.put_item(Item=item, ConditionExpression=condition)
+    except ClientError as exc:
+        if (exc.response.get("Error") or {}).get("Code") == "ConditionalCheckFailedException":
+            raise GrantConflict(f"grant {row.get('action_id')} changed while this was being written") from exc
+        raise
+    row["rev"] = item["rev"]
     return row
+
+
+def _retrying(fn: Callable[..., Dict[str, Any]]) -> Callable[..., Dict[str, Any]]:
+    """A person's action re-reads and retries when a background writer got there first."""
+    import functools
+
+    @functools.wraps(fn)
+    def wrapper(*args: Any, **kwargs: Any) -> Dict[str, Any]:
+        for attempt in range(5):
+            try:
+                return fn(*args, **kwargs)
+            except GrantConflict:
+                if attempt == 4:
+                    raise
+                time.sleep(0.05 * (attempt + 1))
+        raise AssertionError("unreachable")
+
+    return wrapper
 
 
 def _dynamo_safe(value: Any) -> Any:
@@ -198,6 +235,7 @@ def propose(table: Any, pk: str, *, captain: str, action_type: str, scope: Dict[
     return _put(table, row)
 
 
+@_retrying
 def accept(table: Any, pk: str, grant_id: str, *, config: Dict[str, Any], actor: Optional[str] = None, mode: Optional[str] = None,
            enqueue: Optional[Enqueue] = None) -> Dict[str, Any]:
     """A person accepts: ``pr_open``, and the pull request that grants it is queued."""
@@ -225,6 +263,7 @@ def accept(table: Any, pk: str, grant_id: str, *, config: Dict[str, Any], actor:
     return row
 
 
+@_retrying
 def decline(table: Any, pk: str, grant_id: str, *, actor: Optional[str] = None) -> Dict[str, Any]:
     row = get_grant(table, pk, grant_id)
     if row is None:
@@ -235,6 +274,7 @@ def decline(table: Any, pk: str, grant_id: str, *, actor: Optional[str] = None) 
     return _put(table, _transition(row, "declined", actor=actor))
 
 
+@_retrying
 def remove(table: Any, pk: str, grant_id: str, *, config: Dict[str, Any], actor: Optional[str] = None, enqueue: Optional[Enqueue] = None) -> Dict[str, Any]:
     """A person removes the action: disarmed at once, no AWS call; the pull request that takes
     the permission away is queued. The row stays, saying "removal waiting on <PR>", until IAM
@@ -257,6 +297,7 @@ def remove(table: Any, pk: str, grant_id: str, *, config: Dict[str, Any], actor:
     return row
 
 
+@_retrying
 def set_mode(table: Any, pk: str, grant_id: str, *, config: Dict[str, Any], actor: Optional[str] = None,
              mode: Optional[str] = None, risk_max: Optional[int] = None, enabled: Optional[bool] = None,
              enqueue: Optional[Enqueue] = None) -> Dict[str, Any]:
@@ -421,7 +462,11 @@ def refresh(table: Any, pk: str, config: Dict[str, Any], *, iam: Any = None, reg
             state = "applied"   # the self-audit's case: a grant that says armed but is not in the role
         if state != before:
             _transition(row, state, actor=actor or "tick")
-            _put(table, row)
+            try:
+                _put(table, row)
+            except GrantConflict:
+                result.setdefault("conflicts", []).append(row["action_id"])   # someone acted meanwhile; the next pass re-reads
+                continue
             result["changed"].append({"grant_id": row["action_id"], "action_type": row["action_type"], "from": before, "to": state})
             if state == "armed" and row.get("supersedes"):
                 old = get_grant(table, pk, str(row["supersedes"]))
