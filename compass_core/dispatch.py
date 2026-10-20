@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Mapping, Tuple  # noqa: F401 - Any used in signatures
 
+from compass_core import sessions
 from compass_core.queue import InlineQueue, set_job_queue
 
 Handler = Callable[[Dict[str, Any]], Dict[str, Any]]
@@ -36,7 +37,9 @@ def dispatch(captain: str, command: str, payload: Dict[str, Any]) -> Dict[str, A
     from compass_core import captains as _captains
 
     _captains.ensure_active_for_payload(captain, payload)
-    return handler(dict(payload))
+    requester = payload.get("user_id")
+    with sessions.captain_context(captain, requester=requester if isinstance(requester, str) and requester else None):
+        return handler(dict(payload))
 
 
 def _default_store():

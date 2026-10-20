@@ -19,10 +19,8 @@ import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-import boto3
-
 from compass_core import config as core_config
-from compass_core import dispatch
+from compass_core import dispatch, sessions
 from compass_core.tables import tables
 from compass_core.workspace import resolve
 
@@ -142,9 +140,7 @@ def init_config(payload: Dict[str, Any]) -> Dict[str, Any]:
         table_prefix=str(payload.get("table_prefix") or "compass"),
     )
     try:
-        from compass_core.aws import build_target_session
-
-        session = build_target_session(cfg, capability="read", region=cfg["aws"]["region"])
+        session = sessions.target("read", region=cfg["aws"]["region"], captain=sessions.CORE, config=cfg)
         account_id = session.client("sts").get_caller_identity()["Account"]
         cfg["aws"]["account_id"] = str(account_id)
         cfg["aws"]["account_name"] = str(account_id)
@@ -229,7 +225,7 @@ def table_specs(config: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 def create_tables(config: Dict[str, Any], *, client: Any = None) -> Dict[str, List[str]]:
     """Create the missing tables; idempotent. boto3 honours AWS_ENDPOINT_URL_DYNAMODB for DynamoDB-local."""
-    client = client or boto3.client("dynamodb")
+    client = client or sessions.control().client("dynamodb")
     existing = set()
     for page in client.get_paginator("list_tables").paginate():
         existing.update(page["TableNames"])
@@ -296,9 +292,7 @@ def queue_policy(queue_arn: str, account_id: str) -> Dict[str, Any]:
 
 def create_alert_queue(config: Dict[str, Any], *, workspace_id: str, region: str, session: Any = None) -> Dict[str, str]:
     """Create (or find) the decoy alert queue in the target account and set its policy."""
-    from compass_core.aws import build_target_session
-
-    session = session or build_target_session(config, capability="write", region=region)
+    session = session or sessions.target("write", region=region, captain=sessions.CORE, config=config)
     account_id = session.client("sts").get_caller_identity()["Account"]
     sqs = session.client("sqs", region_name=region)
     name = f"compass-decoy-alerts-{workspace_id}"

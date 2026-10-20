@@ -8,7 +8,9 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from moto import mock_aws
 
+from compass_api.middleware.sessions import SessionContextMiddleware
 from compass_api.routes import honeypot_actions, honeypots
+from compass_core import sessions
 from compass_core.keys import honeypot_audit_sort_key, workspace_pk
 
 PK = workspace_pk("ws-a")
@@ -39,6 +41,7 @@ def env(monkeypatch):
             },
         )
         app = FastAPI()
+        app.add_middleware(SessionContextMiddleware)  # the request runs as the honeypot captain, as in the real app
         app.include_router(honeypot_actions.router)
         yield TestClient(app), table
 
@@ -106,7 +109,7 @@ def test_rollback_reactivates_a_deactivated_key_once(env, monkeypatch):
         iam.create_user(UserName="svc-reporting", Path="/service/")
         key = iam.create_access_key(UserName="svc-reporting")["AccessKey"]["AccessKeyId"]
         iam.update_access_key(UserName="svc-reporting", AccessKeyId=key, Status="Inactive")
-        monkeypatch.setattr(honeypot_actions, "build_target_session", lambda *a, **k: boto3.Session(region_name="us-east-1"))
+        monkeypatch.setattr(sessions, "target", lambda *a, **k: boto3.Session(region_name="us-east-1"))
         audit = {
             "audit_id": "1-abc", "incident_id": "9-inc", "action_type": "iam_deactivate_key", "status": "verified",
             "target": {"region": "us-east-1", "user_arn": "arn:aws:iam::123456789012:user/service/svc-reporting", "access_key_id": key},

@@ -21,7 +21,8 @@ from captains.honeypot.responder_role import DEFAULT_ROLE_NAME, generate_respond
 from compass_api.routes import honeypots as hp
 from compass_api.routes._app_config import write_guard
 from compass_api.routes._workspace import get_actor_ids, get_workspace_config
-from compass_core.aws import build_target_session, resolve_target_account_id, resolve_target_region
+from compass_core import sessions
+from compass_core.aws import resolve_target_account_id, resolve_target_region
 from compass_core.keys import (
     honeypot_action_prefix,
     honeypot_action_sort_key,
@@ -143,7 +144,7 @@ def check_responder(request: Request) -> Dict[str, Any]:
         role_name=cfg["role_name"],
     )
     try:
-        session = build_target_session(cfg["workspace_config"], capability="respond", region=cfg["region"])
+        session = sessions.target("act", region=cfg["region"], config=cfg["workspace_config"], approver=get_actor_ids(request).get("user_id"))
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=400, detail=f"cannot assume the responder role: {exc}") from exc
     if session is None:
@@ -298,14 +299,14 @@ def rollback_audit(request: Request, audit_id: str, body: RollbackPayload = Roll
         user_name=user_arn.rsplit("/", 1)[-1] if user_arn else "",
         access_key_id=target.get("access_key_id") or "",
     )
+    actor = get_actor_ids(request)
+    requested_by = actor.get("user_id") or actor.get("workspace_id") or "unknown"
     try:
-        session = build_target_session(get_workspace_config(request), capability="respond", region=ctx.region)
+        session = sessions.target("act", region=ctx.region, config=get_workspace_config(request), approver=actor.get("user_id"))
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=400, detail=f"cannot assume the responder role: {exc}") from exc
     if session is None:
         raise HTTPException(status_code=400, detail="aws.assume_role_respond is not configured for this workspace")
-    actor = get_actor_ids(request)
-    requested_by = actor.get("user_id") or actor.get("workspace_id") or "unknown"
     out = rollback_response_action(
         session=session, audit=audit, ctx=ctx, audit_log=AuditLog(table, pk), requested_by=requested_by, action=action
     )

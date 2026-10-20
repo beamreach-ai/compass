@@ -119,7 +119,7 @@ def api(aws, monkeypatch):
     monkeypatch.setattr(honeypots, "_ws_pk", lambda request: PK)
     monkeypatch.setattr(honeypots, "get_actor_ids", lambda request: {"workspace_id": "ws-a"})
     monkeypatch.setattr(honeypots, "get_workspace_config", lambda request: {})
-    monkeypatch.setattr("compass_core.aws.build_target_session", lambda *a, **k: aws)
+    monkeypatch.setattr("compass_core.sessions.target", lambda *a, **k: aws)
     monkeypatch.setattr(honeypots._queue_client, "enqueue", lambda **k: None)
     app = FastAPI()
     app.include_router(honeypots.router)

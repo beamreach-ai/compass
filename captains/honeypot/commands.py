@@ -199,13 +199,13 @@ def arm(payload: Dict[str, Any]) -> Dict[str, Any]:
     from captains.honeypot import arm as arming
     from captains.honeypot.catalog import epoch_ms
     from captains.honeypot.placement import to_native
-    from compass_core.aws import build_target_session
+    from compass_core import sessions
 
     workspace, config, table, key, item = _token_item(payload)
     token = to_native(item)
     placement = token.get("placement") or None
     region = str(payload.get("region") or token.get("region") or (config.get("aws") or {}).get("region") or config.get("aws_region") or "us-east-1")
-    session = build_target_session(config, capability="read", region=region)
+    session = sessions.target("read", region=region, config=config)
     result = arming.verify_honeytoken(session, token, placement)
     if not result.get("ok"):
         return {"status": "not_ready", "honeytoken_id": token["honeytoken_id"], **result}

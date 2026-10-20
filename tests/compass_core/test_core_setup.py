@@ -43,7 +43,7 @@ def test_init_alerts_creates_the_queue_with_a_policy_and_records_it(tmp_path, mo
     monkeypatch.setenv("COMPASS_CONFIG", str(path))
     monkeypatch.setattr(core_config, "_loader", None)
     session = boto3.Session(region_name="us-east-1")
-    monkeypatch.setattr("compass_core.aws.build_target_session", lambda config, **kwargs: session)
+    monkeypatch.setattr("compass_core.sessions.target", lambda *args, **kwargs: session)
 
     out = commands.init_alerts({"workspace_id": "local"})
     assert out["queue_arn"].endswith(":compass-decoy-alerts-local")

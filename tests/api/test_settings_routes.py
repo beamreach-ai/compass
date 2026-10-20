@@ -5,6 +5,8 @@ from botocore.exceptions import ClientError
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from compass_core import sessions
+
 
 def _build_client(monkeypatch, config):
     """The open settings routes (AWS, GitHub, bootstrap) with no product sections registered."""
@@ -124,8 +126,6 @@ def test_test_aws_settings_returns_400_for_assume_role_access_denied(monkeypatch
     config = {}
     client, _saved = _build_client(monkeypatch, config)
 
-    module = importlib.import_module("compass_api.routes.settings")
-
     def _raise_client_error(*_args, **_kwargs):
         raise ClientError(
             {
@@ -140,7 +140,7 @@ def test_test_aws_settings_returns_400_for_assume_role_access_denied(monkeypatch
             "AssumeRole",
         )
 
-    monkeypatch.setattr(module, "build_target_session", _raise_client_error)
+    monkeypatch.setattr(sessions, "target", _raise_client_error)
 
     response = client.post(
         "/api/settings/aws/test",

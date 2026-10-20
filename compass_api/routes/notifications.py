@@ -10,13 +10,13 @@ import uuid
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
-import boto3
 from boto3.dynamodb.conditions import Key
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from compass_api.routes._app_config import write_guard
 from compass_api.routes._workspace import get_workspace_config, get_workspace_dynamodb_config
+from compass_core import sessions
 from compass_core.keys import (
     notification_endpoint_prefix,
     notification_endpoint_sort_key,
@@ -439,7 +439,7 @@ def test_endpoint(request: Request, endpoint_id: str) -> Dict[str, Any]:
         source = str(item.get("ses_source_email") or BEAMREACH_SES_SENDER)
         region = str(item.get("ses_region") or os.getenv("AWS_REGION") or "us-east-1")
         try:
-            ses = boto3.client("ses", region_name=region)
+            ses = sessions.control(region=region).client("ses")
             ses.send_email(
                 Source=source,
                 Destination={"ToAddresses": recipients},
@@ -486,7 +486,7 @@ def dispatch_notification(
             raise ValueError("no recipients configured")
         source = str(endpoint_item.get("ses_source_email") or BEAMREACH_SES_SENDER)
         region = str(endpoint_item.get("ses_region") or os.getenv("AWS_REGION") or "us-east-1")
-        ses = boto3.client("ses", region_name=region)
+        ses = sessions.control(region=region).client("ses")
         body_parts: Dict[str, Any] = {"Text": {"Data": text_body}}
         if html_body:
             body_parts["Html"] = {"Data": html_body}

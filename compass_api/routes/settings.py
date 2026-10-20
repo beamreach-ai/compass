@@ -27,10 +27,10 @@ from compass_api.infra_scan import mark_infra_scan_pending
 from compass_api.routes._app_config import ensure_settings_enabled, get_app_config
 from compass_api.routes._infra_scan import current_infra_scan_summary, enqueue_full_infra_scan
 from compass_api.routes._workspace import get_workspace_config, get_workspace_context, save_config
-from compass_core import captain_admin
+from compass_core import captain_admin, sessions
 from compass_core import captains as _captains
 from compass_core import updates as _updates
-from compass_core.aws import build_target_session, resolve_target_account_id, resolve_target_region
+from compass_core.aws import resolve_target_account_id, resolve_target_region
 from compass_core.github import (
     api_url as github_api_url,
 )
@@ -64,9 +64,8 @@ def compass_account_id() -> str:
     if _compass_account_id_cache:
         return _compass_account_id_cache
     try:
-        import boto3
 
-        _compass_account_id_cache = str(boto3.client("sts").get_caller_identity()["Account"])
+        _compass_account_id_cache = str(sessions.control().client("sts").get_caller_identity()["Account"])
     except Exception:
         _compass_account_id_cache = ""
     return _compass_account_id_cache
@@ -137,7 +136,7 @@ def _resolve_local_account(config: Dict[str, Any]) -> bool:
     if not aws_cfg or _strip_or_none(aws_cfg.get("auth_mode")) != "local_iam" or _strip_or_none(aws_cfg.get("account_id")):
         return False
     try:
-        session = build_target_session(config, capability="read", region=resolve_target_region(config) or "us-east-1")
+        session = sessions.target("read", region=resolve_target_region(config) or "us-east-1", captain=sessions.CORE, config=config)
         account_id = session.client("sts").get_caller_identity()["Account"]
     except Exception as exc:  # noqa: BLE001 - no credentials yet is a normal state on a fresh install
         logger.debug("cannot resolve the local account: %s", exc)
@@ -238,10 +237,11 @@ def _validate_aws_access(payload: "AwsSettingsPayload") -> Dict[str, Any]:
     # local_iam: use the task role — no extra aws_config needed
 
     try:
-        session = build_target_session(
-            {"aws": aws_config, "aws_region": payload.region},
-            capability="read",
-            allow_default=payload.mode == "local_iam",
+        session = sessions.target(
+            "read",
+            captain=sessions.CORE,
+            config={"aws": aws_config, "aws_region": payload.region},
+            allow_ambient=payload.mode == "local_iam",
         )
     except (BotoCoreError, ClientError, KeyError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=_aws_validation_error_detail(payload, exc, stage="session creation")) from exc

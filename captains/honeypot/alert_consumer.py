@@ -22,9 +22,8 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-import boto3
-
 from captains.honeypot.ingestion import record_alert
+from compass_core import sessions
 from compass_core.tables import tables
 
 logger = logging.getLogger("honeypot-alert-consumer")
@@ -78,7 +77,7 @@ class AlertConsumer:
         self.queue_region = _region_from_queue_url(self.queue_url) or self.region
 
         self._sqs = sqs_client or (
-            boto3.client("sqs", region_name=self.queue_region) if self.queue_url else None
+            sessions.control(region=self.queue_region).client("sqs") if self.queue_url else None
         )
         self._stop = False
 
@@ -123,7 +122,7 @@ class AlertConsumer:
             logger.error("Workspace %s has no table configured; leaving message for retry", workspace_id)
             return False
 
-        table = boto3.resource("dynamodb", region_name=self.region).Table(table_name)
+        table = sessions.control(region=self.region).resource("dynamodb").Table(table_name)
 
         from captains.honeypot.placement import get_placement, placement_summary, to_native
         from compass_core.queue import job_queue

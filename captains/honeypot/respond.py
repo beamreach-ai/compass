@@ -203,12 +203,13 @@ def approve_pending_action(
     return {"incident_id": incident_id, "audit": audit, **fields}
 
 
-def responder_session_factory(config: Dict[str, Any], region: str) -> Callable[[], Any]:
-    from compass_core.aws import build_target_session
+def responder_session_factory(config: Dict[str, Any], region: str, *, approver: Optional[str] = None) -> Callable[[], Any]:
+    """An act session for the responder role, attributed to the person whose approval runs it."""
+    from compass_core import sessions
 
     def _make():
         try:
-            return build_target_session(config, capability="respond", region=region)
+            return sessions.target("act", region=region, config=config, approver=approver)
         except Exception as exc:  # noqa: BLE001
             logger.warning("cannot build responder session: %s", exc)
             return None

@@ -19,6 +19,13 @@ and the map reads that took tens of seconds take milliseconds.
   edge is a version with the time it appeared and the time it went, so the map
   can later be read as it was and two scans compared (the API for that comes
   in a later release).
+- Every AWS session Compass makes comes from one broker, `compass_core.sessions`,
+  and is named `compass-<captain>-<job>` (`compass-mapper-<job id>` for a scan,
+  `compass-honeypot-api-<request>` for an action run from the dashboard), so the
+  target account's CloudTrail says which captain and which job made a call. With
+  `aws.source_identity: true`, once the role's trust policy allows
+  `sts:SetSourceIdentity`, the trail also records who asked. Nothing else changes:
+  credentials are resolved exactly as before.
 - Every reader of the map goes through one interface, `GraphStore`
   (`infra_map.graph_store`), with `set_graph_store_factory` for a deployment
   that brings its own store. A Postgres store implements it too:

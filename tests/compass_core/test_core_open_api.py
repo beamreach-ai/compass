@@ -7,7 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from compass_core import config as core_config
-from compass_core import dispatch, queue
+from compass_core import dispatch, queue, sessions
 
 
 @pytest.fixture
@@ -164,7 +164,7 @@ def test_local_iam_account_is_looked_up_once_and_kept(monkeypatch):
             assert name == "sts"
             return _Sts()
 
-    monkeypatch.setattr(open_settings, "build_target_session", lambda *a, **k: _Session())
+    monkeypatch.setattr(sessions, "target", lambda *a, **k: _Session())
     cfg = {"aws": {"auth_mode": "local_iam", "region": "us-east-1"}}
     assert open_settings._resolve_local_account(cfg) is True
     assert cfg["aws"]["account_id"] == "123456789012"

@@ -11,9 +11,9 @@ from datetime import datetime, timezone
 from email.message import EmailMessage
 from typing import Any, Dict, List, Optional
 
-import boto3
 from boto3.dynamodb.conditions import Key
 
+from compass_core import sessions
 from compass_core.keys import notification_endpoint_prefix, notification_endpoint_sort_key, workspace_pk
 from compass_core.tables import tables
 
@@ -70,7 +70,7 @@ def dispatch_alert(
         return result
 
     region = os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION")
-    table = boto3.resource("dynamodb", region_name=region).Table(table_name)
+    table = sessions.control(region=region).resource("dynamodb").Table(table_name)
     pk = workspace_pk(workspace_id)
 
     endpoint_ids: List[str] = list(action_config.get("notification_endpoint_ids") or [])
@@ -390,7 +390,7 @@ def post_incident_update(
     if not table_name:
         return out
     region = os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION")
-    table = boto3.resource("dynamodb", region_name=region).Table(table_name)
+    table = sessions.control(region=region).resource("dynamodb").Table(table_name)
     pk = workspace_pk(workspace_id)
 
     from compass_core.keys import honeypot_incident_sort_key
@@ -590,7 +590,7 @@ def _send(
             raise ValueError("no recipients configured")
         source = str(endpoint.get("ses_source_email") or BEAMREACH_SES_SENDER)
         region = str(endpoint.get("ses_region") or os.getenv("AWS_REGION") or "us-east-1")
-        ses = boto3.client("ses", region_name=region)
+        ses = sessions.control(region=region).client("ses")
         body_parts: Dict[str, Any] = {"Text": {"Data": text_body}}
         if html_body:
             body_parts["Html"] = {"Data": html_body}

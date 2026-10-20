@@ -6,6 +6,7 @@ from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
 import boto3
 from boto3.dynamodb.conditions import Key
 
+from compass_core import sessions
 from compass_core.keys import (
     PK_NAME,
     SK_NAME,
@@ -45,7 +46,7 @@ class InfraMapStore:
     ):
         self.table_name = table_name
         self.workspace_id = normalize_workspace_id(workspace_id)
-        self._session = session or boto3.Session()
+        self._session = session or sessions.control()
         if table is not None:
             self.table = table
         else:

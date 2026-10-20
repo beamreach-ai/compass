@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from captains.honeypot.classes import normalize_class
 from captains.honeypot.honeytoken_material import default_cover_name
+from compass_core import sessions
 from compass_core.events import emit_job_event
 from compass_core.tables import dynamo_table, tables
 
@@ -309,7 +310,7 @@ class HoneypotCaptain:
         record it on the incident. Runs after the first alert has gone out."""
 
         from captains.honeypot.investigate import investigate_incident, load_map_store_for_config
-        from compass_core.aws import build_target_session, resolve_target_region
+        from compass_core.aws import resolve_target_region
         from compass_core.keys import workspace_pk
 
         incident_id = str(payload.get("incident_id") or "")
@@ -322,7 +323,7 @@ class HoneypotCaptain:
 
         target_region = str(payload.get("region") or resolve_target_region(self.config) or "us-east-1")
         try:
-            session = build_target_session(self.config, capability="read", region=target_region)
+            session = sessions.target("read", region=target_region, config=self.config)
         except Exception as exc:  # noqa: BLE001 - investigate what we can without AWS
             emit_job_event(f"No target AWS access for correlation: {exc}", event_type="warning", status="running")
             session = None
@@ -695,7 +696,6 @@ class HoneypotCaptain:
 
     def _update_placement(self, honeytoken_id: str, fields: Dict[str, Any]) -> None:
         """Record on the token's placement what the plant PR edited (tf_address, env_vars, pr_url, repo)."""
-        import boto3
 
         from compass_core.keys import honeytoken_sort_key, workspace_pk
 
@@ -704,7 +704,7 @@ class HoneypotCaptain:
         if not table_name or not fields:
             return
         region = os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION")
-        table = boto3.resource("dynamodb", region_name=region).Table(table_name)
+        table = sessions.control(region=region).resource("dynamodb").Table(table_name)
         names = {f"#f{i}": k for i, k in enumerate(fields)}
         values = {f":v{i}": v for i, v in enumerate(fields.values())}
         try:
@@ -721,8 +721,6 @@ class HoneypotCaptain:
     def _update_honeytoken_pr_url(self, honeytoken_id: str, pr_url: str) -> None:
         import time
 
-        import boto3
-
         from compass_core.keys import honeytoken_sort_key, workspace_pk
 
         table_name = tables(self.config).items
@@ -731,7 +729,7 @@ class HoneypotCaptain:
             return
 
         region = os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION")
-        table = boto3.resource("dynamodb", region_name=region).Table(table_name)
+        table = sessions.control(region=region).resource("dynamodb").Table(table_name)
         pk = workspace_pk(self.workspace_id)
 
         try:

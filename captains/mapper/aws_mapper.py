@@ -4,6 +4,7 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError, EndpointConnectionError
 
+from compass_core import sessions
 from compass_core.events import current_job_id, emit_job_event
 from infra_map.fact_store import InfraMapFactStore
 from infra_map.facts import FactBatch
@@ -1415,14 +1416,7 @@ class AWSGraphCollector:
         self.edges[key] = edge
 
     def _regional_session(self, region: str) -> boto3.Session:
-        credentials = self.target_session.get_credentials()
-        frozen = credentials.get_frozen_credentials() if hasattr(credentials, "get_frozen_credentials") else credentials
-        return boto3.Session(
-            aws_access_key_id=frozen.access_key,
-            aws_secret_access_key=frozen.secret_key,
-            aws_session_token=frozen.token,
-            region_name=region,
-        )
+        return sessions.with_region(self.target_session, region)
 
     def _paginate_list(self, paginator, field: str) -> List[str]:
         results: List[str] = []

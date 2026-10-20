@@ -90,6 +90,7 @@ model. Each seam is a module-level default plus an `install`/`set_*` hook:
 | Map store | `infra_map.graph_store.open_store`: the SQLite file | `set_graph_store_factory` |
 | Workspace config | the JSON file | `set_workspace_config_loader` / `saver` |
 | Events | the job store | `set_event_sink` |
+| AWS sessions | `compass_core.sessions`: the ambient credentials for the control side; static keys, `assume_role` or `local_iam` for the target, every session named `compass-<captain>-<job>` | `set_session_factory` |
 | Model | Anthropic (`ANTHROPIC_API_KEY`) or none | `set_model_factory` |
 | Email | SMTP endpoint you configure | `set_email_relay` |
 | API: workspace, status sections, bootstrap hooks, auth paths and scopes, tabs | one workspace, open sections, `/api/` gated | `compass_api.workspace.install`, `compass_api.extensions` |

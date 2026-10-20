@@ -155,13 +155,16 @@ def create_app() -> FastAPI:
 
     from compass_api.captain_gate import CaptainGateMiddleware, refusal
     from compass_api.middleware.bearer_auth import BearerAuthMiddleware
+    from compass_api.middleware.sessions import SessionContextMiddleware
     from compass_api.middleware.simple_auth import SimpleAuthMiddleware
     from compass_api.middleware.workspace import WorkspaceContextMiddleware
     from compass_api.routes import settings
     from compass_core import captain_admin, captains
 
     app = FastAPI(title="Compass", lifespan=_lifespan)
-    # innermost: runs after the workspace middleware, so the gate sees the workspace config
+    # innermost: the request runs as the captain that owns the path, with the signed-in user as the requester
+    app.add_middleware(SessionContextMiddleware)
+    # runs after the workspace middleware, so the gate sees the workspace config
     app.add_middleware(CaptainGateMiddleware)
     app.add_middleware(SimpleAuthMiddleware)
     app.add_middleware(WorkspaceContextMiddleware, header_name="X-Workspace-Id", optional=False)
