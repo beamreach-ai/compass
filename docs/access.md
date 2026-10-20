@@ -25,9 +25,11 @@ Both roles carry the tag `managed-by=compass` (`aws.session_prefix`).
 **The read policy is generated**, never written by hand. Each captain's
 manifest declares its reads (`permissions.aws.read`), with wildcards per
 service; `compass validate` checks that the captain's code calls nothing the
-block does not cover. `connect` renders the union into the role. Installing a
-captain that reads more opens a pull request on the access module when the
-roles are under code, and `connect` applies it directly while they are not.
+block does not cover. `connect` renders the union into the role. After
+installing a captain that reads more, run `connect` again while the roles are
+not under code, or open the access pull request (Settings → Account → Access,
+`compass access pr`) once they are: it regenerates the read policy too. The
+self-audit reports the gap until then.
 
 ## The base identity
 

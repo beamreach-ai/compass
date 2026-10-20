@@ -1198,3 +1198,11 @@ changes the model.
 - **The static manifest-versus-code pass** skips a captain's `actions/` and
   `listener/` directories (the write actions are checked against their own
   statements; the listener runs in the target account with its own role).
+- **Read-role growth after setup** (section 5) is not automatic yet: a captain
+  install does not open a pull request on its own, and the Captains page does
+  not say "waiting for the read policy". Re-running `connect`, or the next
+  access pull request, regenerates the read policy, and the self-audit reports
+  the gap (`missing`) until then. The install hook is the next small change.
+- **`connect` does not open the import pull request itself** (section 9.2);
+  the self-audit's "not under code" finding and the Access page's "Open the
+  access PR" button do, with `imports.tf` on the first pull request.
