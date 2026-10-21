@@ -13,9 +13,23 @@ import pytest
 from e2e import fixture
 
 
+def _wait_for_quiet_mapper(stack, timeout: float = 900) -> None:
+    """No mapper job queued or running: the settings tests before this file start scans of their
+    own, and recreating the daemon in the middle of one leaves it stale and later failed."""
+    deadline = time.time() + timeout
+    while True:
+        jobs = stack.api.get("/api/jobs", params={"limit": 20}).json()
+        active = [j for j in jobs if j.get("captain") == "mapper" and str(j.get("status")) in ("queued", "running")]
+        if not active:
+            return
+        assert time.time() < deadline, f"mapper jobs still active: {[j['job_id'] for j in active]}"
+        time.sleep(3)
+
+
 @pytest.fixture(scope="module")
 def demo_mode(stack):
     """APP_MODE=demo on every service for this file, production again afterwards."""
+    _wait_for_quiet_mapper(stack)
     stack.env(APP_MODE="demo")
     stack.restart("api", "compass", "dashboard")
     try:
@@ -54,10 +68,14 @@ def test_demo_1_the_world_is_seeded_beside_the_account_and_a_rescan_leaves_it_al
     if coverage is not None:
         assert coverage.get("total", 0) > 500, coverage
 
-    # a real rescan: the account's rows are rewritten, the world is untouched
+    # a real rescan: the account's rows are rewritten, the world is untouched. The route hands back a
+    # scan already running (the API's own after a restart) instead of queuing one: wait for it, then ours.
     started = stack.api.post("/api/maps/reindex", json={"mode": "full"}).json()
+    if started.get("existing"):
+        stack.wait_job(started["job_id"], timeout=900)
+        started = stack.api.post("/api/maps/reindex", json={"mode": "full"}).json()
     job = stack.wait_job(started["job_id"], timeout=900)
-    assert job["status"] == "completed", job
+    assert job["status"] == "completed", {k: job.get(k) for k in ("job_id", "status", "error", "created_at")}
     rescanned = _graph(stack)
     assert {n["resource_id"] for n in _synthetic(rescanned)} == {n["resource_id"] for n in synthetic}
     assert real <= {n["resource_id"] for n in rescanned["nodes"]}
