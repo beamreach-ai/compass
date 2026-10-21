@@ -138,6 +138,32 @@ same story. The token card shows "Trip it", the countdown while a trip is in
 force, and the link to the incident; `?incident=<id>` on the Honeypots tab
 opens one.
 
+## The tour
+
+A panel bottom-right (`TourPanel`), collapsible to a pill ("Tour · 3 of 7"),
+opened by itself on a visitor's first visit and resumable from the pill. Its
+steps are facts about the world, read from `GET /api/demo/tour` every ten
+seconds while the panel is open; a client-only step posts itself
+(`POST /api/demo/tour/{step}`), "Skip" is `POST /api/demo/tour/{step}/skip`.
+State is one row per visitor, `DEMO#TOUR#<user>`, so a visitor who scanned the
+stand's QR code on a phone resumes on a laptop.
+
+| # | Step | Opens | Done when |
+|---|---|---|---|
+| 1 | See the account | Maps, `?q=payments` (the box filled, the first hit selected) | a node's detail opened (client) |
+| 2 | What Terraform doesn't manage | IaC | the IaC tab viewed (client) |
+| 3 | Open an import pull request | IaC, the search filled with `demo.tour.import_resource` | a pull request by this visitor exists (`origin.command == import`, the job's requester) |
+| 4 | Meet the decoys | Decoys → honeytokens, `?token=<first trippable>` expanded | a trippable decoy's detail opened (client) |
+| 5 | Trip one | the same, "Trip it" | this visitor's trip fired, or the trip in force was shown to them with its incident (the token card posts it) |
+| 6 | Watch the response | the incident (`?incident=<id>`) | `action_verified_at` on that incident |
+| 7 | Run it yourself | a card with the install page and the repository | a link clicked (client) |
+
+Each step has a one-line "why this matters" and a "Skip"; a skipped step
+counts towards the end but not as done. The last step's card is the demo's
+one call to action. The open edition has one login and no user id, so there
+every visitor is the same one; the product's Cognito id makes the tour per
+visitor.
+
 ## The API
 
 `GET /api/demo` (read scope) is what the dashboard asks: the mode, the world

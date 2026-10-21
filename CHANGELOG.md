@@ -37,6 +37,10 @@ demo.beamreach.ai does, a synthetic account on the map beside a real one.
   again. `test-fire` is hidden in demo mode. `honeypot arm` and the arm route
   take `secret_access_key` and keep it with the token, so Compass can use the
   key itself.
+- The tour: seven steps in a panel bottom-right, each completed by a fact
+  about the world (`GET /api/demo/tour`, per visitor), opened on the first
+  visit and resumable from a pill; `?q=` fills the map's and the IaC tab's
+  search, `?token=` opens a decoy's detail, `?incident=` an incident.
 
 ## 0.7.0 — unreleased
 

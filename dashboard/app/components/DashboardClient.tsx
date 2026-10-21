@@ -13,6 +13,8 @@ import { productBanners, productProviders, productSettingsSections, productTabs 
 import type { SettingsSlot } from "../lib/extensions";
 import { ShellProvider } from "../lib/shell";
 import { DEMO_BANNER_DISMISSED_KEY, DEMO_BANNER_TEXT, PINNED_TITLE, isDemoApp, isPinned, pinnedProps } from "../lib/demo";
+import { completeTourStep } from "../lib/tour";
+import TourPanel from "./TourPanel";
 import CaptainsSection from "./CaptainsSection";
 import CompassSection, { UpdateBanner } from "./CompassUpdates";
 import MappingProgressBar from "./MappingProgressBar";
@@ -212,6 +214,9 @@ export default function DashboardClient() {
       setDemoBannerDismissed(false);
     }
   }, []);
+  useEffect(() => {
+    if (isDemo && activeTab === "iac") completeTourStep("unmanaged");
+  }, [isDemo, activeTab]);
   const dismissDemoBanner = () => {
     setDemoBannerDismissed(true);
     try {
@@ -960,6 +965,7 @@ export default function DashboardClient() {
   return (
     <ShellProvider value={shell}>
       {productProviders.reduceRight((children, Provider) => <Provider>{children}</Provider>, body)}
+      {isDemo && <TourPanel />}
     </ShellProvider>
   );
 }

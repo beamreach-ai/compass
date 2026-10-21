@@ -39,6 +39,7 @@ DEFAULTS: Dict[str, Any] = {
     "visitor_repo": "",
     "seeded_pr": {},
     "reset": {"schedule": "cron(0 3 ? * SUN *)", "prune_jobs_days": 7},
+    "tour": {"import_resource": "acme-legacy-exports"},  # the real, unmanaged resource step 3 imports
     "pinned_settings": ["github", "aws", "demo", "notifications.endpoints"],
     "links": {"install": "https://beamreach.ai/compass/install.html", "repository": "https://github.com/beamreach-ai/compass"},
 }
@@ -215,89 +216,132 @@ def _native(item: Any) -> Any:
     return item
 
 
-# ── demo-rearm: after the response verified, undo the key deactivation and arm again ──
+# ── The tour: seven steps, each completed by a fact about the world ──────────
+#
+# State is one row per visitor, DEMO#TOUR#<user>: the client-only steps the dashboard
+# reported and the skips. The other steps are read from the world on every GET: a pull
+# request by this visitor, their trip, the response on its incident.
 
-def rearm_once(config: Dict[str, Any], *, workspace_id: str, table: Any = None, now_ms: Optional[int] = None) -> Dict[str, Any]:
-    """Every tripped decoy whose incident has ``action_verified_at``: roll back the
-    ``iam_deactivate_key`` audits not yet rolled back (the existing rollback, through the
-    act role under the grant), then run ``arm`` for the token. The incident stays open for
-    other visitors to read; the cooldown row keeps the incident id and takes ``rearmed_at``."""
-    from captains.honeypot import commands as honeypot_commands
+TOUR_STEPS: List[Dict[str, Any]] = [
+    {"id": "map", "kind": "client", "title": "See the account",
+     "why": "10,000 resources across four regions, every one with what it can reach: search `payments`, open a role, follow the edges.",
+     "done_when": "You opened a node's detail."},
+    {"id": "unmanaged", "kind": "client", "title": "What Terraform doesn't manage",
+     "why": "40% of this account is not in any state file; the IaC tab lists it, with the drift on what is.",
+     "done_when": "You looked at the IaC tab."},
+    {"id": "import_pr", "kind": "api", "title": "Open an import pull request",
+     "why": "Import a real, unmanaged resource: Compass writes the Terraform and opens the pull request; nothing is applied in the demo.",
+     "done_when": "A pull request by you exists."},
+    {"id": "decoys", "kind": "client", "title": "Meet the decoys",
+     "why": "Two armed decoys sit next to the replay service's real secret, where an intruder would look first.",
+     "done_when": "You opened a decoy's detail."},
+    {"id": "trip", "kind": "api", "title": "Trip one",
+     "why": "Trip it uses the decoy's key for real; CloudTrail delivers the event in one to five minutes and the incident opens.",
+     "done_when": "Your trip opened an incident, or you were shown the one in force."},
+    {"id": "response", "kind": "api", "title": "Watch the response",
+     "why": "The investigation, the blast radius, the gate, the restart and the key going inactive, under a minute after the alert.",
+     "done_when": "The response on that incident verified."},
+    {"id": "run_it", "kind": "client", "title": "Run it yourself",
+     "why": "The install is a compose file; `compass connect` uses your profile once and the services never see it.",
+     "done_when": "You opened the install page or the repository."},
+]
+TOUR_STEP_IDS = [s["id"] for s in TOUR_STEPS]
+
+
+def tour_row(table: Any, pk: str, user_id: str) -> Dict[str, Any]:
+    from compass_core.keys import demo_tour_sort_key
+
+    item = table.get_item(Key={"pk": pk, "sk": demo_tour_sort_key(user_id)}).get("Item")
+    return _native(item) if item else {"user_id": user_id, "steps": {}}
+
+
+def mark_tour_step(table: Any, pk: str, user_id: str, step: str, *, skipped: bool = False, detail: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Record a client-only step as done (or any step as skipped) for this visitor, once."""
+    from compass_core.keys import demo_tour_sort_key
+
+    if step not in TOUR_STEP_IDS:
+        raise LookupError(f"no tour step {step!r}: one of {', '.join(TOUR_STEP_IDS)}")
+    row = tour_row(table, pk, user_id)
+    steps = dict(row.get("steps") or {})
+    now = epoch_ms()
+    entry = dict(steps.get(step) or {})
+    if skipped:
+        entry.setdefault("skipped_at", now)
+    else:
+        entry.setdefault("done_at", now)
+    if detail:
+        entry.update({k: v for k, v in detail.items() if v is not None})
+    steps[step] = entry
+    row = {"pk": pk, "sk": demo_tour_sort_key(user_id), "user_id": user_id, "steps": steps,
+           "started_at": row.get("started_at") or now, "updated_at": now}
+    table.put_item(Item=row)
+    return _native(row)
+
+
+def same_visitor(a: Optional[str], b: Optional[str]) -> bool:
+    """The open edition has one login and no user id; two missing ids are the same visitor."""
+    return (a or "anonymous") == (b or "anonymous")
+
+
+def tour(table: Any, pk: str, config: Dict[str, Any], *, user_id: Optional[str], prs: List[Dict[str, Any]], now_ms: Optional[int] = None) -> Dict[str, Any]:
+    """The visitor's tour: every step with whether it is done, from the row and from the world."""
     from captains.honeypot.incidents import get_incident
-    from compass_core import sessions
-    from compass_core.keys import honeypot_audit_sort_key, workspace_pk
-    from compass_core.tables import dynamo_table, tables
 
-    table = table or dynamo_table(tables(config).items)
-    pk = workspace_pk(workspace_id)
+    me = user_id or "anonymous"
     now_ms = now_ms or epoch_ms()
-    out: Dict[str, Any] = {"rearmed": [], "waiting": [], "failed": []}
-    for row in cooldowns(table, pk, now_ms=now_ms):
-        token_id = str(row.get("honeytoken_id") or "")
-        if not row.get("incident_id") or row.get("rearmed_at"):
-            continue
-        incident = get_incident(table, pk, str(row["incident_id"]))
-        if not incident or not incident.get("action_verified_at"):
-            out["waiting"].append(token_id)
-            continue
-        try:
-            with sessions.captain_context("honeypot", requester=sessions.SCHEDULER):
-                for audit_id in incident.get("audit_ids") or []:
-                    item = table.get_item(Key={"pk": pk, "sk": honeypot_audit_sort_key(str(audit_id))}).get("Item")
-                    audit = _native({k: v for k, v in (item or {}).items() if k not in ("pk", "sk")})
-                    if audit.get("action_type") == "iam_deactivate_key" and audit.get("status") == "verified" and not (audit.get("rollback") or {}).get("done_at"):
-                        rolled = _rollback(table, pk, audit, config)
-                        if (rolled.get("rollback") or {}).get("error"):
-                            raise RuntimeError(f"rollback of {audit_id} failed: {rolled['rollback']['error']}")
-                armed = honeypot_commands.arm({"workspace_id": workspace_id, "honeytoken_id": token_id})
-            if armed.get("status") != "armed":
-                failed = [c for c in armed.get("checks") or [] if not c.get("ok")]
-                raise RuntimeError("not ready to arm: " + "; ".join(f"{c.get('name')}: {c.get('detail')}" for c in failed))
-            record_trip(table, pk, token_id, rearmed_at=epoch_ms(), rearm_error=None)
-            out["rearmed"].append(token_id)
-            logger.info("demo: decoy %s re-armed after incident %s", token_id, row["incident_id"])
-        except Exception as exc:  # noqa: BLE001 - the row says why; the next tick tries again
-            record_trip(table, pk, token_id, rearm_error=f"{type(exc).__name__}: {exc}"[:300])
-            out["failed"].append({"honeytoken_id": token_id, "error": str(exc)[:300]})
-            logger.warning("demo: re-arming %s failed: %s", token_id, exc)
-    return out
+    row = tour_row(table, pk, me)
+    recorded: Dict[str, Dict[str, Any]] = dict(row.get("steps") or {})
+    settings_ = settings(config)
+    trippable = list(settings_["trippable"])
+
+    # the world's facts
+    my_pr = next((p for p in prs if (p.get("origin") or {}).get("command") == "import" and same_visitor((p.get("origin") or {}).get("user_id"), user_id)), None)
+    trips = [r for r in cooldowns(table, pk, now_ms=now_ms) if r.get("honeytoken_id") in trippable]
+    my_trip = next((r for r in sorted(trips, key=lambda r: -int(r.get("tripped_at") or 0)) if same_visitor(r.get("user_id"), user_id) and r.get("fired_at")), None)
+    shown = recorded.get("trip") or {}
+    incident_id = (my_trip or {}).get("incident_id") or shown.get("incident_id")
+    incident = get_incident(table, pk, str(incident_id)) if incident_id else None
+
+    facts: Dict[str, Dict[str, Any]] = {
+        "import_pr": {"done": bool(my_pr), "detail": {"pr_url": (my_pr or {}).get("pr_url") or (my_pr or {}).get("url")} if my_pr else {}},
+        "trip": {"done": bool(my_trip) or bool(shown.get("done_at")),
+                 "detail": {"incident_id": incident_id, "fired_at": (my_trip or {}).get("fired_at"), "by": "you" if my_trip else ("a visitor" if incident_id else None)}},
+        "response": {"done": bool(incident and incident.get("action_verified_at")),
+                     "detail": {"incident_id": incident_id, "action_verified_at": (incident or {}).get("action_verified_at")}},
+    }
+    steps: List[Dict[str, Any]] = []
+    for spec in TOUR_STEPS:
+        entry = recorded.get(spec["id"]) or {}
+        fact = facts.get(spec["id"])
+        done = bool(fact["done"]) if fact else bool(entry.get("done_at"))
+        detail = dict((fact or {}).get("detail") or {k: v for k, v in entry.items() if k not in ("done_at", "skipped_at")})
+        # what the dashboard needs to open the step: the search term, the decoy, the incident, the links
+        if spec["id"] == "map":
+            detail["search"] = "payments"
+        elif spec["id"] == "import_pr":
+            detail["search"] = settings_["tour"]["import_resource"]
+        elif spec["id"] in ("decoys", "trip"):
+            detail["token"] = trippable[0] if trippable else None
+        elif spec["id"] == "run_it":
+            detail["links"] = settings_["links"]
+        steps.append({**spec, "done": done, "skipped": bool(entry.get("skipped_at")), "done_at": entry.get("done_at") if not fact else None, "detail": detail})
+    completed = sum(1 for s in steps if s["done"])
+    passed = sum(1 for s in steps if s["done"] or s["skipped"])
+    current = next((s["id"] for s in steps if not (s["done"] or s["skipped"])), None)
+    return {"steps": steps, "completed": completed, "total": len(steps), "current": current, "finished": passed == len(steps),
+            "started_at": row.get("started_at"), "updated_at": row.get("updated_at")}
 
 
-def _rollback(table: Any, pk: str, audit: Dict[str, Any], config: Dict[str, Any]) -> Dict[str, Any]:
-    """The rollback route's work (compass_api.routes.honeypot_actions) without a request."""
-    from captains.honeypot.actions import get_action
-    from captains.honeypot.actions.base import ActionContext
-    from captains.honeypot.responder import AuditLog, rollback_response_action
-    from compass_core import grants, sessions
-    from compass_core.aws import resolve_target_region
-    from compass_core.keys import honeypot_action_sort_key
+def tour_completions(table: Any, pk: str, *, since_ms: int) -> int:
+    """Visitors whose tour reached its end since ``since_ms`` (for `demo status`)."""
+    from boto3.dynamodb.conditions import Key
 
-    action = get_action(str(audit.get("action_type") or ""))
-    target = audit.get("target") or {}
-    user_arn = str(target.get("user_arn") or "")
-    ctx = ActionContext(
-        region=str(target.get("region") or resolve_target_region(config) or "us-east-1"), incident_id=str(audit.get("incident_id") or ""),
-        cluster_arn=str(target.get("cluster_arn") or ""), service_arn=str(target.get("service_arn") or ""), task_arn=str(target.get("task_arn") or ""),
-        container=str(target.get("container") or ""), user_arn=user_arn, user_name=user_arn.rsplit("/", 1)[-1] if user_arn else "",
-        access_key_id=str(target.get("access_key_id") or ""),
-    )
-    grant_row = table.get_item(Key={"pk": pk, "sk": honeypot_action_sort_key(str(audit.get("action_id") or ""))}).get("Item") if audit.get("action_id") else None
-    narrowing = grants.narrowing(dict(grant_row), config) if grant_row else None
-    session = sessions.target("act", region=ctx.region, captain="honeypot", config=config, action=narrowing)
-    if session is None:
-        raise RuntimeError("no act role (aws.roles.act) for this workspace")
-    return rollback_response_action(session=session, audit=audit, ctx=ctx, audit_log=AuditLog(table, pk), requested_by="demo-rearm", action=action)
+    from compass_core.keys import demo_tour_prefix
 
-
-def run_rearm_service(workspace_id: str, config: Dict[str, Any], stop: Any, *, interval: Optional[int] = None) -> None:
-    """A `compass serve` service (ServiceSpec `demo-rearm`), active in demo mode only."""
-    if not enabled():
-        return
-    wait = float(interval or 30)
-    while True:
-        try:
-            rearm_once(config, workspace_id=workspace_id)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("demo re-arm tick failed: %s", exc)
-        if stop.wait(wait):
-            return
+    rows = table.query(KeyConditionExpression=Key("pk").eq(pk) & Key("sk").begins_with(demo_tour_prefix())).get("Items", [])
+    count = 0
+    for row in rows:
+        steps = _native(row.get("steps") or {})
+        if int(row.get("updated_at") or 0) >= since_ms and all(k in steps for k in ("map", "unmanaged", "decoys", "run_it")):
+            count += 1
+    return count

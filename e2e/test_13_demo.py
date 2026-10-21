@@ -138,7 +138,7 @@ def test_demo_3_a_visitor_trips_a_pre_armed_decoy_and_it_re_arms_after_the_respo
     armed = stack.api.post(f"/api/honeypots/tokens/{planted['id']}/arm", json={"secret_access_key": planted["secret"]})
     assert armed.status_code == 200, armed.text
     _action(stack, "autopilot")
-    _write_demo_block(stack, trippable=[planted["id"]], cooldown_seconds=300, trips_per_visitor_per_hour=3)
+    _write_demo_block(stack, trippable=[planted["id"]], cooldown_seconds=60, trips_per_visitor_per_hour=3)
     stack.env(COMPASS_DEMO_REARM="5")
     stack.restart("api", "compass")
     try:
@@ -149,7 +149,8 @@ def test_demo_3_a_visitor_trips_a_pre_armed_decoy_and_it_re_arms_after_the_respo
         tripped = stack.api.post(f"/api/honeypots/tokens/{planted['id']}/trip", headers=_visitor(stack, "visitor-a"))
         assert tripped.status_code == 200, tripped.text
         first = tripped.json()
-        assert first["state"] == "tripped" and first["by"] == "you" and first["job_id"] and 290 <= first["seconds_left"] <= 300
+        assert first["state"] == "tripped" and first["by"] == "you" and first["job_id"] and 50 <= first["seconds_left"] <= 60
+        stack.records["demo_decoy"] = {**planted, "key": key}
 
         # the second visitor, in the cooldown, is told and gets no second fire
         again = stack.api.post(f"/api/honeypots/tokens/{planted['id']}/trip", headers=_visitor(stack, "visitor-b")).json()
@@ -204,6 +205,128 @@ def test_demo_3_a_visitor_trips_a_pre_armed_decoy_and_it_re_arms_after_the_respo
         page.locator("[data-trip-state]").get_by_role("link", name="open it").click()
         page.wait_for_url(f"**incident={incident_id}**")
         page.get_by_role("button", name="Close", exact=True).wait_for()  # the incident drawer
+    finally:
+        _action(stack, "off")
+        stack.env(COMPASS_DEMO_REARM=None)
+        stack.restart("api", "compass")
+
+
+def _tour(stack) -> Dict[str, Any]:
+    return stack.api.get("/api/demo/tour").json()
+
+
+def _wait_step(stack, step: str, *, timeout: float = 60) -> Dict[str, Any]:
+    deadline = time.time() + timeout
+    while True:
+        tour = _tour(stack)
+        done = {s["id"]: s for s in tour["steps"]}[step]
+        if done["done"]:
+            return tour
+        assert time.time() < deadline, f"step {step} not done: {done}"
+        time.sleep(2)
+
+
+def test_demo_4_the_tour_walks_from_the_map_to_the_install_page(stack, page, phone_page, mapped, demo_mode):
+    """Builds on DEMO-3: the same pre-armed decoy, tripped again by this visitor (the page's session),
+    the alert sent by the test as CloudTrail would, the response and the re-arm; the client-only
+    steps complete from the page, one step is skipped, the last opens the install page."""
+    from e2e.test_06_decoys import _action
+
+    decoy = stack.records.get("demo_decoy")
+    assert decoy, "DEMO-3 planted and armed the decoy this tour trips"
+    _write_demo_block(stack, trippable=[decoy["id"]], cooldown_seconds=900, trips_per_visitor_per_hour=3)
+    _action(stack, "autopilot")
+    stack.env(COMPASS_DEMO_REARM="5")
+    stack.restart("api", "compass")
+    try:
+        # the open edition has one visitor: DEMO-3's page already met the decoys and saw the trip; the rest is this test's
+        tour = _tour(stack)
+        done = {s["id"]: s["done"] for s in tour["steps"]}
+        assert list(done) == ["map", "unmanaged", "import_pr", "decoys", "trip", "response", "run_it"] and not done["map"] and not done["unmanaged"]
+
+        # the world (a no-op when DEMO-1 seeded it): "payments" is a synthetic team's name
+        stack.cli("demo", "seed", "resources=1000", "seed=7")
+        # the panel opens by itself on a first visit (else from the pill); the map's search selects a node: step 1 done
+        page.open("/workspace?tab=maps&q=payments", wait_for="Node details")
+        pill = page.locator("[data-tour-pill]")
+        panel = page.locator("[data-tour-panel]")
+        page.locator("[data-tour-panel], [data-tour-pill]").first.wait_for()
+        if pill.count():
+            pill.click()
+        panel.wait_for()
+        assert "Tour · " in panel.inner_text()
+        _wait_step(stack, "map")
+        page.locator("[data-tour-step=unmanaged]").get_by_role("link", name="Open →").click()
+        page.wait_for_url("**tab=iac**")
+        page.get_by_text(fixture.UNMANAGED_BUCKET, exact=False).first.wait_for()
+        _wait_step(stack, "unmanaged")
+
+        # "Skip" on the import step (IAC-2 proves the import itself; the API test proves the check)
+        page.locator("[data-tour-step=import_pr]").get_by_role("button", name="Skip").click()
+        deadline = time.time() + 20
+        while not {s["id"]: s for s in _tour(stack)["steps"]}["import_pr"]["skipped"]:
+            assert time.time() < deadline, _tour(stack)
+            time.sleep(1)
+        page.locator("[data-tour-step=import_pr]").get_by_text("skipped", exact=True).wait_for(timeout=15_000)  # the next poll at the latest
+
+        # the decoys: the step's link (the same URL the panel offers while the step is current) expands the
+        # trippable decoy's detail (step 4), where "Trip it" waits for the previous cooldown to lapse
+        page.open(f"/workspace?tab=honeypots&view=honeytokens&token={decoy['id']}")
+        button = page.locator("[data-trip-it]")
+        button.wait_for()
+        _wait_step(stack, "decoys")
+        deadline = time.time() + 120
+        while button.is_disabled():
+            assert time.time() < deadline, f"Trip it still disabled: {button.inner_text()}"
+            time.sleep(3)
+        button.click()
+        page.locator("[data-trip-state]").wait_for()
+        deadline = time.time() + 120
+        while not next((r for r in stack.api.get("/api/demo").json()["cooldowns"] if r["honeytoken_id"] == decoy["id"]), {}).get("fired_at"):
+            assert time.time() < deadline, "the trip job did not fire"
+            time.sleep(2)
+        message = {"token_id": decoy["id"], "workspace_id": "local", "event_id": f"e2e-tour-{time.time_ns()}", "event_time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                   "event_name": "GetCallerIdentity", "region": fixture.REGION, "access_key_id": decoy["key"],
+                   "principal_arn": f"arn:aws:iam::{fixture.ACCOUNT}:user/service/{decoy['user']}", "source_ip": "203.0.113.43",
+                   "user_agent": "Boto3/1.39 compass-demo-trip", "error_code": "", "vpc_endpoint_id": "", "service": "sts"}
+        stack.aws_client("sqs").send_message(QueueUrl=f"{stack.moto_url}/{fixture.ACCOUNT}/compass-decoy-alerts-local", MessageBody=json.dumps(message))
+        tour = _wait_step(stack, "trip", timeout=180)
+        incident_id = {s["id"]: s for s in tour["steps"]}["trip"]["detail"]["incident_id"]
+        assert incident_id and {s["id"]: s for s in tour["steps"]}["trip"]["detail"]["by"] == "you"
+
+        # the response verifies on its own: step 6; the step's link is the incident
+        tour = _wait_step(stack, "response", timeout=240)
+        assert {s["id"]: s for s in tour["steps"]}["response"]["detail"]["incident_id"] == incident_id
+        page.open(f"/workspace?tab=honeypots&view=history&incident={incident_id}")
+        page.get_by_role("button", name="Close", exact=True).wait_for()
+        page.keyboard.press("Escape")
+
+        # the last step: the install page (a new tab); then the tour is done and the pill says so
+        page.open("/workspace?tab=maps", wait_for="Target account")
+        page.locator("[data-tour-panel], [data-tour-pill]").first.wait_for()
+        if pill.count():
+            pill.click()
+        page.locator("[data-tour-step=run_it]").get_by_role("link", name="Install Compass", exact=False).wait_for()
+        with page.context.expect_page() as popup:
+            page.locator("[data-tour-step=run_it]").get_by_role("link", name="Install Compass", exact=False).click()
+        popup.value.close()
+        tour = _wait_step(stack, "run_it")
+        assert tour["finished"] is True and tour["completed"] == 6
+        panel.get_by_text("6 of 7", exact=False).wait_for(timeout=15_000)  # the panel's next poll
+        page.get_by_role("button", name="Collapse the tour").click()
+        pill.wait_for()
+        assert "6 of 7" in pill.inner_text()
+        page.open("/workspace?tab=maps", wait_for="Target account")
+        pill.wait_for()
+
+        # on a phone the pill does not cover the menu button
+        phone_page.open("/workspace?tab=maps")
+        menu = phone_page.get_by_role("button", name="Open menu")
+        menu.wait_for()
+        widget = phone_page.locator("[data-tour-panel], [data-tour-pill]").first
+        widget.wait_for()
+        a, b = menu.bounding_box(), widget.bounding_box()
+        assert a and b and (a["x"] + a["width"] <= b["x"] or a["y"] + a["height"] <= b["y"]), (a, b)
     finally:
         _action(stack, "off")
         _write_demo_block(stack, trippable=[])

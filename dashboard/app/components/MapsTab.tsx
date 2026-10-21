@@ -6,6 +6,7 @@ import Graphin, { Behaviors, Components as GraphinComponents } from "@antv/graph
 import "@antv/graphin/dist/index.css";
 import MappingProgressBar from "./MappingProgressBar";
 import { isDemoApp } from "../lib/demo";
+import { completeTourStep } from "../lib/tour";
 import { useShell } from "../lib/shell";
 
 type InfraNode = {
@@ -992,8 +993,9 @@ const relationshipLabel = (edge: InfraEdge): string =>
   `${edge.relationship_type} → ${edge.to_resource_id.split(":").pop() || edge.to_resource_id}`;
 
 const MapsTab: React.FC<MapsTabProps> = ({ infraScan = null, mapperJob = null, onMapperTriggered }) => {
-  const { settingsBootstrap } = useShell();
+  const { settingsBootstrap, searchParams } = useShell();
   const demo = isDemoApp(settingsBootstrap?.app);
+  const wantedSearch = searchParams?.get("q") ?? null;
   const [mapData, setMapData] = useState<InfraMapResponse | null>(null);
   const [mapLoading, setMapLoading] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
@@ -1265,6 +1267,21 @@ const toggleCategoryFilter = useCallback(
       setSelectedNodeId(hit.resource_id);
     }
   }, [mapData, searchTerm]);
+
+  // ?q=<term> (the tour's "search payments"): the box filled and the first hit selected, once the map is here
+  const [searchedFromUrl, setSearchedFromUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!wantedSearch || !mapData || searchedFromUrl === wantedSearch) return;
+    setSearchedFromUrl(wantedSearch);
+    setSearchTerm(wantedSearch);
+    const term = wantedSearch.trim().toLowerCase();
+    const hit = mapData.nodes.find((node) => node.name?.toLowerCase().includes(term) || node.resource_id.toLowerCase().includes(term));
+    if (hit) setSelectedNodeId(hit.resource_id);
+  }, [wantedSearch, mapData, searchedFromUrl]);
+  // the tour's first step: a node's detail opened
+  useEffect(() => {
+    if (demo && selectedNodeId) completeTourStep("map");
+  }, [demo, selectedNodeId]);
 
   return (
     <section className="space-y-6">

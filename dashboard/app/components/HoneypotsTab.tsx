@@ -8,6 +8,7 @@ import HoneypotIncidents, { Short, type Incident, type TokenInfo } from "./Honey
 import { SLACK_SETTINGS_HREF, useSlackStatus } from "./SlackIntegrationCard";
 import { BTN_GHOST, BTN_OUTLINE, BTN_OUTLINE_SM, BTN_QUIET_DANGER_SM, LINK_BTN, ReadOnlyContext, exactUtc, relativeTime, useReadOnly, writeProps } from "./honeypotFormat";
 import { DemoTripContext, incidentHref, useDemoTrip } from "./honeypotFormat";
+import { completeTourStep } from "../lib/tour";
 import type { DemoTrip, DemoTripState } from "./honeypotFormat";
 import { asHoneypotView, honeypotViewHref } from "./honeypotViews";
 import { isOpenEdition, PRODUCT_NAME } from "../lib/edition";
@@ -1271,6 +1272,10 @@ function AlertPanel({
   }, [trippable]);
   const secondsLeft = currentTrip ? Math.max(0, Math.ceil((currentTrip.until - now) / 1000)) : 0;
   const tripInForce = Boolean(currentTrip) && secondsLeft > 0;
+  // the tour's "Trip one": shown the trip in force with its incident counts, as the spec says
+  useEffect(() => {
+    if (trippable && tripInForce && currentTrip?.incident_id) completeTourStep("trip", { incident_id: currentTrip.incident_id });
+  }, [trippable, tripInForce, currentTrip?.incident_id]);
   const [tripping, setTripping] = useState(false);
   const [tripResult, setTripResult] = useState<React.ReactNode>(null);
   const handleTrip = async () => {
@@ -1901,7 +1906,9 @@ function AutopilotSwitch() {
 const VIEW_LINK = "text-sm font-medium text-blue-600 hover:underline";
 
 export default function HoneypotsTab() {
-  const view = asHoneypotView(useSearchParams().get("view"));
+  const searchParams = useSearchParams();
+  const view = asHoneypotView(searchParams.get("view"));
+  const wantedToken = searchParams.get("token");
   const [readOnly, setReadOnly] = useState(false);
   const [honeytokens, setHoneytokens] = useState<Honeytoken[]>([]);
   const [endpoints, setEndpoints] = useState<NotificationEndpoint[]>([]);
@@ -2002,6 +2009,13 @@ export default function HoneypotsTab() {
     const id = setInterval(refreshDemoTrip, 10_000);
     return () => clearInterval(id);
   }, [demo, refreshDemoTrip]);
+  // ?token=<id> opens that decoy's detail (the tour); a trippable decoy's detail opened is a tour step
+  useEffect(() => {
+    if (wantedToken && view === "honeytokens") setExpandedId(wantedToken);
+  }, [wantedToken, view]);
+  useEffect(() => {
+    if (demo && expandedId && demoTrip.trippable.includes(expandedId)) completeTourStep("decoys");
+  }, [demo, expandedId, demoTrip.trippable]);
 
   const handleDelete = async (honeytoken: Honeytoken) => {
     if (!window.confirm(`Decommission honeytoken "${honeytoken.name}"? This will also generate a PR to remove the honeytoken from your infrastructure.`)) return;

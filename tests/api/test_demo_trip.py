@@ -16,6 +16,7 @@ from moto import mock_aws
 
 from captains.honeypot import arm as arming
 from captains.honeypot import commands as honeypot_commands
+from captains.honeypot import demo_rearm
 from captains.honeypot.ingestion import record_alert
 from compass_api.routes import honeypots
 from compass_core import config as config_module
@@ -165,12 +166,12 @@ def test_the_rearm_waits_for_the_verified_response_then_rolls_the_key_back_and_a
     monkeypatch.setattr(sessions, "target", lambda *a, **k: boto3.Session(region_name="us-east-1"))
     monkeypatch.setattr(arming, "verify_honeytoken", lambda session, token, placement=None, *, config=None: {"ok": True, "checks": [], "access_key_id": key})
 
-    waiting = demo.rearm_once(CONFIG, workspace_id=WS, table=table)
+    waiting = demo_rearm.rearm_once(CONFIG, workspace_id=WS, table=table)
     assert waiting == {"rearmed": [], "waiting": [ARMED], "failed": []}, "nothing before the response verified"
     assert iam.list_access_keys(UserName="svc-backup")["AccessKeyMetadata"][0]["Status"] == "Inactive"
 
     table.update_item(Key={"pk": PK, "sk": honeypot_incident_sort_key("inc-1")}, UpdateExpression="SET action_verified_at = :t", ExpressionAttributeValues={":t": "2026-10-21T10:01:00Z"})
-    done = demo.rearm_once(CONFIG, workspace_id=WS, table=table)
+    done = demo_rearm.rearm_once(CONFIG, workspace_id=WS, table=table)
     assert done["rearmed"] == [ARMED] and done["failed"] == [], done
     assert iam.list_access_keys(UserName="svc-backup")["AccessKeyMetadata"][0]["Status"] == "Active"
     audit = table.get_item(Key={"pk": PK, "sk": honeypot_audit_sort_key("aud-1")})["Item"]
@@ -181,7 +182,7 @@ def test_the_rearm_waits_for_the_verified_response_then_rolls_the_key_back_and_a
     assert row["rearmed_at"] and row["incident_id"] == "inc-1", "the incident stays for the next visitor to read"
     assert table.get_item(Key={"pk": PK, "sk": honeypot_incident_sort_key("inc-1")})["Item"]["status"] == "open"
     # a second tick has nothing to do
-    assert demo.rearm_once(CONFIG, workspace_id=WS, table=table) == {"rearmed": [], "waiting": [], "failed": []}
+    assert demo_rearm.rearm_once(CONFIG, workspace_id=WS, table=table) == {"rearmed": [], "waiting": [], "failed": []}
 
     # the trip route reports the trip, in force, with the incident, to anyone
     actor["user_id"] = "visitor-2"
