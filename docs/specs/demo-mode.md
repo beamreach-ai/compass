@@ -1,7 +1,17 @@
 # Demo mode: a synthetic account, a real decoy, a tour, on demo.beamreach.ai
 
-Status: draft 2026-10-21, for review. Roadmap item 4.9 (angle 4).
-Line references: `main` of this repository at ed5590a; `beamreach-coworker` at cb76d19.
+Status: accepted 2026-10-21; revised the same day to add the 0.7.0 release
+(section 3.12), the map store on ECS (section 3.13) and the visitor's
+definition of done (section 10). Roadmap item 4.9 (angle 4).
+Line references: `main` of this repository at ed5590a (§3.12–3.13 at e7ed309); `beamreach-coworker` at cb76d19.
+
+**The outcome this spec is for:** demo.beamreach.ai is a slick environment
+strangers use on their own: it opens fast on a phone or a laptop, every tab
+has something real in it, the map is big enough to be worth exploring, one
+button trips a real decoy and the response lands while they watch, nothing
+is broken or empty, and the last screen sends them to the install page.
+Section 10 turns that sentence into a checklist; the work is done when the
+checklist passes on demo.beamreach.ai, not when the PRs merge.
 
 ## 1. Goals and non-goals
 
@@ -371,6 +381,85 @@ If usage analytics (angle 10) ships first, the demo's install id is flagged
 - **The map at scale.** 4.2 and 1.3 are not shipped; the dashboard draws
   4,000 items. Open decision 3 sets the world size until they land.
 - **A real-fire route.** New in this spec; nothing else needs it.
+- **A released core.** Nothing has been released since v0.4.1: `main`
+  carries 0.5.0 to 0.7.0, each section marked unreleased in `CHANGELOG.md`,
+  and `pyproject.toml` still says 0.5.2. Section 3.12.
+- **A map store the product's services can share.** Section 3.13.
+
+### 3.12 The release: 0.5.0 to 0.7.0 released together as v0.7.0
+
+Before any demo-mode code, the four unreleased versions ship as one release,
+so the demo (and every install on 0.4.1) moves to a tagged core.
+
+- `CHANGELOG.md`: the sections `0.5.0`, `0.5.1`, `0.5.2`, `0.6.0` and `0.7.0`
+  lose "unreleased" and take the release date (`## 0.7.0 — 2026-10-2x`, and
+  the same date on the four below it). The 0.7.0 section's first paragraph,
+  which the dashboard shows as the summary, gains one sentence: "This release
+  also carries 0.5.0 to 0.6.0, which were not released on their own." The
+  "After the update" bullets of 0.6.0 (fetch the new compose file for the
+  `map-data` volume) and 0.7.0 (run `compass connect` once) both apply to an
+  install coming from 0.4.1, and the update card already lists the notes of
+  every version in between.
+- `pyproject.toml`: `0.7.0`. The release workflow refuses a tag that does
+  not match it (`.github/workflows/release.yml:51-54`) and one without its
+  changelog section (`:55-56`).
+- One tag, `v0.7.0`, on `main`. The workflow runs the whole e2e suite on the
+  tagged commit, publishes the three images, the GitHub Release, the entry
+  in `releases.json`, and bumps the `COMPASS_VERSION` defaults on `main`
+  (still `0.4.0` in `docker-compose.yml` and `.env.example`). The
+  intermediate versions are not tagged and get no images: there was never a
+  commit whose `pyproject.toml` said 0.5.0, 0.5.1 or 0.6.0.
+- The release notes feed on beamreach.ai needs a page for each version the
+  update card will list (0.5.0, 0.5.1, 0.5.2, 0.7.0; 0.6.0 has one). The card
+  does not hold the update back when a page is missing; it shows less.
+- One core fix goes into the release first (PR 0 in section 8): the
+  `0.6.0-map-sqlite` migration (`infra_map/migrate.py:29-59`) copies into a
+  SQLite file whatever store the config names and then points the workspace
+  at that file. A deployment that sets `map.store: postgres` (the product,
+  section 3.13) must get its map copied into Postgres and keep its setting.
+  The step copies into the configured store, or skips when that store
+  already has a scan.
+
+Demo mode itself (PRs 1–5) ships in the release after, 0.8.0, and the demo
+bumps twice: to 0.7.0 as soon as it is out (the large, risky bump, done
+without any demo-mode code in it), then to 0.8.0.
+
+### 3.13 The map store on ECS
+
+The product runs the core as a dozen ECS services
+(`deploy/modules/on-premise/main.tf:1254-2806`): the mapper captain writes
+the map, the engine (the API), the IaC, honeypot and triage workers read it,
+each its own Fargate task. The open default, a SQLite file on a volume
+shared by two containers on one host, cannot serve that: Fargate tasks share
+only EFS, and SQLite's WAL is unsafe on NFS (`docs/specs/map-store.md` §13).
+DynamoDB, the product's map today, is the store the benchmark measured at 20
+to 33 seconds per whole-graph read and two minutes per scan at 10k
+(`docs/specs/map-store.md` §10.5): a map nobody would click twice.
+
+The demo's map is therefore **Postgres**, which the core already supports
+(`infra_map/graph_store.py:380-386`, `pip install compass[postgres]`,
+`map.store: postgres` with `map.dsn` or `COMPASS_MAP_DSN`) and which met
+every 10k budget but one (4.8 s per scan, 0.2 s first load, milliseconds per
+read). In the coworker Terraform: one RDS PostgreSQL 16 instance
+(`db.t4g.small`, 20 GB gp3, single-AZ, in the demo VPC's private subnets,
+reachable from the services' security group only), the DSN in Secrets
+Manager, `COMPASS_MAP_STORE=postgres` and `COMPASS_MAP_DSN` on every service
+that touches the map, the `postgres` extra in the enterprise image.
+
+Two product changes go with it, in the coworker repository:
+
+- The engine and the triage captain read the map through the old DynamoDB
+  class directly (`src/beamreach/captains/engine/context_builder.py:177`,
+  `src/beamreach/captains/triage/captain.py:299`). They move to
+  `infra_map.graph_store.open_store`, or they would read a map the mapper no
+  longer writes.
+- The demo's existing DynamoDB map is the small real account; the migration
+  (fixed in PR 0) copies it into Postgres once, and the first rescan
+  rebuilds it anyway.
+
+The marketplace and production environments are out of scope here; they
+inherit the decision when they bump, and this spec's coworker step is where
+the pattern is set.
 
 ## 4. What changes where
 
@@ -501,6 +590,11 @@ demo mode the block is ignored and the routes answer 404.
 
 This repository, each shippable alone, with a stop after each:
 
+0. **`map: the 0.6.0 migration copies into the configured store`**, then
+   **`release: 0.7.0`** (section 3.12): the fix, then the changelog dates,
+   `pyproject.toml` and the tag. *Stop before the tag: the changelog diff,
+   the green CI, and your go. Stop after: the workflow's run, the images,
+   the Release.*
 1. **`map: the synthetic world is a module; compass demo seed`**.
    `infra_map/synthetic.py`, the `demo` block and command, the scopes, the
    benchmark on the moved module. *Stop: a 10k world beside a real scan in
@@ -516,11 +610,19 @@ This repository, each shippable alone, with a stop after each:
 5. **`demo: reset and status`**. *Stop: a reset on the e2e stack, then by
    hand against demo.beamreach.ai once 6 is done.*
 
-Then `beamreach-coworker`: 6. the submodule bump, `connect` on the replay
-account, the migrations; 7. the Terraform (variables, scheduler, run-task),
-the sandbox repo, the bot account; 8. the beats and the nightly dry run.
-*Stop after 7 with the demo walked end to end by you on the phone and the
-laptop.*
+Then `beamreach-coworker`:
+
+6. **The bump to 0.7.0**, as soon as it is released, in parallel with PRs
+   1–5: the submodule, the RDS instance and `COMPASS_MAP_*` (section 3.13),
+   the engine and triage readers on `open_store`, the migrations, `connect`
+   on the replay account, the existing responder role and pre-armed decoys
+   under grants. *Stop: the demo as it is today, on 0.7.0, working: the
+   replay's `friday` phase green.*
+7. **The bump to 0.8.0 and demo mode on**: the submodule, the Terraform
+   (variables, scheduler, run-task), the sandbox repo, the bot account, the
+   seed. *Stop: section 10's checklist, walked by you on a phone and a
+   laptop.*
+8. **The beats and the nightly dry run.** *Stop: a dry run's output.*
 
 ## 9. Decisions taken (2026-10-21, from the questions)
 
@@ -538,6 +640,67 @@ laptop.*
     pre-armed decoys are what trips.
 11. "Trip it" has a shared cooldown and re-arms after the response.
 12. The call to action is the website's install page, not the Marketplace.
+13. 0.5.0 to 0.7.0 are released together as v0.7.0, before demo mode;
+    demo mode ships in 0.8.0 (section 3.12).
+14. The scope stays as specified: the outcome is a demo visitors use on
+    their own, and section 10 is its definition of done.
+
+## 10. Definition of done: the visitor's walk
+
+Walked on demo.beamreach.ai, signed in with a Google account that has never
+used the demo, once on a phone (Safari, iOS) and once on a laptop (Chrome),
+on the production build after step 7. Every line passes, or the work is not
+done.
+
+**Arriving**
+
+- [ ] Sign-in to the map in under 5 s on the laptop, under 8 s on the phone
+      on 4G; the map is drawn, not a spinner.
+- [ ] The badge and the watermark are visible on the first screen; the
+      banner says what the demo is in one line and can be dismissed.
+- [ ] The tour opens by itself at step 1; closing it leaves the pill.
+
+**Every tab**
+
+- [ ] Maps, Decoys, IaC, Pull requests, FinOps, Audit and Settings each open
+      in under 2 s, with no error toast, no "not configured", no empty state
+      that asks the visitor to set something up.
+- [ ] Maps: search finds `payments`; a node's detail opens; a synthetic node
+      says so.
+- [ ] IaC: coverage and the unmanaged list are populated; the drifted queue
+      is there.
+- [ ] Decoys: two armed decoys with "Trip it"; suggestions on the map's
+      resources.
+- [ ] Pull requests: the seeded PR with the reviewer's comment under Needs
+      you.
+- [ ] Settings: the pinned fields say "fixed in the demo"; nothing the
+      visitor can save breaks the demo for the next one.
+
+**The tour, start to end**
+
+- [ ] Step 3 opens a real PR on the sandbox repo, visible on github.com,
+      labelled `demo`.
+- [ ] Step 5: "Trip it" to the incident on screen in under 6 minutes; the
+      clock is visible while waiting; if in cooldown, the visitor lands on
+      the open incident instead.
+- [ ] Step 6: the incident shows the investigation, the blast radius, the
+      restart and the key deactivated, under a minute after the alert.
+- [ ] Step 7 opens https://beamreach.ai/compass/install.html.
+- [ ] Every step's check completes without a reload; "Skip" works on each.
+
+**On the phone**
+
+- [ ] The drawer menu opens and closes; the tour pill does not cover a
+      control; the map pans and zooms with a finger; the incident timeline
+      reads without horizontal scrolling.
+
+**After**
+
+- [ ] A second visitor signing in five minutes later sees the first one's PR
+      as "by a visitor", and their own tour at step 1.
+- [ ] A manual `compass demo reset` brings the demo back to this list's first
+      line, and the scheduled one is listed for Sunday 03:00 UTC.
+- [ ] The nightly `npm run dry -- tour` is green.
 
 ## Open decisions
 
