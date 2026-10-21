@@ -521,13 +521,12 @@ def demo(payload: Dict[str, Any]) -> Dict[str, Any]:
         return dispatch.dispatch("honeypot", "demo_reset", dict(ids))
 
     def rescan() -> Optional[str]:
-        from compass_core.jobs import store_for
-        from compass_core.queue import StoreQueue
+        # the installed queue: the daemon's store in the open edition, the product's broker there; from the
+        # CLI it is the inline queue, so the reset ends with the scan done and recorded
+        from compass_core.queue import job_queue
 
-        store = store_for(config)
-        if store is None:
-            return None
-        return StoreQueue(store).enqueue(captain="mapper", command="run", payload={**ids, "mode": "full"}).get("job_id")
+        _captains.load_commands("mapper")
+        return (job_queue().enqueue(captain="mapper", command="run", payload={**ids, "mode": "full"}) or {}).get("job_id")
 
     def notify(line: str) -> None:
         _captains.load_commands("honeypot")
