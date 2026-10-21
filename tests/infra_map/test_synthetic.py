@@ -118,9 +118,17 @@ def test_the_world_is_seeded_beside_a_real_scan_and_a_rescan_leaves_it_alone(wor
 
 def test_the_seed_takes_its_numbers_from_the_demo_block_and_refuses_outside_demo_mode(workspace, monkeypatch):
     workspace_id, config = workspace
-    config["demo"] = {"world": {"resources": 150, "seed": 3}}
-    result = demo.demo({"verb": "seed", "workspace_id": workspace_id})
+    config["demo"] = {"world": {"resources": 150, "seed": 3, "edges": 900}}
+    seen = {}
+    demo.register_seeder("test", lambda cfg, ws, world: seen.update(ws=ws, nodes=world.node_count, edges=world.edge_count) or "ok")
+    try:
+        result = demo.demo({"verb": "seed", "workspace_id": workspace_id})
+    finally:
+        demo._seeders.pop("test", None)
     assert result["resources"] == 150 and result["seed"] == 3 and result["scope"] == "demo:seed:3"
+    assert result["edges"] == 900, "the block's edges target densifies the world"
+    assert result["seeded"] == {"test": "ok"} and seen == {"ws": workspace_id, "nodes": result["nodes"], "edges": 900}, "a registered seeder gets the world"
+    assert demo.demo({"verb": "seed", "workspace_id": workspace_id, "edges": 0})["edges"] < 900, "edges=0 is the rules alone"
 
     monkeypatch.setenv("APP_MODE", "production")
     with pytest.raises(ValueError, match="runs only in demo mode"):

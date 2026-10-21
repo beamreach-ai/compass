@@ -653,17 +653,20 @@ class SqlGraphStore:
 
     # ── compatibility ───────────────────────────────────────────────────────
     def fetch_graph(self, org_id: str, *, limit: Optional[int] = None) -> Dict[str, List]:
+        """The whole graph, or with ``limit`` the first ``limit`` nodes and every edge between
+        them: the limit is a node budget, never spent on edges (a map just under it used to
+        come back with no edges at all)."""
         where, params = self._scope_clause(org_id, None)
         nodes: List[ResourceNode] = []
         edges: List[RelationshipEdge] = []
         cap = f" LIMIT {int(limit)}" if limit else ""
         for row in self._rows(f"SELECT {', '.join(NODE_COLUMNS)} FROM nodes WHERE {where} ORDER BY row_id{cap}", params):
             nodes.append(node_from_row(row))
-        remaining = None if limit is None else max(0, limit - len(nodes))
-        if remaining != 0:
-            cap = f" LIMIT {int(remaining)}" if remaining else ""
-            for row in self._rows(f"SELECT {', '.join(EDGE_COLUMNS)} FROM edges WHERE {where} ORDER BY row_id{cap}", params):
-                edges.append(edge_from_row(row))
+        keep = {n.resource_id for n in nodes} if limit else None
+        for row in self._rows(f"SELECT {', '.join(EDGE_COLUMNS)} FROM edges WHERE {where} ORDER BY row_id", params):
+            edge = edge_from_row(row)
+            if keep is None or (edge.from_resource_id in keep and edge.to_resource_id in keep):
+                edges.append(edge)
         return {"nodes": nodes, "edges": edges}
 
 

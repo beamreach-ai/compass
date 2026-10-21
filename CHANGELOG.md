@@ -52,6 +52,16 @@ install coming from 0.4.1.
   a row of counts and one line to Slack. `compass demo status` prints the
   last reset, the next one, the trips in force, the open visitor pull
   requests and this week's tour completions.
+- `demo.world.edges` (default 20,000; `compass demo seed edges=…`): the world
+  has at least that many edges, more of the kinds the rules already produce,
+  deterministic from the seed. `compass_core.demo.register_seeder(name, fn)`
+  runs `fn(config, workspace_id, world)` after every seed, for what a larger
+  deployment derives from the world; the open edition registers none.
+- Fixed: the map store's `fetch_graph(limit)` spent the budget on nodes first,
+  so a map just under the dashboard's 4,000 came back with every node and no
+  edge. The limit is a node budget and the edges between the kept nodes all
+  come along, on SQLite, Postgres and DynamoDB. In demo mode the dashboard asks
+  for 10,000 nodes.
 - Fixed: the grant verification sends a statement's own condition to IAM's
   simulation as the request's context. Without it IAM answered `implicitDeny`
   for every conditioned statement, so `ecs_restart_task` (its statements carry

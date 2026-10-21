@@ -95,6 +95,7 @@ class WorldSpec:
     scope: Optional[str] = None  # one scope for every row (the demo); None: the scopes a real scan would give them
     synthetic: bool = False  # mark every node `synthetic: true` (the demo's detail panel says so)
     repo_owner: str = "acme"  # the GitHub organisation of the synthetic repositories; the demo uses one no real repo has
+    edges: int = 0  # at least this many edges: the rules above give about 2.6 per resource; the demo asks for more
 
 
 @dataclass
@@ -288,10 +289,45 @@ def generate(spec: WorldSpec, *, observed: Optional[datetime] = None) -> World:
 
     _ownership(spec, rng, world, observed)
     world.edges = _dedupe(world.edges)
+    if spec.edges > len(world.edges):
+        _densify(spec, rng, world, per_type, observed)
 
     world.hubs = [roles[0].resource_id, groups[0].resource_id]
     world.typical = [instances[len(instances) // 2].resource_id, lambdas[len(lambdas) // 2].resource_id, buckets[len(buckets) // 2].resource_id]
     return world
+
+
+def _densify(spec: WorldSpec, rng: random.Random, world: World, per_type: Dict[str, List[ResourceNode]], observed: datetime) -> None:
+    """More of the same kinds of edge until the world has ``spec.edges``: the compute talks to
+    more queues, tables, buckets and secrets, sits behind more security groups, writes more
+    logs, is watched by more alarms. Deterministic for the seed; stops when the rules are
+    exhausted rather than invent a relationship the mapper never produces."""
+    compute = per_type["lambda_function"] + per_type["ec2_instance"] + per_type["ecs_task_definition"] + per_type["stepfunctions_state_machine"]
+    data = per_type["sqs_queue"] + per_type["sns_topic"] + per_type["dynamodb_table"] + per_type["s3_bucket"]
+    rules: List[Tuple[Sequence[ResourceNode], Sequence[ResourceNode], str]] = [
+        (compute, data, "depends_on"),
+        (compute, per_type["secretsmanager_secret"], "uses_in"),
+        (per_type["ec2_instance"] + per_type["ecs_task_definition"], per_type["cloudwatch_log_group"], "writes_to"),
+        (per_type["ec2_instance"] + per_type["lambda_function"] + per_type["rds_instance"], per_type["ec2_security_group"], "secured_by"),
+        (per_type["cloudwatch_alarm"], compute + per_type["rds_instance"] + per_type["sqs_queue"], "depends_on"),
+        (per_type["eventbridge_rule"], per_type["lambda_function"] + per_type["sqs_queue"] + per_type["sns_topic"], "routes_to"),
+        (compute, per_type["iam_role"], "uses_in"),
+    ]
+    rules = [r for r in rules if r[0] and r[1]]
+    seen = {(e.from_resource_id, e.to_resource_id, e.relationship_type) for e in world.edges}
+    possible = sum(len(a) * len(b) for a, b, _ in rules)
+    want = min(spec.edges, len(seen) + possible)
+    misses = 0
+    while len(seen) < want and misses < 20 * want:
+        src_pool, dst_pool, rel = rng.choice(rules)
+        src = src_pool[_pareto_index(rng, len(src_pool))] if rng.random() < 0.3 else rng.choice(src_pool)
+        dst = dst_pool[_pareto_index(rng, len(dst_pool))]  # hubs stay hubs
+        key = (src.resource_id, dst.resource_id, rel)
+        if src.resource_id == dst.resource_id or key in seen:
+            misses += 1
+            continue
+        seen.add(key)
+        world.edges.append(_edge(spec, src.resource_id, dst.resource_id, rel, observed))
 
 
 def _dedupe(edges: Iterable[RelationshipEdge]) -> List[RelationshipEdge]:

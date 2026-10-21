@@ -278,22 +278,17 @@ class InfraMapStore:
                 if record_type == "relationship":
                     edge = RelationshipEdge.from_item(item)
                     edges[edge.canonical_edge_id()] = edge
-                else:
+                elif limit is None or fetched < limit:
                     node = ResourceNode.from_item(item)
                     nodes[node.resource_id] = node
-
-                fetched += 1
-                if limit is not None and fetched >= limit:
-                    break
-
-            if limit is not None and fetched >= limit:
-                break
+                    fetched += 1  # the limit is a node budget; the edges between the kept nodes all come along
 
             exclusive_key = response.get("LastEvaluatedKey")
             if not exclusive_key:
                 break
 
-        return {"nodes": list(nodes.values()), "edges": list(edges.values())}
+        kept = [e for e in edges.values() if limit is None or (e.from_resource_id in nodes and e.to_resource_id in nodes)]
+        return {"nodes": list(nodes.values()), "edges": kept}
 
     def replace_scope(
         self,

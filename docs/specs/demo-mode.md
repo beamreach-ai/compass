@@ -775,6 +775,14 @@ one of the three model-backed things in the product.
 What the code showed that the text above assumed otherwise; `docs/demo.md` is
 the reference for what shipped.
 
+- **The world is denser than the rules make it.** 2,500 resources gave 4,025
+  nodes and 6,555 edges; with the real account beside it the map was over the
+  dashboard's 4,000-item limit and, the store spending the budget on nodes
+  first, showed no edge at all. `fetch_graph(limit)` is a node budget now, the
+  dashboard asks for 10,000 nodes in demo mode, and `demo.world.edges`
+  (default 20,000) densifies the world with more of the same kinds of edge.
+  A seeder seam (`compass_core.demo.register_seeder`) lets the product derive
+  its FinOps findings from the world on every seed.
 - **The synthetic world is told apart by scope, not source.** Coverage, the
   suggestions, the IaC tab and the mapper's own annotation all filter on
   `source == "aws_scan"`; a `demo_world` source would have left the world out of

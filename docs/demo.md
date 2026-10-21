@@ -37,17 +37,31 @@ a default (`compass_core/demo.py`):
 ## The world: `compass demo seed`
 
 ```sh
-compass demo seed                      # demo.world.resources and demo.world.seed
-compass demo seed resources=2500 seed=7
+compass demo seed                      # demo.world.resources, .seed and .edges
+compass demo seed resources=2500 seed=7 edges=20000
 ```
 
 The synthetic account is the benchmark's world (`infra_map/synthetic.py`,
 [docs/benchmark.md](benchmark.md)): the mix of resource types a real account
 has, four regions, a few roles and security groups carrying most of the edges,
 repositories, root modules and state files covering 60% of the resources, 3%
-of those drifted. At 10,000 resources it is about 16,000 nodes and 26,000
-edges; the demo runs 2,500 until the map draws more than 4,000 items at once.
+of those drifted. The rules alone give about 2.6 edges per resource (10,000
+resources: about 16,000 nodes and 26,000 edges); `edges` asks for at least that
+many, and the generator adds more of the same kinds, the compute talking to
+more queues, tables, buckets and secrets, behind more security groups, watched
+by more alarms, until the count is reached (`0`: the rules alone). The demo
+runs 2,500 resources with 20,000 edges: about 4,000 nodes, five edges each.
 Deterministic from the seed.
+
+The map route's `limit` is a node budget; the edges between the kept nodes all
+come along. In demo mode the dashboard asks for 10,000 nodes (the world plus
+the real account), elsewhere 4,000.
+
+A larger deployment derives more from the world: `compass_core.demo.register_seeder(name, fn)`
+registers `fn(config, workspace_id, world)`, run after the map is written, on
+every seed and so on every reset (the product seeds its FinOps findings this
+way; they are marked `source: demo-world`). The open edition registers none;
+the seed's result lists each seeder's answer under `seeded`.
 
 `seed` writes it to the map as one scan under the scope `demo:seed:<seed>`,
 with the target's account id on every resource, `synthetic: true` in every

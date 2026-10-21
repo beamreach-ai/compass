@@ -182,6 +182,23 @@ def test_the_summary_counts_nodes_by_type_region_and_source_and_edges_by_type(st
     assert store.fetch_graph(ORG, limit=10)["nodes"] or store.fetch_graph(ORG, limit=10)["edges"]
 
 
+def test_the_limit_is_a_node_budget_and_the_edges_between_the_kept_nodes_come_along(store):
+    """A map just under the dashboard's limit used to come back with every node and no edge:
+    the budget was spent on nodes first. The limit caps nodes; the edges are those whose both
+    ends were kept, all of them."""
+    world = generate(WorldSpec(resources=80, regions=2, org_id=ORG, seed=5))
+    _write(store, world.nodes, world.edges)
+    whole = store.fetch_graph(ORG)
+    assert len(whole["nodes"]) == world.node_count and len(whole["edges"]) == world.edge_count
+    limit = world.node_count - 1
+    cut = store.fetch_graph(ORG, limit=limit)
+    kept = {n.resource_id for n in cut["nodes"]}
+    assert len(kept) == limit
+    expected = [e for e in whole["edges"] if e.from_resource_id in kept and e.to_resource_id in kept]
+    assert len(cut["edges"]) == len(expected) > 0
+    assert all(e.from_resource_id in kept and e.to_resource_id in kept for e in cut["edges"])
+
+
 def test_history_is_either_there_or_said_not_to_be(store):
     _write(store, [_node("a")], [])
     scans = store.list_scans(ORG)

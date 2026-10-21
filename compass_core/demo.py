@@ -17,7 +17,7 @@ from __future__ import annotations
 import logging
 import os
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from compass_core.aws import resolve_target_account_id
 from compass_core.events import current_job_id
@@ -32,7 +32,7 @@ logger = logging.getLogger("compass.demo")
 REPO_OWNER = "acme-demo"
 
 DEFAULTS: Dict[str, Any] = {
-    "world": {"resources": 10_000, "seed": 7},
+    "world": {"resources": 10_000, "seed": 7, "edges": 20_000},  # edges: at least this many; the rules alone give about 2.6 per resource
     "trippable": [],
     "cooldown_seconds": 300,
     "trips_per_visitor_per_hour": 3,
@@ -77,8 +77,11 @@ def seed(payload: Dict[str, Any]) -> Dict[str, Any]:
     world_settings = settings(config)["world"]
     resources = int(payload.get("resources") or world_settings["resources"])
     seed_number = int(payload.get("seed") if payload.get("seed") is not None else world_settings["seed"])
+    edges = int(payload.get("edges") if payload.get("edges") is not None else world_settings.get("edges") or 0)
     if resources < 1:
         raise ValueError("resources must be at least 1")
+    if edges < 0:
+        raise ValueError("edges must be 0 (the rules alone) or the number of edges wanted")
     account = resolve_target_account_id(config)
     if not account:
         raise ValueError("the target account is not known: run `compass connect` first, or set aws.account_id in the workspace config")
@@ -87,8 +90,8 @@ def seed(payload: Dict[str, Any]) -> Dict[str, Any]:
     scope = synthetic.world_scope(seed_number)
     # the repositories are `acme-demo/...`: a row shares an id with a real one only by its id, and a real
     # repository called acme/infra (the e2e world has one) must not be rewritten as synthetic
-    world = synthetic.generate(synthetic.WorldSpec(resources=resources, seed=seed_number, org_id=org_id, account=account, scope=scope, synthetic=True,
-                                                   repo_owner=REPO_OWNER))
+    world = synthetic.generate(synthetic.WorldSpec(resources=resources, seed=seed_number, edges=edges, org_id=org_id, account=account, scope=scope,
+                                                   synthetic=True, repo_owner=REPO_OWNER))
     store = open_store(config, workspace_id=workspace.workspace_id)
     try:
         # the scan covers the new world's pairs and every synthetic pair already on the map, so a
@@ -105,13 +108,33 @@ def seed(payload: Dict[str, Any]) -> Dict[str, Any]:
     done = scan.scan
     logger.info("seeded the synthetic world %s: %d nodes, %d edges (added %d, changed %d, removed %d)",
                 scope, world.node_count, world.edge_count, done.added, done.changed, done.removed)
+    seeded: Dict[str, Any] = {}
+    for name, seeder in _seeders.items():
+        seeded[name] = seeder(config, workspace.workspace_id, world)
+        logger.info("seeded %s: %s", name, seeded[name])
     return {
         "workspace_id": workspace.workspace_id, "org_id": org_id, "scope": scope, "resources": resources, "seed": seed_number,
         "nodes": world.node_count, "edges": world.edge_count,
         "scan": {"status": done.status, "added": done.added, "changed": done.changed, "removed": done.removed, "job_id": done.job_id},
         "closed_scopes": [{"source": s, "scope": c} for s, c in old if c != scope],
         "map": by_scope(after),
+        "seeded": seeded,
     }
+
+
+# Whatever else a deployment derives from the world (the product seeds its FinOps findings from it)
+# is written after the map, by a seeder registered here: ``fn(config, workspace_id, world) -> result``,
+# idempotent, since the reset seeds again. The open edition registers none.
+Seeder = Callable[[Dict[str, Any], str, synthetic.World], Any]
+_seeders: Dict[str, Seeder] = {}
+
+
+def register_seeder(name: str, seeder: Seeder) -> None:
+    _seeders[name] = seeder
+
+
+def seeders() -> Dict[str, Seeder]:
+    return dict(_seeders)
 
 
 def by_scope(counts: Dict[Tuple[str, str], int]) -> List[Dict[str, Any]]:

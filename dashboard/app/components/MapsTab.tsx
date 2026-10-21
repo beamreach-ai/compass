@@ -1024,7 +1024,9 @@ const MapsTab: React.FC<MapsTabProps> = ({ infraScan = null, mapperJob = null, o
       const response = await axios.get<InfraMapResponse>("/api/maps", {
         params: {
           org_id: orgInput || undefined,
-          limit: 4000,
+          // a node budget (the edges between the kept nodes come along); the demo's world plus the
+          // real account is more than the draw-whole 4,000, and the demo is there to be looked at
+          limit: demo ? 10000 : 4000,
         },
       });
       setMapData(response.data);
@@ -1034,7 +1036,7 @@ const MapsTab: React.FC<MapsTabProps> = ({ infraScan = null, mapperJob = null, o
     } finally {
       setMapLoading(false);
     }
-  }, [orgInput]);
+  }, [orgInput, demo]);
 
   const triggerMapper = useCallback(async () => {
     setMapperError(null);
