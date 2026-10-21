@@ -19,6 +19,7 @@ import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from compass_core import captains as _captains
 from compass_core import config as core_config
 from compass_core import dispatch, sessions
 from compass_core.tables import dynamo_table, tables
@@ -497,10 +498,42 @@ def update(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def demo(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """seed [resources=10000] [seed=7]: the synthetic world on the map. Demo mode only (compass_core.demo)."""
+    """seed [resources=10000] [seed=7] | reset | status: the synthetic world on the map, the demo back to
+    its golden world, what the demo is up to. Demo mode only (compass_core.demo, compass_core.demo_reset).
+    The reset's decoy work and its rescan are the captains' jobs, named here as every follow-up job is."""
     from compass_core import demo as _demo
+    from compass_core import demo_reset as _reset
 
-    return _demo.demo(payload)
+    verb = str(payload.get("verb") or "").strip().lower()
+    if verb == "seed":
+        return _demo.seed(payload)
+    if verb not in ("reset", "status"):
+        raise ValueError("verb must be seed, reset or status: `compass demo seed [resources=10000] [seed=7]`, `compass demo reset`, `compass demo status`")
+    workspace = resolve(payload)
+    config = dict(workspace.config)
+    config.setdefault("workspace_id", workspace.workspace_id)
+    if verb == "status":
+        return _reset.status(config, workspace_id=workspace.workspace_id)
+    ids = {"workspace_id": workspace.workspace_id, "org_id": config.get("org_id") or workspace.org_id, "user_id": payload.get("user_id")}
+
+    def decoys() -> Dict[str, Any]:
+        _captains.load_commands("honeypot")  # the CLI loads only the invoked captain's commands
+        return dispatch.dispatch("honeypot", "demo_reset", dict(ids))
+
+    def rescan() -> Optional[str]:
+        from compass_core.jobs import store_for
+        from compass_core.queue import StoreQueue
+
+        store = store_for(config)
+        if store is None:
+            return None
+        return StoreQueue(store).enqueue(captain="mapper", command="run", payload={**ids, "mode": "full"}).get("job_id")
+
+    def notify(line: str) -> None:
+        _captains.load_commands("honeypot")
+        dispatch.dispatch("honeypot", "notify_line", {**ids, "text": line})
+
+    return _reset.reset(config, workspace_id=workspace.workspace_id, decoys=decoys, rescan=rescan, notify=notify)
 
 
 COMMANDS = {

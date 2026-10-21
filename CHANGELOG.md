@@ -41,6 +41,14 @@ demo.beamreach.ai does, a synthetic account on the map beside a real one.
   about the world (`GET /api/demo/tour`, per visitor), opened on the first
   visit and resumable from a pill; `?q=` fills the map's and the IaC tab's
   search, `?token=` opens a decoy's detail, `?incident=` an incident.
+- `compass demo reset` brings the golden world back: incidents closed, key
+  deactivations rolled back, the pre-armed decoys armed again, the visitors'
+  pull requests closed and their decoys and grants retired without a pull
+  request, the seeded reviewed pull request recreated, old jobs pruned, the
+  trips and tours cleared, the world seeded again and a rescan started, with
+  a row of counts and one line to Slack. `compass demo status` prints the
+  last reset, the next one, the trips in force, the open visitor pull
+  requests and this week's tour completions.
 
 ## 0.7.0 — unreleased
 

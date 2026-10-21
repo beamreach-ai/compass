@@ -125,7 +125,7 @@ def demo(payload: Dict[str, Any]) -> Dict[str, Any]:
     verb = str(payload.get("verb") or "").strip().lower()
     if verb == "seed":
         return seed(payload)
-    raise ValueError("verb must be seed: `compass demo seed [resources=10000] [seed=7]`")
+    raise ValueError("verb must be seed here: `compass demo seed [resources=10000] [seed=7]`; reset and status are compass_core.demo_reset")
 
 
 # ── Trip it: one real use of a pre-armed decoy, paced ────────────────────────

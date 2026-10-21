@@ -33,7 +33,7 @@ VERB_COMMANDS = {
     "update": ("check", "apply", "rollback"),
     "connect": ("template", "verify", "rotate"),
     "access": ("list", "accept", "decline", "remove", "verify", "audit", "pr"),
-    "demo": ("seed",),
+    "demo": ("seed", "reset", "status"),
 }
 
 

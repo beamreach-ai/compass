@@ -164,6 +164,43 @@ one call to action. The open edition has one login and no user id, so there
 every visitor is the same one; the product's Cognito id makes the tour per
 visitor.
 
+## Reset and status
+
+`compass demo reset` brings the golden world back, idempotent, in this order,
+each step counted in the result and in the row `DEMO#RESET#<ts>` it writes:
+
+1. **The decoys** (the honeypot captain's command `demo_reset`): every open
+   incident closed with `resolution: demo reset`; every verified
+   `iam_deactivate_key` not yet rolled back rolled back through the act role
+   under its grant; the pre-armed decoys armed again; the ECS service their
+   placement names waited for until it runs what it wants (five minutes at
+   most). What `demo/replay/run.sh reset` did by hand.
+2. **The visitors' pull requests**: every open pull request Compass opened on
+   `demo.visitor_repo` closed on GitHub, its branch deleted, its record marked
+   closed (`demo reset`), the decoy it planted retired in place
+   (`decommissioned`, no decommission pull request) and the grants whose pull
+   request it was disarmed with no revoke pull request.
+3. **The seeded pull request** recreated: one fixed file change
+   (`demo.seeded_pr.path`, default `services/payments/variables.tf`) on the
+   branch `beamreach/demo/payments-variables`, labelled `demo`, and one review
+   requesting changes from the bot account (`demo.seeded_pr.reviewer_token`;
+   Compass's own token without one), registered so the PR watcher lists it
+   under Needs you.
+4. **Jobs** older than `demo.reset.prune_jobs_days` (7) pruned; every
+   `DEMO#COOLDOWN#`, `DEMO#VISITOR#` and `DEMO#TOUR#` row cleared.
+5. **The world** seeded again (a no-op scan when unchanged) and a real rescan
+   started (the mapper's job).
+6. One line with the counts to every Slack endpoint the workspace has.
+
+The deployment schedules it (`demo.reset.schedule`, `cron(0 3 ? * SUN *)`,
+EventBridge Scheduler → ECS RunTask of the worker image with `compass demo
+reset`); it runs by hand any time. A second run right after changes nothing
+but the seeded pull request, which it closes and recreates.
+
+`compass demo status` prints the last reset (its counts), the next one from
+the schedule, the trips in force, the visitors' open pull requests and the
+tours that reached the end this week.
+
 ## The API
 
 `GET /api/demo` (read scope) is what the dashboard asks: the mode, the world

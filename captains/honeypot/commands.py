@@ -315,6 +315,40 @@ def trip(payload: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
+def demo_reset(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Demo mode: close every open incident, roll back every key deactivation, arm the pre-armed
+    decoys again, wait for the replay service's steady state. `compass demo reset` runs it first."""
+    from captains.honeypot.demo_reset import demo_reset as run
+
+    return run(payload)
+
+
+def notify_line(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """One line to every Slack endpoint the workspace has (the demo's reset summary); returns how many."""
+    from boto3.dynamodb.conditions import Key
+
+    from captains.honeypot import alert_dispatcher
+    from compass_core.keys import notification_endpoint_prefix, workspace_pk
+    from compass_core.tables import dynamo_table, tables
+
+    workspace = resolve(payload)
+    config = captain_config(payload, workspace)
+    table = dynamo_table(tables(config).items)
+    pk = workspace_pk(workspace.workspace_id)
+    text = str(payload.get("text") or "").strip()
+    if not text:
+        raise ValueError("text is required")
+    sent = 0
+    rows = table.query(KeyConditionExpression=Key("pk").eq(pk) & Key("sk").begins_with(notification_endpoint_prefix())).get("Items", [])
+    for row in rows:
+        endpoint = alert_dispatcher.resolve_endpoint({k: v for k, v in row.items() if k not in ("pk", "sk")}, config)
+        if endpoint.get("type") != "slack":
+            continue
+        alert_dispatcher._send(endpoint, subject=text, text_body=text, html_body=None, severity="low")
+        sent += 1
+    return {"sent": sent, "text": text}
+
+
 COMMANDS = {
     "create": create,
     "incidents": incidents,
@@ -322,6 +356,8 @@ COMMANDS = {
     "action_set": action_set,
     "arm": arm,
     "trip": trip,
+    "demo_reset": demo_reset,
+    "notify_line": notify_line,
     "fire": fire,
     "plant": plant,
     "decommission": decommission,

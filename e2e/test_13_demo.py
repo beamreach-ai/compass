@@ -138,7 +138,7 @@ def test_demo_3_a_visitor_trips_a_pre_armed_decoy_and_it_re_arms_after_the_respo
     armed = stack.api.post(f"/api/honeypots/tokens/{planted['id']}/arm", json={"secret_access_key": planted["secret"]})
     assert armed.status_code == 200, armed.text
     _action(stack, "autopilot")
-    _write_demo_block(stack, trippable=[planted["id"]], cooldown_seconds=60, trips_per_visitor_per_hour=3)
+    _write_demo_block(stack, trippable=[planted["id"]], cooldown_seconds=300, trips_per_visitor_per_hour=3)
     stack.env(COMPASS_DEMO_REARM="5")
     stack.restart("api", "compass")
     try:
@@ -149,7 +149,7 @@ def test_demo_3_a_visitor_trips_a_pre_armed_decoy_and_it_re_arms_after_the_respo
         tripped = stack.api.post(f"/api/honeypots/tokens/{planted['id']}/trip", headers=_visitor(stack, "visitor-a"))
         assert tripped.status_code == 200, tripped.text
         first = tripped.json()
-        assert first["state"] == "tripped" and first["by"] == "you" and first["job_id"] and 50 <= first["seconds_left"] <= 60
+        assert first["state"] == "tripped" and first["by"] == "you" and first["job_id"] and 290 <= first["seconds_left"] <= 300
         stack.records["demo_decoy"] = {**planted, "key": key}
 
         # the second visitor, in the cooldown, is told and gets no second fire
@@ -275,7 +275,7 @@ def test_demo_4_the_tour_walks_from_the_map_to_the_install_page(stack, page, pho
         button = page.locator("[data-trip-it]")
         button.wait_for()
         _wait_step(stack, "decoys")
-        deadline = time.time() + 120
+        deadline = time.time() + 330  # DEMO-3's cooldown is five minutes
         while button.is_disabled():
             assert time.time() < deadline, f"Trip it still disabled: {button.inner_text()}"
             time.sleep(3)
@@ -290,9 +290,15 @@ def test_demo_4_the_tour_walks_from_the_map_to_the_install_page(stack, page, pho
                    "principal_arn": f"arn:aws:iam::{fixture.ACCOUNT}:user/service/{decoy['user']}", "source_ip": "203.0.113.43",
                    "user_agent": "Boto3/1.39 compass-demo-trip", "error_code": "", "vpc_endpoint_id": "", "service": "sts"}
         stack.aws_client("sqs").send_message(QueueUrl=f"{stack.moto_url}/{fixture.ACCOUNT}/compass-decoy-alerts-local", MessageBody=json.dumps(message))
-        tour = _wait_step(stack, "trip", timeout=180)
-        incident_id = {s["id"]: s for s in tour["steps"]}["trip"]["detail"]["incident_id"]
-        assert incident_id and {s["id"]: s for s in tour["steps"]}["trip"]["detail"]["by"] == "you"
+        # the step was done already (DEMO-3 showed this visitor a trip in force); now it is their own trip
+        deadline = time.time() + 180
+        while True:
+            trip_step = {s["id"]: s for s in _tour(stack)["steps"]}["trip"]
+            if trip_step["done"] and trip_step["detail"].get("by") == "you" and trip_step["detail"].get("incident_id"):
+                break
+            assert time.time() < deadline, trip_step
+            time.sleep(3)
+        incident_id = trip_step["detail"]["incident_id"]
 
         # the response verifies on its own: step 6; the step's link is the incident
         tour = _wait_step(stack, "response", timeout=240)
@@ -331,6 +337,66 @@ def test_demo_4_the_tour_walks_from_the_map_to_the_install_page(stack, page, pho
         _action(stack, "off")
         _write_demo_block(stack, trippable=[])
         stack.env(COMPASS_DEMO_REARM=None)
+        stack.restart("api", "compass")
+
+
+def test_demo_5_the_reset_brings_the_golden_world_back_and_status_reads_it(stack, page, mapped, demo_mode):
+    """Builds on DEMO-3 and DEMO-4: their incidents, trips and tour are what the reset clears. The
+    visitor's pull request is the decoy DEMO-3 planted; the seeded pull request is new."""
+    from e2e.test_06_decoys import incidents
+
+    decoy = stack.records.get("demo_decoy")
+    assert decoy, "DEMO-3 planted the decoy whose pull request the reset closes"
+    # the block names the world DEMO-1 and DEMO-4 seeded, so the reset's seed is a no-op scan
+    _write_demo_block(stack, trippable=[decoy["id"]], visitor_repo=fixture.REPO, seeded_pr={"reviewer": "demo-reviewer"}, world={"resources": 1000, "seed": 7})
+    stack.restart("api", "compass")
+    try:
+        assert any(not i.get("closed_at") for i in incidents(stack)), "DEMO-3 and DEMO-4 left open incidents"
+        owner, name = fixture.REPO.split("/")
+
+        result = stack.cli("demo", "reset", timeout=900)
+        assert result["decoys"]["incidents_closed"] >= 1 and result["decoys"]["rearmed"] == [decoy["id"]], result["decoys"]
+        assert result["pull_requests"]["closed"] >= 1 and result["pull_requests"]["failed"] == [], result["pull_requests"]
+        assert result["seeded_pr"]["number"] and result["world"]["unchanged"] is True and result["rescan_job_id"], result
+        assert result["rows_cleared"] >= 2 and "Demo reset:" in result["summary"]
+
+        assert all(i.get("closed_at") for i in incidents(stack)), "every incident closed"
+        closed = [i for i in incidents(stack) if i.get("resolution") == "demo reset"]
+        assert closed, "closed by the reset, not by a person"
+        after = {p["number"]: p for p in stack.repo()["pulls"]}
+        planted = after[decoy["pull"]["number"]]
+        assert planted["state"] in ("closed", "merged"), planted["state"]
+        gone = stack.fakes.get(f"/github/repos/{owner}/{name}/git/ref/heads/{planted['head']}", headers={"Authorization": "token x"})
+        assert gone.status_code == 404, "the visitor's branch is deleted"
+        seeded = after[result["seeded_pr"]["number"]]
+        labels = [label["name"] if isinstance(label, dict) else label for label in seeded.get("labels", [])]
+        assert seeded["state"] == "open" and "demo" in labels and seeded["head"] == "beamreach/demo/payments-variables", seeded
+        reviews = stack.fakes.get(f"/github/repos/{owner}/{name}/pulls/{seeded['number']}/reviews", headers={"Authorization": "token x"}).json()
+        assert reviews and reviews[0]["state"] == "CHANGES_REQUESTED"
+        assert stack.api.get("/api/demo").json()["cooldowns"] == [] and stack.api.get("/api/demo/tour").json()["completed"] == 0
+        assert stack.api.get(f"/api/honeypots/tokens/{decoy['id']}").json()["status"] == "armed"
+        job = stack.wait_job(result["rescan_job_id"], timeout=900)
+        assert job["status"] == "completed", job
+        assert len(_synthetic(_graph(stack))) > 500, "the world is still there after the rescan"
+
+        # the PR watcher syncs the seeded pull request: the reviewer's request lands under Needs you
+        stack.api.post("/api/prs/sync").raise_for_status()
+        deadline = time.time() + 120
+        while True:
+            record = stack.api.get(f"/api/prs/{owner}/{name}/{seeded['number']}").json()
+            if record.get("pending_revision") or (record.get("watch") or {}).get("status") == "needs_human":
+                break
+            assert time.time() < deadline, record
+            time.sleep(3)
+        page.open("/workspace?tab=prs&view=needs_you")
+        page.get_by_text(f"#{seeded['number']}", exact=False).first.wait_for()
+
+        shown = stack.cli("demo", "status")
+        assert shown["last_reset"]["reset_at"] == result["started_at"] and shown["next_reset"].endswith("03:00:00+00:00")
+        assert shown["cooldowns_in_force"] == [] and shown["tour_completions_this_week"] == 0
+        assert all(p["number"] != seeded["number"] for p in shown["visitor_prs_open"]), "the seeded pull request is not a visitor's"
+    finally:
+        _write_demo_block(stack, trippable=[], visitor_repo="", seeded_pr={})
         stack.restart("api", "compass")
 
 
