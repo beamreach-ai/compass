@@ -15,7 +15,7 @@ from moto import mock_aws
 
 from infra_map.graph_store import BadCursor, EdgeQuery, NodeQuery
 from infra_map.models import RelationshipEdge, ResourceNode
-from tests.benchmark.world import WorldSpec, generate
+from infra_map.synthetic import WorldSpec, generate
 
 ORG = "acme"
 OBSERVED = datetime(2026, 1, 1, tzinfo=timezone.utc)

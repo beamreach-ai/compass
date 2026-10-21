@@ -298,6 +298,14 @@ def invalidate_bootstrap_sections(workspace_id: Optional[str] = None) -> None:
             _bootstrap_sections_cache.pop(str(workspace_id), None)
 
 
+def _demo_public(config: Dict[str, Any]) -> Dict[str, Any]:
+    from compass_core import demo
+
+    settings = demo.settings(config)
+    return {"links": settings["links"], "pinned_settings": settings["pinned_settings"], "world": settings["world"],
+            "cooldown_seconds": settings["cooldown_seconds"]}
+
+
 @router.get("/api/settings/bootstrap")
 def get_settings_bootstrap(request: Request) -> Dict[str, Any]:
     from compass_api.routes.auth import _auth_enabled
@@ -312,7 +320,8 @@ def get_settings_bootstrap(request: Request) -> Dict[str, Any]:
             "org_id": ctx.org_id,
             "user_id": ctx.user_id,
         },
-        "app": {**app, "auth_enabled": _auth_enabled()},
+        # in demo mode the dashboard marks itself and links the install page (docs/demo.md)
+        "app": {**app, "auth_enabled": _auth_enabled(), **({"demo": _demo_public(config)} if app["mode"] == "demo" else {})},
         "core_version": _captains.core_version(),
         # is a release out (cached; one fetch every few hours), for the banner and the Compass card
         "update": _updates.check(config=config).to_dict(),

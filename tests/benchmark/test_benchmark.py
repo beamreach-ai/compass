@@ -6,9 +6,9 @@ from __future__ import annotations
 
 import pytest
 
+from infra_map.synthetic import WorldSpec, churn, generate
 from tests.benchmark.harness import measure
 from tests.benchmark.run import failures, table
-from tests.benchmark.world import WorldSpec, churn, generate
 
 pytestmark = pytest.mark.benchmark
 

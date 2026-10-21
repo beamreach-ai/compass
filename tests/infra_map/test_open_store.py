@@ -55,7 +55,7 @@ def test_threads_share_one_store_per_file_and_closing_it_closes_nothing(tmp_path
 def test_mapper_backup_copies_the_file_while_it_is_open(tmp_path, monkeypatch):
     from captains.mapper import commands
     from compass_core.workspace import Workspace
-    from tests.benchmark.world import WorldSpec, generate
+    from infra_map.synthetic import WorldSpec, generate
 
     config = {"map": {"store": "sqlite"}, "org_id": "acme", "workspace_id": "ws"}
     world = generate(WorldSpec(resources=30, regions=1, org_id="acme"))

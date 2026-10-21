@@ -496,11 +496,18 @@ def update(payload: Dict[str, Any]) -> Dict[str, Any]:
     raise ValueError("verb must be check, apply or rollback: `compass update check`")
 
 
+def demo(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """seed [resources=10000] [seed=7]: the synthetic world on the map. Demo mode only (compass_core.demo)."""
+    from compass_core import demo as _demo
+
+    return _demo.demo(payload)
+
+
 COMMANDS = {
     "init_config": init_config, "init_tables": init_tables, "serve": serve, "api": api, "login": login,
     "captains": captains, "enable": enable, "disable": disable, "configure": configure, "catalog": catalog,
     "install": install, "uninstall": uninstall, "validate": validate, "migrate": migrate, "update": update,
-    "connect": connect, "access": access,
+    "connect": connect, "access": access, "demo": demo,
 }
 
 dispatch.register("core", COMMANDS)

@@ -17,7 +17,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from moto import mock_aws
 
-from tests.benchmark.world import WorldSpec, generate
+from infra_map.synthetic import WorldSpec, generate
 
 ORG = "acme"
 WORKSPACE = "ws-1"

@@ -14,9 +14,9 @@ import sys
 import time
 from typing import Any, Dict, List
 
+from infra_map.synthetic import WorldSpec, churn, describe, generate
 from tests.benchmark.budgets import BUDGETS, ENFORCED, REPORTED_ONLY, SCALES, budget
 from tests.benchmark.harness import measure, resolve_adapter
-from tests.benchmark.world import WorldSpec, churn, describe, generate
 
 
 def fmt(metric: str, value: Any) -> str:

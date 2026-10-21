@@ -11,6 +11,7 @@ from infra_map.facts import FactBatch
 from infra_map.graph_store import GraphStore, open_store
 from infra_map.materializer import InfraMapMaterializer
 from infra_map.models import RelationshipEdge, ResourceNode
+from infra_map.synthetic import is_synthetic_scope
 
 from .coverage_drift import annotate_coverage, annotate_drift
 from .github_mapper import GitHubGraphCollector
@@ -50,6 +51,18 @@ def _parse_tf_state_file_id(resource_id: str) -> Optional[Dict[str, str]]:
     if not separator or not bucket or not key:
         return None
     return {"bucket": bucket, "key": key}
+
+
+def scan_scopes(store: GraphStore, org_id: str, nodes: Sequence[ResourceNode], edges: Sequence[RelationshipEdge]) -> Optional[List[Tuple[str, str]]]:
+    """The ``(source, scope)`` pairs a full scan closes within: every pair it produced and every
+    pair already on the map, except the seeded synthetic world (``infra_map.synthetic``), which
+    no scan produces and none may close. A store without ``scopes`` gets the whole org, as before."""
+    pairs = {(n.source or "", n.scope or "") for n in nodes} | {(e.source or "", e.scope or "") for e in edges}
+    existing = getattr(store, "scopes", None)
+    if existing is None:
+        return None
+    pairs |= {pair for pair in existing(org_id) if not is_synthetic_scope(pair[1])}
+    return sorted(pairs)
 
 
 def extract_task_definition_secret_refs(container_definitions: Optional[List[dict]]) -> List[Tuple[str, str, Optional[str]]]:
@@ -192,8 +205,8 @@ class AWSInfraMapper:
             data={"node_count": len(nodes), "edge_count": len(edges)},
         )
 
-        # a full scan: everything the scan did not produce is stale, whatever its scope
-        with self.store.begin_scan(self.org_id, job_id=current_job_id()) as scan:
+        # a full scan: everything the scan did not produce is stale, within the scopes it covers
+        with self.store.begin_scan(self.org_id, scopes=scan_scopes(self.store, self.org_id, nodes, edges), job_id=current_job_id()) as scan:
             scan.put_nodes(nodes)
             scan.put_edges(edges)
         logger.info("🌐 Infra map write complete: %d nodes, %d edges", len(nodes), len(edges))

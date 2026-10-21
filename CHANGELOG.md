@@ -5,6 +5,23 @@ workflow refuses a tag without one, and reads from it what the dashboard shows
 next to the Update button: the first paragraph is the summary, the bullets under
 `### After the update` are the notes an operator needs after applying it.
 
+## 0.8.0 — unreleased
+
+Demo mode: with `APP_MODE=demo` this image runs a public demo the way
+demo.beamreach.ai does, a synthetic account on the map beside a real one.
+[docs/demo.md](docs/demo.md) says how. The quickstart does not change.
+
+- `compass demo seed [resources=…] [seed=…]` writes the benchmark's synthetic
+  world (`infra_map/synthetic.py`, until now `tests/benchmark/world.py`) to the
+  map as one scan under the scope `demo:seed:<n>`, next to the real account's
+  scan, with `synthetic: true` on every node. The mapper's scans now list the
+  `(source, scope)` pairs they cover (every pair they produced and every pair
+  already on the map, except the seeded world's), so a rescan closes what it no
+  longer sees and leaves the world alone. Seeding the same numbers again changes
+  nothing; other numbers replace the world. Demo mode only.
+- The map store answers `scopes(org_id)`: the `(source, scope)` pairs with
+  current rows and their counts, on SQLite, Postgres and DynamoDB.
+
 ## 0.7.0 — unreleased
 
 Compass only reads your account, through a role it creates once, and writes

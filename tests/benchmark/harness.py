@@ -16,7 +16,7 @@ import sys
 import time
 from typing import Any, Callable, Dict, Optional, Protocol
 
-from tests.benchmark.world import World
+from infra_map.synthetic import World
 
 
 def peak_rss_mb() -> float:

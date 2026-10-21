@@ -66,6 +66,12 @@ instead of deleting it. `map.store` in the workspace config names the store
 overrides it for one process. [docs/specs/map-store.md](specs/map-store.md) is
 the design, [docs/benchmark.md](benchmark.md) the numbers.
 
+**Demo mode** (`APP_MODE=demo`, [docs/demo.md](demo.md)) puts a synthetic
+account on the same map: `compass demo seed` writes the benchmark's world
+(`infra_map/synthetic.py`) as one scan under the scope `demo:seed:<n>`, and the
+mapper's scans list their own scopes, so a real rescan never closes it.
+`compass_core/demo.py` holds the commands and the `demo` config block.
+
 **Everything else** is DynamoDB, one table set per workspace (`init_tables`
 creates them): `items`, `aws_inventory`, `tf_inventory`, `tf_state`,
 `progress`, `jobs`, and `map`, which holds the fact store and, on an install

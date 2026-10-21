@@ -802,7 +802,7 @@ runs, and CI calls with a scale argument. Nothing in it reaches the network;
 DynamoDB is moto (in CI) or DynamoDB-local in Docker (locally, closer to what
 an install runs).
 
-### 10.1 The synthetic world (`tests/benchmark/world.py`)
+### 10.1 The synthetic world (`infra_map/synthetic.py`, until 0.8.0 `tests/benchmark/world.py`)
 
 Deterministic from a seed; parameters `resources`, `regions` (default 4),
 `managed_share` (0.6), `churn` (0.05, for the second scan). The mix per 1000

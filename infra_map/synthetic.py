@@ -11,6 +11,14 @@ sets them. Everything is deterministic from the seed.
 `churn()` is the next day's scan: some resources gone, as many new, a few
 changed. Node and edge ids use the collectors' own helpers, so an ownership
 question walks the same path it walks on a real map.
+
+Two users: the benchmark (tests/benchmark) scales it up and measures the stores;
+demo mode (compass_core.demo) seeds it on a live map beside a real account's scan.
+Rows carry the mapper's own sources (`aws_scan`, `git_scan`, `tf_state`) so the
+coverage and the suggestions treat them as resources; a `WorldSpec.scope` puts the
+whole world under one scope (`demo:seed:<n>` for the demo, `world_scope`) so a
+real scan, which lists its own scopes, never closes it, and `synthetic=True`
+marks every node so the dashboard can say so.
 """
 
 from __future__ import annotations
@@ -18,7 +26,7 @@ from __future__ import annotations
 import random
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 from captains.mapper.infra_map_ids import (
@@ -61,6 +69,18 @@ GLOBAL_TYPES = {"iam_role", "s3_bucket"}
 ENVIRONMENTS = ("prod", "staging", "dev", "shared")
 TEAMS = ("payments", "search", "identity", "data", "platform", "growth", "ops", "ml")
 
+SCOPE_PREFIX = "demo:"
+
+
+def world_scope(seed: int) -> str:
+    """The scope a seeded world lives under: one per seed, so another seed replaces it."""
+    return f"{SCOPE_PREFIX}seed:{int(seed)}"
+
+
+def is_synthetic_scope(scope: Optional[str]) -> bool:
+    """Rows a scan may not close: seeded, never scanned."""
+    return str(scope or "").startswith(SCOPE_PREFIX)
+
 
 @dataclass
 class WorldSpec:
@@ -72,6 +92,9 @@ class WorldSpec:
     org_id: str = "bench"
     account: str = "123456789012"
     generation: int = 0  # bumped by churn() so new ids never collide with old ones
+    scope: Optional[str] = None  # one scope for every row (the demo); None: the scopes a real scan would give them
+    synthetic: bool = False  # mark every node `synthetic: true` (the demo's detail panel says so)
+    repo_owner: str = "acme"  # the GitHub organisation of the synthetic repositories; the demo uses one no real repo has
 
 
 @dataclass
@@ -122,6 +145,14 @@ def _tags(rng: random.Random, name: str) -> Dict[str, str]:
     }
 
 
+def _scope(spec: WorldSpec, default: str) -> str:
+    return spec.scope or default
+
+
+def _attributes(spec: WorldSpec, attributes: Dict[str, object]) -> Dict[str, object]:
+    return {**attributes, "synthetic": True} if spec.synthetic else attributes
+
+
 def _node(spec: WorldSpec, rng: random.Random, ntype: str, region: str, service: str, resource: str, name: str,
           attributes: Dict[str, object], observed: datetime) -> ResourceNode:
     return ResourceNode(
@@ -132,11 +163,18 @@ def _node(spec: WorldSpec, rng: random.Random, ntype: str, region: str, service:
         region=region,
         name=name,
         tags=_tags(rng, name),
-        attributes=attributes,
+        attributes=_attributes(spec, attributes),
         source="aws_scan",
-        scope=spec.account,
+        scope=_scope(spec, "aws:full"),
         last_seen=observed,
     )
+
+
+def _artifact(spec: WorldSpec, resource_id: str, ntype: str, name: str, attributes: Dict[str, object], *, source: str, scope: str,
+              observed: datetime) -> ResourceNode:
+    """An ownership node (repository, root module, state file, state instance), as the GitHub and state collectors write them."""
+    return ResourceNode(org_id=spec.org_id, resource_id=resource_id, type=ntype, account_id="", region="global", name=name,
+                        attributes=_attributes(spec, attributes), node_class="artifact", source=source, scope=_scope(spec, scope), last_seen=observed)
 
 
 def _edge(spec: WorldSpec, src: str, dst: str, rel: str, observed: datetime, *, source: str = "aws_scan",
@@ -149,7 +187,7 @@ def _edge(spec: WorldSpec, src: str, dst: str, rel: str, observed: datetime, *, 
         confidence="high",
         evidence=evidence or [f"{source}:{rel}"],
         source=source,
-        scope=scope or spec.account,
+        scope=_scope(spec, scope or "aws:full"),
         last_seen=observed,
     )
 
@@ -264,13 +302,18 @@ def _dedupe(edges: Iterable[RelationshipEdge]) -> List[RelationshipEdge]:
     return list(seen.values())
 
 
+def _created(rng: random.Random) -> datetime:
+    """When a resource was made: from the seed, not the clock, so the same world seeded twice is unchanged."""
+    return datetime(2024, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=rng.randint(0, 600 * 86400))
+
+
 def _make(spec: WorldSpec, rng: random.Random, ntype: str, region: str, uid: str, name: str, observed: datetime) -> ResourceNode:
     acct = spec.account
     if ntype == "ec2_instance":
         return _node(spec, rng, ntype, region, "ec2", f"instance/i-{uid}", name,
                      {"instanceType": rng.choice(("t3.medium", "m6i.large", "c6g.xlarge", "r6i.2xlarge")), "state": "running",
                       "privateIp": f"10.{rng.randint(0, 255)}.{rng.randint(0, 255)}.{rng.randint(1, 254)}", "imageId": f"ami-{_hex(rng, 17)}",
-                      "subnetId": f"subnet-{_hex(rng, 17)}", "vpcId": f"vpc-{_hex(rng, 17)}", "launchTime": observed.isoformat()}, observed)
+                      "subnetId": f"subnet-{_hex(rng, 17)}", "vpcId": f"vpc-{_hex(rng, 17)}", "launchTime": _created(rng).isoformat()}, observed)
     if ntype == "ec2_network_interface":
         return _node(spec, rng, ntype, region, "ec2", f"network-interface/eni-{uid}", name,
                      {"status": "in-use", "privateIp": f"10.{rng.randint(0, 255)}.{rng.randint(0, 255)}.{rng.randint(1, 254)}", "subnetId": f"subnet-{_hex(rng, 17)}"}, observed)
@@ -280,7 +323,7 @@ def _make(spec: WorldSpec, rng: random.Random, ntype: str, region: str, uid: str
     if ntype == "lambda_function":
         return _node(spec, rng, ntype, region, "lambda", f"function:{name}", name,
                      {"runtime": rng.choice(("python3.12", "nodejs20.x", "java21")), "memorySize": rng.choice((128, 256, 512, 1024)), "timeout": rng.choice((3, 30, 300)),
-                      "handler": "app.handler", "codeSize": rng.randint(1000, 50_000_000), "lastModified": observed.isoformat()}, observed)
+                      "handler": "app.handler", "codeSize": rng.randint(1000, 50_000_000), "lastModified": _created(rng).isoformat()}, observed)
     if ntype == "cloudwatch_log_group":
         return _node(spec, rng, ntype, region, "logs", f"log-group:/aws/lambda/{name}", f"/aws/lambda/{name}",
                      {"retentionInDays": rng.choice((7, 14, 30, 90, None)), "storedBytes": rng.randint(0, 10**10)}, observed)
@@ -290,7 +333,7 @@ def _make(spec: WorldSpec, rng: random.Random, ntype: str, region: str, uid: str
                       "policies": [{"name": "inline-0", "source": "inline", "document": {"Version": "2012-10-17", "Statement": [{"Effect": "Allow", "Action": ["s3:GetObject", "sqs:SendMessage"], "Resource": "*"}]}}]}, observed)
     if ntype == "s3_bucket":
         return _node(spec, rng, ntype, region, "s3", f"{name}-{uid[:6]}", f"{name}-{uid[:6]}",
-                     {"versioning": rng.choice(("Enabled", "Suspended")), "encryption": "AES256", "publicAccessBlocked": True, "creationDate": observed.isoformat()}, observed)
+                     {"versioning": rng.choice(("Enabled", "Suspended")), "encryption": "AES256", "publicAccessBlocked": True, "creationDate": _created(rng).isoformat()}, observed)
     if ntype == "sqs_queue":
         return _node(spec, rng, ntype, region, "sqs", name, name,
                      {"visibilityTimeout": rng.choice((30, 60, 300)), "fifo": False, "queueUrl": f"https://sqs.{region}.amazonaws.com/{acct}/{name}"}, observed)
@@ -336,29 +379,30 @@ def _ownership(spec: WorldSpec, rng: random.Random, world: World, observed: date
     aws_nodes = [n for n in world.nodes if n.source == "aws_scan"]
     n_repos = max(1, spec.resources // 2500)
     n_roots = max(1, spec.resources // 200)
-    repos = [f"acme/infra-{i}" if i else "acme/infra" for i in range(n_repos)]
+    repos = [f"{spec.repo_owner}/infra-{i}" if i else f"{spec.repo_owner}/infra" for i in range(n_repos)]
     roots: List[Tuple[str, str, str]] = []  # (root_id, repo, path)
     for i in range(n_roots):
         repo = repos[i % n_repos]
         path = f"environments/{rng.choice(ENVIRONMENTS)}/{rng.choice(TEAMS)}-{i}"
         roots.append((tf_root_module_node_id(repo, path), repo, path))
 
+    # the sources and scopes are the collectors' own: git_scan per repository and per root module,
+    # tf_state per state file (captains/mapper/infra_map_ids.py)
     for repo in repos:
-        world.nodes.append(ResourceNode(org_id=spec.org_id, resource_id=github_repo_node_id(repo), type="github_repo", account_id="", region="global",
-                                        name=repo, attributes={"default_branch": "main", "full_name": repo}, node_class="artifact",
-                                        source="github", scope=f"repo:{repo}", last_seen=observed))
+        world.nodes.append(_artifact(spec, github_repo_node_id(repo), "github_repo", repo, {"default_branch": "main", "full_name": repo},
+                                     source="git_scan", scope=f"repo:{repo}", observed=observed))
     state_files: List[str] = []
     for root_id, repo, path in roots:
-        world.nodes.append(ResourceNode(org_id=spec.org_id, resource_id=root_id, type="tf_root_module", account_id="", region="global", name=path,
-                                        attributes={"repo": repo, "path": path, "backend": {"bucket": "acme-tfstate", "key": f"{path}/terraform.tfstate"}},
-                                        node_class="artifact", source="github", scope=f"repo:{repo}", last_seen=observed))
-        world.edges.append(_edge(spec, root_id, github_repo_node_id(repo), "part_of", observed, source="github", scope=f"repo:{repo}"))
+        world.nodes.append(_artifact(spec, root_id, "tf_root_module", path,
+                                     {"repo": repo, "path": path, "backend": {"bucket": "acme-tfstate", "key": f"{path}/terraform.tfstate"}},
+                                     source="git_scan", scope=tf_root_scope(root_id), observed=observed))
+        world.edges.append(_edge(spec, root_id, github_repo_node_id(repo), "part_of", observed, source="git_scan", scope=f"repo:{repo}"))
         sf = tf_state_file_node_id("acme-tfstate", f"{path}/terraform.tfstate")
         state_files.append(sf)
-        world.nodes.append(ResourceNode(org_id=spec.org_id, resource_id=sf, type="tf_state_file", account_id="", region="global", name="terraform.tfstate",
-                                        attributes={"bucket": "acme-tfstate", "key": f"{path}/terraform.tfstate", "serial": rng.randint(1, 900)},
-                                        node_class="artifact", source="tfstate", scope=f"state_file:{sf}", last_seen=observed))
-        world.edges.append(_edge(spec, root_id, sf, "writes", observed, source="github", scope=tf_root_scope(root_id)))
+        world.nodes.append(_artifact(spec, sf, "tf_state_file", "terraform.tfstate",
+                                     {"bucket": "acme-tfstate", "key": f"{path}/terraform.tfstate", "serial": rng.randint(1, 900)},
+                                     source="tf_state", scope=f"state_file:{sf}", observed=observed))
+        world.edges.append(_edge(spec, root_id, sf, "writes", observed, source="git_scan", scope=tf_root_scope(root_id)))
 
     managed_count = int(len(aws_nodes) * spec.managed_share)
     managed = rng.sample(aws_nodes, k=managed_count)
@@ -367,11 +411,10 @@ def _ownership(spec: WorldSpec, rng: random.Random, world: World, observed: date
         sf = state_files[i % len(state_files)]
         address = f"module.{node.type}.aws_{node.type}.this"
         inst = tf_state_instance_node_id(sf, address, instance_key=None, aws_resource_id=node.resource_id)
-        world.nodes.append(ResourceNode(org_id=spec.org_id, resource_id=inst, type="tf_state_instance", account_id="", region="global", name=address,
-                                        attributes={"resource_address": address, "aws_resource_id": node.resource_id, "state_file": sf},
-                                        node_class="artifact", source="tfstate", scope=f"state_file:{sf}", last_seen=observed))
-        world.edges.append(_edge(spec, sf, inst, "contains", observed, source="tfstate", scope=f"state_file:{sf}"))
-        world.edges.append(_edge(spec, inst, node.resource_id, "observes", observed, source="tfstate", scope=f"state_file:{sf}"))
+        world.nodes.append(_artifact(spec, inst, "tf_state_instance", address, {"resource_address": address, "aws_resource_id": node.resource_id, "state_file": sf},
+                                     source="tf_state", scope=f"state_file:{sf}", observed=observed))
+        world.edges.append(_edge(spec, sf, inst, "contains", observed, source="tf_state", scope=f"state_file:{sf}"))
+        world.edges.append(_edge(spec, inst, node.resource_id, "observes", observed, source="tf_state", scope=f"state_file:{sf}"))
         node.attributes["coverage_score"] = 1
         if i in drifted:
             node.attributes["drift_status"] = "drifted"

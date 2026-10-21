@@ -58,7 +58,7 @@ parallel, each with its own stack:
 
 | Shard | Files |
 |---|---|
-| A | install, sign-in, shell, settings (`test_00`–`test_03`) |
+| A | install, sign-in, shell, settings, demo mode (`test_00`–`test_03`, `test_13`) |
 | B | captains, the map (`test_04`, `test_05`) |
 | C | decoys, code-as-cloud, pull requests (`test_06`–`test_08`) |
 | D | jobs, updates, release (`test_09`–`test_11`) |
@@ -327,3 +327,12 @@ not here.
 
 The suite cannot run Terraform against moto: "the operator applies" is the test writing the
 policy the module renders into moto, as the apply would.
+
+### 4.14 Demo mode (`test_13_demo.py`)
+
+| ID | Test | Via |
+|---|---|---|
+| DEMO-1 | With `APP_MODE=demo`, `compass demo seed` puts the synthetic world on the map beside the scanned account, a rescan leaves it alone, the same seed again changes nothing; outside demo mode the command refuses | CLI, API |
+
+The stack runs these with `APP_MODE=demo` in `.env` and puts it back afterwards; the
+read-only test (AUT-5) keeps `READ_ONLY=1` as its own thing.

@@ -10,7 +10,7 @@ import uuid
 from typing import Any, Dict, Optional
 
 from infra_map.graph_store import EdgeQuery, GraphStore, NodeQuery
-from tests.benchmark.world import World
+from infra_map.synthetic import World
 
 DRAW_ALL_BELOW = 3000
 

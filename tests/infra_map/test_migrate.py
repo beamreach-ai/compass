@@ -15,7 +15,7 @@ from moto import mock_aws
 from compass_core import migrations
 from infra_map.graph_store import open_store
 from infra_map.migrate import dynamodb_to_store
-from tests.benchmark.world import WorldSpec, generate
+from infra_map.synthetic import WorldSpec, generate
 
 ORG = "acme"
 
