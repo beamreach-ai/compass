@@ -299,7 +299,8 @@ def tour(table: Any, pk: str, config: Dict[str, Any], *, user_id: Optional[str],
     trips = [r for r in cooldowns(table, pk, now_ms=now_ms) if r.get("honeytoken_id") in trippable]
     my_trip = next((r for r in sorted(trips, key=lambda r: -int(r.get("tripped_at") or 0)) if same_visitor(r.get("user_id"), user_id) and r.get("fired_at")), None)
     shown = recorded.get("trip") or {}
-    incident_id = (my_trip or {}).get("incident_id") or shown.get("incident_id")
+    # the visitor's own trip is theirs even before its alert landed: never another visitor's incident in its place
+    incident_id = my_trip.get("incident_id") if my_trip else shown.get("incident_id")
     incident = get_incident(table, pk, str(incident_id)) if incident_id else None
 
     facts: Dict[str, Dict[str, Any]] = {

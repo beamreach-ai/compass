@@ -100,6 +100,19 @@ def test_a_visitor_shown_the_trip_in_force_has_tripped_and_a_second_visitor_star
     assert "trip" in _ids(shown) and "response" in _ids(shown)
     assert shown["steps"][4]["detail"]["by"] == "a visitor" and shown["steps"][5]["detail"]["incident_id"] == "inc-9"
 
+    # the visitor trips on their own: until their alert lands, the step is theirs with no incident yet,
+    # never the other visitor's incident in its place; then it is their own
+    demo.record_trip(table, PK, "tok-1", **{"until": 1})
+    demo.claim_trip(table, PK, "tok-1", user_id="visitor-1", cooldown_seconds=300, now_ms=demo.epoch_ms())
+    demo.record_trip(table, PK, "tok-1", fired_at="2026-10-21T11:00:00Z")
+    mine = client.get("/api/demo/tour").json()
+    assert mine["steps"][4]["done"] and mine["steps"][4]["detail"]["by"] == "you" and mine["steps"][4]["detail"]["incident_id"] is None
+    assert not mine["steps"][5]["done"] and mine["steps"][5]["detail"]["incident_id"] is None
+    demo.record_trip(table, PK, "tok-1", incident_id="inc-10")
+    table.put_item(Item={"pk": PK, "sk": honeypot_incident_sort_key("inc-10"), "incident_id": "inc-10", "status": "open"})
+    own = client.get("/api/demo/tour").json()
+    assert own["steps"][4]["detail"]["incident_id"] == "inc-10" and not own["steps"][5]["done"]
+
     # skip works on each step, and counts towards the end but not as done
     skipped = client.post("/api/demo/tour/map/skip").json()
     assert "map" in _ids(skipped, "skipped") and "map" not in _ids(skipped) and skipped["current"] == "unmanaged"
