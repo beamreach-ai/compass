@@ -10,8 +10,10 @@ from typing import Any, Dict
 from fastapi import APIRouter, HTTPException, Request
 
 from compass_api.routes._infra_map import resolve_infra_map_context
-from compass_api.routes._workspace import get_workspace_config
+from compass_api.routes._workspace import get_actor_ids, get_workspace_config, get_workspace_dynamodb_config
 from compass_core import demo
+from compass_core.keys import workspace_pk
+from compass_core.tables import dynamo_table, tables
 from infra_map import synthetic
 
 router = APIRouter()
@@ -44,4 +46,14 @@ def get_demo(request: Request) -> Dict[str, Any]:
         "pinned_settings": settings["pinned_settings"],
         "cooldown_seconds": settings["cooldown_seconds"],
         "trippable": list(settings["trippable"]),
+        "cooldowns": _cooldowns(request),
     }
+
+
+def _cooldowns(request: Request):
+    """Every trippable decoy's last trip, as the visitor may see it."""
+    actor = get_actor_ids(request)
+    table = dynamo_table(tables(get_workspace_dynamodb_config(request)).items)
+    now = demo.epoch_ms()
+    me = str(actor.get("user_id") or "anonymous")
+    return [demo.public_cooldown(row, me=me, now_ms=now) for row in demo.cooldowns(table, workspace_pk(str(actor.get("workspace_id"))), now_ms=now)]

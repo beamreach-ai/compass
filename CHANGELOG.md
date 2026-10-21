@@ -28,6 +28,15 @@ demo.beamreach.ai does, a synthetic account on the map beside a real one.
   "Fixed in the demo" on the settings the demo pins, and "Synthetic resource
   (demo world)" on a synthetic node's detail. The read-only notice stays its
   own thing (`READ_ONLY`). `APP_MODE` reaches the dashboard from `.env`.
+- Trip it: `POST /api/honeypots/tokens/{id}/trip` (demo mode only) fires one of
+  the pre-armed decoys (`demo.trippable`) for real, as the job `honeypot trip`
+  attributed to the visitor, under a shared cooldown per decoy
+  (`demo.cooldown_seconds`) and a per-visitor limit; a visitor in the cooldown
+  is sent to the incident the trip opened. The core service `demo-rearm` rolls
+  the key deactivation back once the response verified and arms the decoy
+  again. `test-fire` is hidden in demo mode. `honeypot arm` and the arm route
+  take `secret_access_key` and keep it with the token, so Compass can use the
+  key itself.
 
 ## 0.7.0 — unreleased
 

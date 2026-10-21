@@ -226,3 +226,35 @@ def pr_sort_key(repo: str, number: int) -> str:
 
 def pr_prefix() -> str:
     return "PR#"
+
+
+# ── Demo mode (compass_core.demo) ──────────────────────────────────────────
+
+def demo_cooldown_sort_key(honeytoken_id: str) -> str:
+    """One row per trippable decoy: the trip in force, who made it and the incident it opened."""
+    return f"DEMO#COOLDOWN#{honeytoken_id}"
+
+
+def demo_cooldown_prefix() -> str:
+    return "DEMO#COOLDOWN#"
+
+
+def demo_visitor_sort_key(user_id: str) -> str:
+    """A visitor's trips in the last hour (the per-visitor limit)."""
+    return f"DEMO#VISITOR#{user_id}"
+
+
+def demo_tour_sort_key(user_id: str) -> str:
+    return f"DEMO#TOUR#{user_id}"
+
+
+def demo_tour_prefix() -> str:
+    return "DEMO#TOUR#"
+
+
+def demo_reset_sort_key(timestamp_ms: int) -> str:
+    return f"DEMO#RESET#{int(timestamp_ms):013d}"
+
+
+def demo_reset_prefix() -> str:
+    return "DEMO#RESET#"

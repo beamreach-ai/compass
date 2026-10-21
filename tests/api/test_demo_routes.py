@@ -27,6 +27,7 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setattr(demo_routes, "get_workspace_config", lambda request: dict(config))
     monkeypatch.setattr(demo_routes, "resolve_infra_map_context",
                         lambda request: {"store": open_store(config, workspace_id=WORKSPACE), "default_org": ORG, "workspace_id": WORKSPACE})
+    monkeypatch.setattr(demo_routes, "_cooldowns", lambda request: [])  # the trips live in the items table: tests/api/test_demo_trip.py
     app = FastAPI()
     app.include_router(demo_routes.router)
     return TestClient(app), config

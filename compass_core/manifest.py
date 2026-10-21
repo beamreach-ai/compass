@@ -36,6 +36,8 @@ MANIFEST = CaptainManifest(
     services=(
         ServiceSpec(name="grant-verify", start="compass_core.grants:run_service", interval=300, interval_setting="grant_verify"),
         ServiceSpec(name="access-audit", start="compass_core.access_audit:run_service", interval=86400, interval_setting="access_audit"),
+        # demo mode only (it returns at once otherwise): after a tripped decoy's response verified, roll the key back and arm again
+        ServiceSpec(name="demo-rearm", start="compass_core.demo:run_rearm_service", interval=30, interval_setting="demo_rearm"),
     ),
     # the block every install needs: the self-audit reads the two Compass roles and nothing else
     permissions=Permissions(

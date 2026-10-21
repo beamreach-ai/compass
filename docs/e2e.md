@@ -334,6 +334,7 @@ policy the module renders into moto, as the apply would.
 |---|---|---|
 | DEMO-1 | With `APP_MODE=demo`, `compass demo seed` puts the synthetic world on the map beside the scanned account, a rescan leaves it alone, the same seed again changes nothing; outside demo mode the command refuses | CLI, API |
 | DEMO-2 | The demo is marked: the chip beside the account and in the phone's top bar, the title, the watermark over the map, the banner that dismisses for the session, "Run it yourself" to the install page, a synthetic node's detail says so; the exported map page carries the watermark | UI, CLI |
+| DEMO-3 | A visitor trips a pre-armed decoy: the job uses the key, the alert (sent by the test, as CloudTrail would) opens a real incident, a second visitor in the cooldown lands on it, the autopilot deactivates the key and `demo-rearm` rolls it back and arms the decoy again; `test-fire` is 404; the page shows the trip in force and opens the incident | API, UI, moto |
 
 The stack runs these with `APP_MODE=demo` in `.env` and puts it back afterwards; the
 read-only test (AUT-5) keeps `READ_ONLY=1` as its own thing.

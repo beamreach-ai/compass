@@ -15,6 +15,8 @@ from captains.honeypot.classes import normalize_class
 from captains.honeypot.terraform_generator import _cover, stealth_tag
 
 TEST_FIRE_USER_AGENT = "compass-test-fire"
+# a demo visitor's "Trip it": a real use of the key, so ingestion opens an incident (compass_core.demo)
+TRIP_USER_AGENT = "compass-demo-trip"
 RULE_ENABLED_STATE = "ENABLED_WITH_ALL_CLOUDTRAIL_MANAGEMENT_EVENTS"
 NO_TRAIL_DETAIL = (
     "no logging CloudTrail trail in this account; create one "
@@ -221,9 +223,11 @@ def _check_alert_queue(config: Dict[str, Any], region: str) -> Optional[Dict[str
 # ── Test fire ────────────────────────────────────────────────────────────────
 
 def fire_aws_credential(
-    access_key_id: str, secret_access_key: str, region: str, *, client_factory: Optional[Callable[..., Any]] = None
+    access_key_id: str, secret_access_key: str, region: str, *, client_factory: Optional[Callable[..., Any]] = None,
+    user_agent: str = TEST_FIRE_USER_AGENT,
 ) -> None:
-    """One real, read-only call with the honeytoken key, from the Compass side."""
+    """One real, read-only call with the honeytoken key, from the Compass side. The user agent
+    says what the call was: a test (recorded, no incident) or a demo visitor's trip (a real one)."""
     import boto3
     from botocore.config import Config
 
@@ -233,20 +237,20 @@ def fire_aws_credential(
         aws_access_key_id=access_key_id,
         aws_secret_access_key=secret_access_key,
         region_name=region,
-        config=Config(user_agent_extra=TEST_FIRE_USER_AGENT, retries={"max_attempts": 1}),
+        config=Config(user_agent_extra=user_agent, retries={"max_attempts": 1}),
     )
     sts.get_caller_identity()
 
 
-def find_test_alert(table: Any, pk: str, honeytoken_id: str, since_iso: str) -> Optional[Dict[str, Any]]:
-    """The first alert for this token created at/after `since_iso` by the test call."""
+def find_test_alert(table: Any, pk: str, honeytoken_id: str, since_iso: str, *, user_agent: str = TEST_FIRE_USER_AGENT) -> Optional[Dict[str, Any]]:
+    """The first alert for this token created at/after `since_iso` by the call that carried `user_agent`."""
     from boto3.dynamodb.conditions import Key
 
     from compass_core.keys import honeypot_alert_prefix
 
     resp = table.query(KeyConditionExpression=Key("pk").eq(pk) & Key("sk").begins_with(honeypot_alert_prefix(honeytoken_id)))
     for item in resp.get("Items", []):
-        if str(item.get("processed_at") or "") >= since_iso and TEST_FIRE_USER_AGENT in str(item.get("user_agent") or ""):
+        if str(item.get("processed_at") or "") >= since_iso and user_agent in str(item.get("user_agent") or ""):
             return item
     return None
 
@@ -255,10 +259,11 @@ def wait_for_test_alert(
     table: Any, pk: str, honeytoken_id: str, since_iso: str, *,
     timeout_s: float = 30.0, interval_s: float = 1.0,
     sleep: Callable[[float], None] = time.sleep, clock: Callable[[], float] = time.monotonic,
+    user_agent: str = TEST_FIRE_USER_AGENT,
 ) -> Optional[Dict[str, Any]]:
     deadline = clock() + timeout_s
     while True:
-        found = find_test_alert(table, pk, honeytoken_id, since_iso)
+        found = find_test_alert(table, pk, honeytoken_id, since_iso, user_agent=user_agent)
         if found:
             return found
         if clock() >= deadline:

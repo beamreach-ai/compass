@@ -98,6 +98,46 @@ the requester a job recorded on the pull request's origin. The settings the
 demo fixes (`demo.pinned_settings`: the AWS access, GitHub, the demo block,
 the notification endpoints) are read-only with "Fixed in the demo" on them.
 
+## Trip it
+
+The only decoys a visitor fires are the pre-armed ones, `demo.trippable`:
+`aws_credential` decoys whose key Compass holds (`honeypot arm
+honeytoken_id=… secret_access_key=…` stores the secret from the apply output;
+the API's `arm` takes it in the body). `POST /api/honeypots/tokens/{id}/trip`
+(demo mode only, 404 otherwise; `operate`) refuses with the reason (409) when
+the decoy is not trippable, not `armed`, or has no stored key, and otherwise:
+
+- **Cooldown.** One trip per decoy per `demo.cooldown_seconds` (300), shared
+  by every visitor, kept as the row `DEMO#COOLDOWN#<token>` and claimed with a
+  conditional write, so two visitors pressing at once get one trip. During
+  it the route answers `{"state": "cooldown", …}` with the trip's `incident_id`
+  and `seconds_left`, and the dashboard takes the visitor to that incident:
+  "Tripped 2 minutes ago by a visitor; the incident is open". A visitor gets
+  `trips_per_visitor_per_hour` (3); past it, 429.
+- **The fire** is the job `honeypot trip`, attributed to the visitor (the
+  job's requester, so the act sessions it causes carry the id): one STS call
+  with the stored key, under a user agent that marks it a trip and not a
+  test, then the wait for CloudTrail (one to five minutes) and the alert that
+  opens the incident. The job's events and the cooldown row carry `fired_at`,
+  `alert_received_at` and `incident_id`; `GET /api/demo` lists every decoy's
+  last trip as `cooldowns` (never the visitor's identity, only "you" or "a
+  visitor").
+- **Then the real path**: the queue, the consumer, the incident, the
+  investigation, the gate, the response (`ecs_restart_task`,
+  `iam_deactivate_key` on autopilot).
+- **Re-arm.** The core service `demo-rearm` (every 30 s, `COMPASS_DEMO_REARM`;
+  it does nothing outside demo mode) finds the trips whose incident has
+  `action_verified_at`, rolls back each `iam_deactivate_key` audit not yet
+  rolled back through the act role under its grant (the same rollback the
+  incident page offers), and runs `arm` for the decoy. The incident stays open
+  for the next visitor to read; a failed re-arm is logged and written on the
+  row as `rearm_error`, and the next tick tries again.
+
+`test-fire` answers 404 in demo mode: it would be a second button for the
+same story. The token card shows "Trip it", the countdown while a trip is in
+force, and the link to the incident; `?incident=<id>` on the Honeypots tab
+opens one.
+
 ## The API
 
 `GET /api/demo` (read scope) is what the dashboard asks: the mode, the world

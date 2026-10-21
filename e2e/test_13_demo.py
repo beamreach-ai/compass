@@ -3,6 +3,8 @@ through the CLI beside the scanned account, a rescan that leaves it alone."""
 
 from __future__ import annotations
 
+import json
+import time
 from pathlib import Path
 from typing import Any, Dict
 
@@ -108,6 +110,105 @@ def test_demo_2_the_demo_is_marked_on_every_screen_and_in_the_exported_map(stack
     assert exported["nodes"] > 0
     html = stack.read("map/demo-export.html") or ""
     assert 'id="wm"' in html and "Synthetic resource (demo world)" in html
+
+
+def _write_demo_block(stack, **block: Any) -> None:
+    """The `demo` block in the install's config file (config/local.json), as the operator would set it."""
+    config = json.loads(stack.read("config/local.json") or "{}")
+    config["demo"] = {**(config.get("demo") or {}), **block}
+    stack.write("config/local.json", json.dumps(config, indent=2) + "\n")
+
+
+def _visitor(stack, user_id: str) -> Dict[str, str]:
+    return {"X-User-Id": user_id}
+
+
+def test_demo_3_a_visitor_trips_a_pre_armed_decoy_and_it_re_arms_after_the_response(stack, page, mapped, demo_mode):
+    """Trip it through the fake alert path: the trip job's STS call hits moto, the test puts the
+    alert on the queue as CloudTrail would, the autopilot deactivates the key, the demo-rearm
+    service rolls it back and arms the decoy again; a second visitor meanwhile lands on the incident."""
+    from e2e.test_06_decoys import _action, apply_aws_credential, ensure_trail, incidents, plant
+
+    # a pre-armed decoy with its secret stored, an autopilot response, the decoy trippable; the re-arm ticks fast
+    planted = plant(stack, "aws_credential", "e2e-demo-trip")
+    key = apply_aws_credential(stack, planted)
+    ensure_trail(stack)
+    owner, repo = fixture.REPO.split("/")
+    stack.fakes.post(f"/_control/repos/{owner}/{repo}/pulls/{planted['pull']['number']}/merge").raise_for_status()
+    armed = stack.api.post(f"/api/honeypots/tokens/{planted['id']}/arm", json={"secret_access_key": planted["secret"]})
+    assert armed.status_code == 200, armed.text
+    _action(stack, "autopilot")
+    _write_demo_block(stack, trippable=[planted["id"]], cooldown_seconds=300, trips_per_visitor_per_hour=3)
+    stack.env(COMPASS_DEMO_REARM="5")
+    stack.restart("api", "compass")
+    try:
+        assert stack.api.post(f"/api/honeypots/tokens/{planted['id']}/test-fire").status_code == 404, "test-fire is not part of the demo"
+        before = stack.api.get("/api/demo").json()
+        assert planted["id"] in before["trippable"] and before["cooldowns"] == []
+
+        tripped = stack.api.post(f"/api/honeypots/tokens/{planted['id']}/trip", headers=_visitor(stack, "visitor-a"))
+        assert tripped.status_code == 200, tripped.text
+        first = tripped.json()
+        assert first["state"] == "tripped" and first["by"] == "you" and first["job_id"] and 290 <= first["seconds_left"] <= 300
+
+        # the second visitor, in the cooldown, is told and gets no second fire
+        again = stack.api.post(f"/api/honeypots/tokens/{planted['id']}/trip", headers=_visitor(stack, "visitor-b")).json()
+        assert again["state"] == "cooldown" and again["by"] == "a visitor" and again["job_id"] == first["job_id"]
+
+        # the job used the key (one STS call against moto) and now waits for CloudTrail; the test is CloudTrail
+        deadline = time.time() + 120
+        while not (stack.api.get("/api/demo").json()["cooldowns"] or [{}])[0].get("fired_at"):
+            assert time.time() < deadline, "the trip job did not fire"
+            time.sleep(2)
+        message = {"token_id": planted["id"], "workspace_id": "local", "event_id": f"e2e-trip-{time.time_ns()}", "event_time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                   "event_name": "GetCallerIdentity", "region": fixture.REGION, "access_key_id": key,
+                   "principal_arn": f"arn:aws:iam::{fixture.ACCOUNT}:user/service/{planted['user']}", "source_ip": "203.0.113.42",
+                   "user_agent": "Boto3/1.39 compass-demo-trip", "error_code": "", "vpc_endpoint_id": "", "service": "sts"}
+        stack.aws_client("sqs").send_message(QueueUrl=f"{stack.moto_url}/{fixture.ACCOUNT}/compass-decoy-alerts-local", MessageBody=json.dumps(message))
+
+        job = stack.wait_job(first["job_id"], timeout=180)
+        assert job["status"] == "completed", job
+        result = job["result_summary"]
+        assert result["status"] == "delivered" and result["incident_id"], result
+        incident_id = result["incident_id"]
+        assert any(e["message"].startswith("Using the decoy's key") for e in job["events"]) and any("alert arrived" in e["message"] for e in job["events"])
+        assert incident_id in {i["incident_id"] for i in incidents(stack)}
+        detail = stack.api.get(f"/api/honeypots/incidents/{incident_id}").json()
+        assert not (detail.get("incident") or detail).get("is_test"), "a trip is a real incident"
+        late = stack.api.post(f"/api/honeypots/tokens/{planted['id']}/trip", headers=_visitor(stack, "visitor-c")).json()
+        assert late["state"] == "cooldown" and late["incident_id"] == incident_id, "a late visitor lands on the open incident"
+
+        # the response runs on its own and verifies; then the key is rolled back and the decoy armed again
+        iam = stack.aws_client("iam")
+        deadline = time.time() + 240
+        while True:
+            row = (stack.api.get("/api/demo").json()["cooldowns"] or [{}])[0]
+            if row.get("rearmed_at"):
+                break
+            assert time.time() < deadline, f"not re-armed: {row}"
+            time.sleep(3)
+        assert iam.list_access_keys(UserName=planted["user"])["AccessKeyMetadata"][0]["Status"] == "Active"
+        token = stack.api.get(f"/api/honeypots/tokens/{planted['id']}").json()
+        assert token["status"] == "armed"
+        verified = stack.api.get(f"/api/honeypots/incidents/{incident_id}").json()
+        inc = verified.get("incident") or verified
+        assert inc.get("action_verified_at") and inc.get("status") != "closed", "the incident stays for other visitors to read"
+
+        # on the page: the button shows the trip in force, and the link opens the incident
+        page.open("/workspace?tab=honeypots&view=honeytokens", wait_for="e2e-demo-trip")
+        page.get_by_text("e2e-demo-trip", exact=True).first.click()
+        button = page.locator("[data-trip-it]")
+        button.wait_for()
+        assert "Tripped" in button.inner_text() and button.is_disabled()
+        assert page.get_by_role("button", name="Test fire").count() == 0
+        page.locator("[data-trip-state]").get_by_role("link", name="open it").click()
+        page.wait_for_url(f"**incident={incident_id}**")
+        page.get_by_role("button", name="Close", exact=True).wait_for()  # the incident drawer
+    finally:
+        _action(stack, "off")
+        _write_demo_block(stack, trippable=[])
+        stack.env(COMPASS_DEMO_REARM=None)
+        stack.restart("api", "compass")
 
 
 def test_demo_1b_outside_demo_mode_the_seed_refuses_in_one_line(stack):

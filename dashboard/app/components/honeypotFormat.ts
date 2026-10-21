@@ -13,6 +13,25 @@ export const useReadOnly = () => useContext(ReadOnlyContext);
 export const writeProps = (readOnly: boolean, disabled = false) =>
   readOnly ? { disabled: true, title: READ_ONLY_TITLE } : { disabled };
 
+// Demo mode's "Trip it" (docs/demo.md): which decoys a visitor may trip and the trip in
+// force on each, from GET /api/demo. HoneypotsTab provides it; the token panel reads it.
+export type DemoTrip = {
+  honeytoken_id: string;
+  in_force: boolean;
+  until: number; // ms, this browser's clock
+  tripped_at?: number | null;
+  by: string;
+  incident_id?: string | null;
+  job_id?: string | null;
+  rearmed_at?: number | null;
+  rearm_error?: string | null;
+};
+export type DemoTripState = { demo: boolean; trippable: string[]; cooldownSeconds: number; cooldowns: Record<string, DemoTrip>; refresh: () => void };
+export const DemoTripContext = createContext<DemoTripState>({ demo: false, trippable: [], cooldownSeconds: 0, cooldowns: {}, refresh: () => undefined });
+export const useDemoTrip = () => useContext(DemoTripContext);
+/** The Honeypots tab with one incident open. */
+export const incidentHref = (incidentId: string) => `/workspace?tab=honeypots&view=history&incident=${encodeURIComponent(incidentId)}`;
+
 const toMs = (v: string | number | null | undefined): number => {
   if (v === null || v === undefined || v === "") return NaN;
   return typeof v === "number" ? v : Date.parse(v);

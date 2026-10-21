@@ -45,9 +45,10 @@ Order, and what to check after each step:
    logs: `0.6.0-map-sqlite`); the table stays for a rollback
    (`COMPASS_MAP_STORE=dynamodb` in `.env`).
 6. Decoys: `honeypot action_set` (the queue exists since `connect`), then plant from the dashboard's Honeypots tab or `honeypot create …` — a
-   pull request URL. The user merges and applies; then `honeypot arm` and,
-   with the secret from the apply output, `honeypot fire`; incidents show in
-   the dashboard and in `honeypot incidents`.
+   pull request URL. The user merges and applies; then `honeypot arm` (with
+   `secret_access_key=…` from the apply output it keeps the secret, so `fire`
+   needs none) and `honeypot fire`; incidents show in the dashboard and in
+   `honeypot incidents`.
 7. Code-as-cloud: the IaC tab, or `iac import …` — a pull request URL;
    `verified: false` with a warning means the plan could not run with the
    given credentials.
