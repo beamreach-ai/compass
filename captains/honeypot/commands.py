@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
+from captains.honeypot import actions as _actions  # noqa: F401 - loading the commands registers the responses too
 from compass_core import dispatch
 from compass_core.workspace import captain_config, resolve
 
