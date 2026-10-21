@@ -160,3 +160,9 @@ def test_compass_migrate_runs_the_step_once_per_workspace(tmp_path, monkeypatch)
         assert any(c.get("map", {}).get("store") == "sqlite" for _, c in saved), "the 0.6.0 step switched the map to the file"
         second = migrations.run(config, workspace_id="ws", client=client, table=table)
         assert second["migrations"] == []
+
+        # a step sees the workspace id even when the config came from a loader that does not set it
+        seen = []
+        config.pop("workspace_id", None)
+        migrations.run(config, workspace_id="ws", client=client, table=table, steps=[("9.9.9-test", lambda c: seen.append(c.get("workspace_id")))])
+        assert seen == ["ws"]

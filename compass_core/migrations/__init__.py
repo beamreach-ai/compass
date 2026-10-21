@@ -141,7 +141,8 @@ def run(config: Dict[str, Any], *, workspace_id: str, client: Any = None, table:
             if version in done:
                 continue
             logger.info("running migration %s for workspace %s", version, workspace_id)
-            step(config)
+            # the steps read the id from the config; the file loader sets it, a host's loader may not
+            step({**config, "workspace_id": workspace_id})
             table.put_item(Item={"pk": workspace_pk(workspace_id), "sk": sort_key(version), "version": version,
                                  "core": running_version(), "at": int(time.time() * 1000)})
             ran.append(version)
