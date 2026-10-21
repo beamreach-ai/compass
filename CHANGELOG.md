@@ -47,6 +47,10 @@ one command, `compass connect`; the running services never see it.
   as anything but the runtime identity `connect` recorded.
 - `local_iam` and static keys are gone as ways in; `init_alerts` is absorbed
   into `connect`. The `aws` block of the config names roles, not credentials.
+- The 0.6.0 map migration copies the DynamoDB map into the store the workspace
+  names (`map.store`, or `COMPASS_MAP_STORE`; Postgres for a deployment that set
+  it) and keeps that setting, instead of always writing a SQLite file and
+  pointing the workspace at it.
 
 ### After the update
 

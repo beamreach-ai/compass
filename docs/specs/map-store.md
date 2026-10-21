@@ -756,19 +756,23 @@ Only what the API must support. The map's look, combos and overlays stay.
 step has run, then `sqlite`: the step sets it. `COMPASS_MAP_STORE` overrides
 for one process (the rollback switch, and the benchmark).
 
-**The step**, registered as `("0.6.0-map-sqlite", migrate_map_to_sqlite)` in
-`compass_core.migrations.STEPS`:
+**The step**, registered as `("0.6.0-map-sqlite", step_0_6_0)` in
+`compass_core.migrations.STEPS` (`infra_map/migrate.py`):
 
-1. If `map.store` is already `sqlite`, or the DynamoDB map table is empty,
-   or there is no table: set `sqlite`, done.
-2. Open the SQLite file, create the schema. If it already holds a completed
-   scan for the org (the daemon started first and scanned): set `sqlite`, done.
+1. The target is the store the workspace names (`map.store`, or
+   `COMPASS_MAP_STORE` for the process): Postgres for a deployment that set
+   it, else the SQLite file, which is also what an install that names nothing
+   (`dynamodb`, the pre-0.6 default) gets.
+2. Open the target, create the schema. If it already holds a completed scan
+   for the org (the daemon started first and scanned): record the store, done.
+   The same when the DynamoDB map table is empty or there is none.
 3. Read the DynamoDB graph with the old store, paginated, in one
-   `begin_scan(scopes=<every (source, scope) seen>)`; each row's `valid_from`
-   is its `last_seen` (so "first_seen" is at least as old as the old map
-   said), `commit`. The scan is marked `job_id = "migration"`.
-4. Set `map.store = sqlite` and save the config. The DynamoDB table is not
-   touched: a migration step never deletes.
+   `begin_scan`; each row's `valid_from` is its `last_seen` (so "first_seen"
+   is at least as old as the old map said), `commit`. The scan is marked
+   `job_id = "migration:dynamodb"`.
+4. Set `map.store` to the target's name (`sqlite`, or the `postgres` it
+   already said) and save the config. The DynamoDB table is not touched: a
+   migration step never deletes.
 
 At 100k items this is the whole-graph read (section 10 measures it; tens of
 seconds against DynamoDB-local) plus one SQLite transaction. It runs under the
