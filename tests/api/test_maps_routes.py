@@ -78,9 +78,11 @@ def test_the_whole_map_lists_every_node_and_edge_with_their_shape(client, world)
     assert edge["resource_id"] == edge["edge_id"]
 
 
-def test_a_limit_cuts_the_whole_map_at_that_many_items_without_saying_so(client, world):
+def test_a_limit_cuts_the_whole_map_at_that_many_nodes_with_their_edges_without_saying_so(client, world):
     body = client.get("/api/maps", params={"limit": 100}).json()
-    assert len(body["nodes"]) + len(body["edges"]) == 100
+    kept = {n["resource_id"] for n in body["nodes"]}
+    assert len(kept) == 100, "the limit is a node budget, never spent on edges"
+    assert body["edges"] and all(e["from_resource_id"] in kept and e["to_resource_id"] in kept for e in body["edges"])
     assert "truncated" not in body
 
 
