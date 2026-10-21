@@ -59,7 +59,13 @@ class FakeIam:
     def simulate_principal_policy(self, **kw):
         if not self.simulate_available:
             raise NotImplementedError("no simulation here")
-        held = {a for s in self.statements for a in (s["Action"] if isinstance(s["Action"], list) else [s["Action"]])}
+        # like IAM: a conditioned statement allows only a request whose context meets the condition
+        context = {e["ContextKeyName"]: set(e["ContextKeyValues"]) for e in kw.get("ContextEntries", [])}
+        held = set()
+        for s in self.statements:
+            wanted = {k: set(v if isinstance(v, list) else [v]) for keys in (s.get("Condition") or {}).values() for k, v in keys.items()}
+            if all(context.get(k) == v for k, v in wanted.items()):
+                held |= set(s["Action"] if isinstance(s["Action"], list) else [s["Action"]])
         return {"EvaluationResults": [{"EvalActionName": a, "EvalDecision": "allowed" if a in held else "implicitDeny"} for a in kw["ActionNames"]]}
 
 
@@ -316,3 +322,29 @@ def test_a_persons_action_retries_after_a_background_write(table, monkeypatch):
     monkeypatch.setattr(grants, "get_grant", get_then_tick)
     removed = grants.remove(table, PK, row["action_id"], config=CONFIG, enqueue=lambda **kw: None)
     assert removed["grant_status"] == "disarmed" and calls["n"] == 2, "the first attempt conflicted, the second won"
+
+
+ECS_SCOPE = {"service_arns": [f"arn:aws:ecs:us-east-1:{ACCOUNT}:service/replay/web"]}
+
+
+def test_a_conditioned_statement_is_simulated_with_its_own_condition_as_the_context(table):
+    """ecs_restart_task's statements carry ``ArnEquals ecs:cluster``; IAM answers implicitDeny
+    for them unless the simulated request carries the cluster, so the simulation sends the
+    statement's condition as its context, and the grant arms."""
+    row = grants.propose(table, PK, captain="honeypot", action_type="ecs_restart_task", scope=ECS_SCOPE, mode="autopilot")
+    statements = grants.statements_for(row, CONFIG)
+    conditioned = [s for s in statements if s.get("Condition")]
+    assert conditioned, "the ECS statements are the conditioned ones"
+    assert grants.context_entries(conditioned[0]) == [
+        {"ContextKeyName": "ecs:cluster", "ContextKeyValues": [f"arn:aws:ecs:us-east-1:{ACCOUNT}:cluster/replay"], "ContextKeyType": "string"}
+    ]
+    assert grants.context_entries({"Action": "s3:GetObject", "Resource": "*"}) == []
+    assert grants.context_entries({"Condition": {"Bool": {"aws:SecureTransport": "true"}}})[0]["ContextKeyType"] == "boolean"
+
+    assert grants.simulate(FakeIam(statements), ACT, statements) == {"simulated": True, "denied": []}
+
+    accepted = grants.accept(table, PK, row["action_id"], config=CONFIG, enqueue=lambda **kw: {"job_id": "j1"})
+    accepted["grant_pr"] = "https://github.com/o/r/pull/8"
+    grants._put(table, accepted)
+    armed = grants.refresh(table, PK, CONFIG, iam=FakeIam(statements), registry=FakeRegistry(merged={"https://github.com/o/r/pull/8"}))
+    assert [c["to"] for c in armed["changed"]] == ["armed"]

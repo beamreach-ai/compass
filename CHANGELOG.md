@@ -52,6 +52,11 @@ install coming from 0.4.1.
   a row of counts and one line to Slack. `compass demo status` prints the
   last reset, the next one, the trips in force, the open visitor pull
   requests and this week's tour completions.
+- Fixed: the grant verification sends a statement's own condition to IAM's
+  simulation as the request's context. Without it IAM answered `implicitDeny`
+  for every conditioned statement, so `ecs_restart_task` (its statements carry
+  `ArnEquals ecs:cluster`) stayed `applied` forever on a real account;
+  `iam_deactivate_key` was never affected.
 
 ## 0.7.0 — 2026-10-21
 
