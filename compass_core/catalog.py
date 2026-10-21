@@ -73,12 +73,14 @@ class Entry:
     homepage: Optional[str] = None       # where to read about it, or get it when there is no pip line
     source: Optional[str] = None         # the code, for a reader deciding whether to trust it
     tags: Tuple[str, ...] = ()
+    permissions: Optional[Dict[str, Any]] = None   # the manifest's block, as compass_core.permissions.describe shows it
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "name": self.name, "label": self.label, "summary": self.summary, "tier": self.tier,
             "version": self.version, "requires_core": self.requires_core, "pip": self.pip,
             "author": self.author, "homepage": self.homepage, "source": self.source, "tags": list(self.tags),
+            "permissions": self.permissions,
         }
 
 
@@ -122,7 +124,32 @@ def _entry_errors(raw: Dict[str, Any]) -> List[str]:
         Version(str(raw.get("version") or ""))
     except Exception:  # noqa: BLE001
         problems.append(f"version {raw.get('version')!r} is not a PEP 440 version")
+    block = raw.get("permissions")
+    if block is not None:
+        problems.extend(f"permissions: {p}" for p in permissions_block_errors(block))
     return problems
+
+
+def permissions_block_errors(block: Any) -> List[str]:
+    """A catalog entry's permissions, in the shape ``describe`` renders: ``reads`` by service,
+    ``actions``, ``github``, ``egress``. The read verbs are held to the manifest's rules."""
+    from compass_core.permissions import AwsPermissions, Permissions, Statement, permission_errors
+
+    if not isinstance(block, dict):
+        return ["must be an object"]
+    reads = block.get("reads") or {}
+    if not isinstance(reads, dict) or any(not isinstance(v, list) for v in reads.values()):
+        return ["reads must map a service to a list of verbs"]
+    statements = tuple(Statement(actions=tuple(f"{service}:{verb}" for verb in verbs)) for service, verbs in reads.items() if verbs)
+    names = []
+    for action in block.get("actions") or []:
+        names.append(str(action.get("action_type") if isinstance(action, dict) else action))
+    try:
+        parsed = Permissions(aws=AwsPermissions(read=statements, actions=tuple(names)),
+                             github=tuple(str(g) for g in block.get("github") or []), egress=tuple(str(e) for e in block.get("egress") or []))
+    except Exception as exc:  # noqa: BLE001
+        return [str(exc)]
+    return permission_errors(parsed)
 
 
 def parse(document: Any, *, source: str) -> Catalog:
@@ -151,6 +178,7 @@ def parse(document: Any, *, source: str) -> Catalog:
             version=str(raw["version"]), requires_core=str(raw.get("requires_core") or ""),
             pip=raw.get("pip"), author=raw.get("author"), homepage=raw.get("homepage"), source=raw.get("source"),
             tags=tuple(str(t) for t in raw.get("tags") or ()),
+            permissions=raw.get("permissions") if isinstance(raw.get("permissions"), dict) else None,
         ))
     return Catalog(entries=entries, source=source, fetched_at=time.time(), rejected=rejected)
 

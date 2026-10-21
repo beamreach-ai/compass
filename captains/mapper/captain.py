@@ -1,8 +1,7 @@
 import logging
 
-import boto3
-
-from compass_core.aws import build_target_session, resolve_target_region
+from compass_core import sessions
+from compass_core.aws import resolve_target_region
 from compass_core.events import emit_job_event
 from compass_core.tables import tables
 from infra_map.graph_store import open_store
@@ -64,7 +63,7 @@ class MapperCaptain:
     def _load_target_session(self):
         control_session = self._get_local_control_session()
         region = resolve_target_region(self.config, default=self.config.get("aws_region"))
-        target_session = build_target_session(self.config, capability="read", region=region)
+        target_session = sessions.target("read", region=region, config=self.config)
 
         if target_session is None:
             raise RuntimeError("target AWS credentials are required for mapper scans")
@@ -77,7 +76,7 @@ class MapperCaptain:
         )
 
     def _get_local_control_session(self):
-        return boto3.Session()
+        return sessions.control()
 
     def _setup_components(self):
         if not self.ctx:

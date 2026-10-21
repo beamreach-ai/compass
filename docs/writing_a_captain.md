@@ -15,7 +15,7 @@ through everything below.
 
 ```python
 # mycaptain/manifest.py
-from compass_core.captains import CaptainManifest, ServiceSpec, TabSpec
+from compass_core.captains import AwsPermissions, CaptainManifest, Permissions, ServiceSpec, Statement, TabSpec
 
 MANIFEST = CaptainManifest(
     name="hello",                       # the dispatch key and the config section; never changes once shipped
@@ -31,6 +31,11 @@ MANIFEST = CaptainManifest(
     services=(ServiceSpec(name="poll", start="mycaptain.service:run_service", interval=60, interval_setting="hello_poll"),),
     config_schema={...},                # JSON Schema of your section of the workspace config (§4)
     depends_on=("mapper",),             # captains that must be on for you to be on
+    permissions=Permissions(            # what you read in AWS and where else you reach (§1.1)
+        aws=AwsPermissions(read=(Statement(actions=("ecs:Describe*", "ecs:List*")),)),
+        github=("contents:read",),
+        egress=("api.github.com",),
+    ),
     requires_core=">=0.1,<1",           # PEP 440 against compass_core.__version__
     version="0.1.0",
 )
@@ -38,6 +43,37 @@ MANIFEST = CaptainManifest(
 
 `MANIFEST.errors()` lists what is wrong with it; the registry refuses a manifest
 with errors and logs why.
+
+### 1.1 Permissions
+
+Compass only reads a target account, and only what each captain declared. Your
+`permissions.aws.read` is the list of IAM read actions your code calls, with `*`
+wildcards per service (`ecs:Describe*`) so a new describe call needs no change.
+Three things come from it and nothing is written by hand: the read role's policy
+(the union over the installed captains), your sessions' inline policy (STS
+narrows every session you get from `compass_core.sessions.target("read")` to
+exactly this block, whatever the role allows), and the check that your code
+calls only what you declared. `compass validate` runs that check: a static pass
+over your package for `.client("<service>")` and `<verb>_<noun>(` pairs, mapped
+to IAM action names; a call the manifest does not cover fails with the file and
+line. The rules: read-only verbs only (`Get`, `List`, `Describe`, `Lookup`, …; a
+write is an *action*, which a person grants by pull request), no `*:*`, no
+`s3:GetObject` on `*` (name the bucket: `{state_bucket}` is the configured state
+bucket), no `lambda:Get*` (it downloads code). `github` and `egress` are shown
+before install; nothing enforces them yet. A captain that reads nothing declares
+`Permissions()`: without the field, `compass validate` fails.
+
+A write is an **action**: a class deriving `compass_core.actions.Action` with
+the IAM statements it needs for a scope, a scope check, and the four steps
+(snapshot, execute, verify, rollback), registered by your commands module with
+`compass_core.actions.register("mycaptain", {"mycaptain.freeze": Freeze})` and
+named in `permissions.aws.actions`. Proposing one is all a captain can do: a
+person accepts it, Compass opens the pull request that grants exactly those
+statements to the act role, and the action runs only once that is merged,
+applied and verified. The Captains page shows the block before install as
+"Will use": reads by service, the actions with their change type and rollback,
+GitHub scopes, egress. A catalog entry may carry the same block (`permissions`,
+in the shape the page shows) so it is visible before the package is downloaded.
 
 ## 2. Discovery
 

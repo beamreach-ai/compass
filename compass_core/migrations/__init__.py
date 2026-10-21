@@ -31,8 +31,74 @@ def _map_to_sqlite(config: Dict[str, Any]) -> None:
     step_0_6_0(config)
 
 
+def _access_model(config: Dict[str, Any]) -> None:
+    """0.7.0: the `aws` block names roles, not credentials (docs/specs/access-model.md §12).
+    An install that assumed roles keeps them as `roles.read` / `roles.act`; one that used
+    the profile (`local_iam`) or static keys gets no roles and the Connect card, and runs
+    nothing against a target until `compass connect` has run."""
+    from compass_core.config import save_workspace_config
+
+    aws = config.get("aws") if isinstance(config.get("aws"), dict) else None
+    if not aws or isinstance(aws.get("roles"), dict):
+        return
+    roles: Dict[str, str] = {}
+    for key, kind in (("assume_role_read", "read"), ("assume_role", "read"), ("assume_role_respond", "act")):
+        legacy = aws.get(key)
+        if isinstance(legacy, dict) and legacy.get("account_id") and legacy.get("role_name") and kind not in roles:
+            roles[kind] = f"arn:aws:iam::{legacy['account_id']}:role/{legacy['role_name']}"
+            if legacy.get("external_id") and not aws.get("external_id"):
+                aws["external_id"] = str(legacy["external_id"])
+            aws.setdefault("account_id", str(legacy["account_id"]))
+    if aws.get("generated_external_id") and not aws.get("external_id"):
+        aws["external_id"] = str(aws["generated_external_id"])
+    aws["roles"] = roles
+    aws["migrated_from"] = aws.get("auth_mode") or ("assume_role" if roles else ("access_key" if aws.get("credentials") else None))
+    for stale in ("auth_mode", "assume_role", "assume_role_read", "assume_role_write", "assume_role_respond", "credentials",
+                  "credentials_read", "credentials_write", "credentials_respond", "static_credentials", "generated_external_id"):
+        aws.pop(stale, None)
+    workspace_id = str(config.get("workspace_id") or "")
+    if workspace_id:
+        save_workspace_config(workspace_id, config)
+
+
+def _grants(config: Dict[str, Any]) -> None:
+    """0.7.0: the decoy captain's whitelist rows are grants (compass_core.grants): the key moves
+    from HONEYPOT#ACTION#<id> to GRANT#honeypot#<id> and the row gets a lifecycle. An enabled row
+    whose responder role was applied is `applied`: the next verification tick arms it once IAM
+    holds and allows its statements; a disabled row is `revoked`. Nothing runs until then."""
+    from boto3.dynamodb.conditions import Key
+
+    from compass_core.keys import grant_sort_key, legacy_honeypot_action_prefix
+
+    name = tables(config).items
+    workspace_id = str(config.get("workspace_id") or "")
+    if not name or not workspace_id:
+        return
+    table = dynamo_table(name)
+    pk = workspace_pk(workspace_id)
+    kwargs: Dict[str, Any] = {"KeyConditionExpression": Key("pk").eq(pk) & Key("sk").begins_with(legacy_honeypot_action_prefix())}
+    moved = 0
+    while True:
+        page = table.query(**kwargs)
+        for item in page.get("Items", []):
+            row = dict(item)
+            grant_id = str(row.get("action_id") or str(row["sk"]).rsplit("#", 1)[-1])
+            enabled = bool(row.get("enabled", True)) and str(row.get("mode") or "off") != "off"
+            row.update(sk=grant_sort_key("honeypot", grant_id), action_id=grant_id, captain="honeypot",
+                       grant_status="applied" if enabled else "revoked", grant_pr=row.get("grant_pr"), applied_at=None, verified_at=None,
+                       policy_hash=None, grant_history=[{"from": None, "to": "applied" if enabled else "revoked", "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "by": "migration 0.7.0"}])
+            table.put_item(Item=row)
+            moved += 1
+        if not page.get("LastEvaluatedKey"):
+            break
+        kwargs["ExclusiveStartKey"] = page["LastEvaluatedKey"]
+    if moved:
+        logger.info("moved %d decoy whitelist rows to grants", moved)
+
+
 # 0.6.0: the map moves from DynamoDB to the SQLite file (infra_map.migrate); the table stays for rollback
-STEPS: List[Step] = [("0.6.0-map-sqlite", _map_to_sqlite)]
+# 0.7.0: the aws block names roles, not credentials; `compass connect` creates them; the whitelist rows become grants
+STEPS: List[Step] = [("0.6.0-map-sqlite", _map_to_sqlite), ("0.7.0-access-model", _access_model), ("0.7.0-grants", _grants)]
 
 
 def sort_key(version: str) -> str:

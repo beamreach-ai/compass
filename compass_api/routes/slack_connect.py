@@ -30,7 +30,6 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-import boto3
 from boto3.dynamodb.conditions import Key
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse
@@ -39,6 +38,7 @@ from pydantic import BaseModel, Field
 from compass_api.routes import notifications as _notifications
 from compass_api.routes._app_config import ensure_not_read_only, write_guard
 from compass_api.routes._workspace import get_actor_ids, get_workspace_config, save_config
+from compass_core import sessions
 from compass_core.keys import notification_endpoint_prefix, notification_endpoint_sort_key
 
 router = APIRouter(dependencies=[Depends(write_guard())])
@@ -73,7 +73,7 @@ def _read_slack_app() -> Optional[Dict[str, str]]:
     secret_id = (os.getenv("SLACK_APP_SECRET_ID") or "beamreach/slack-app").strip()
     region = os.getenv("AWS_REGION") or "eu-central-1"
     try:
-        raw = boto3.client("secretsmanager", region_name=region).get_secret_value(SecretId=secret_id)["SecretString"]
+        raw = sessions.control(region=region).client("secretsmanager").get_secret_value(SecretId=secret_id)["SecretString"]
         data = json.loads(raw)
     except Exception as exc:  # noqa: BLE001
         logger.debug("Slack app secret %s not readable: %s", secret_id, type(exc).__name__)

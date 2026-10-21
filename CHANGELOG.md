@@ -5,6 +5,59 @@ workflow refuses a tag without one, and reads from it what the dashboard shows
 next to the Update button: the first paragraph is the summary, the bullets under
 `### After the update` are the notes an operator needs after applying it.
 
+## 0.7.0 — unreleased
+
+Compass only reads your account, through a role it creates once, and writes
+nothing without a pull request you merge. The operator's profile is used by
+one command, `compass connect`; the running services never see it.
+
+- `compass connect account=<id> region=<r>`, run once with your profile,
+  creates in the account a read role whose policy is generated from what the
+  installed captains declare they read, an act role with no permissions, the
+  queue decoy alerts report to (in the control account, SQS-managed
+  encryption), and, off AWS, a runtime user whose only right is to assume the
+  two roles. On AWS it trusts the machine's own role instead. `connect verify`,
+  `connect rotate` and `connect template` (CloudFormation and Terraform for an
+  account out of reach) complete it.
+- Every captain's manifest declares what it reads and the write actions it may
+  propose (`permissions`); `compass validate` fails on a call the manifest does
+  not cover or an action it does not register, and the Captains page shows the
+  block as "Will use" before anything is installed. Each session is
+  narrowed to that declaration, so a captain cannot read more than it declared
+  whatever the role allows. `lambda:Get*` is never a read: it downloads code.
+- Every AWS session Compass makes comes from one broker, `compass_core.sessions`,
+  and is named `compass-<captain>-<job>` with `SourceIdentity` set to who asked,
+  so the target account's CloudTrail says which captain, which job, and whom.
+- A response action is a grant: allowing it opens the pull request that gives
+  the act role exactly that permission, and it runs only once the pull request
+  is merged, applied and verified against IAM (`proposed → pr_open → merged →
+  applied → verified → armed`). Removing it disarms it at once and opens the
+  pull request that takes the permission away. Settings → Account → Access
+  shows every grant with its state and pull request; `compass access` lists,
+  accepts, removes and verifies them. Each action runs in its own session,
+  narrowed to that grant and attributed to the person who approved it.
+- Compass audits its own access every day and on demand (`compass access
+  audit`, Settings → Account → Access): both roles' trust, inline and attached
+  policies against what the manifests, the grants and the config explain. A
+  statement added in the console, an attached managed policy, a second
+  trusted principal, a grant that says armed but is not in the role, or a
+  role that no connected repository holds is a finding, with the time it was
+  first seen; the access pull request is its fix.
+- The services refuse to start with `AWS_PROFILE` set or `~/.aws` mounted, or
+  as anything but the runtime identity `connect` recorded.
+- `local_iam` and static keys are gone as ways in; `init_alerts` is absorbed
+  into `connect`. The `aws` block of the config names roles, not credentials.
+
+### After the update
+
+- Run `docker compose run --rm -v ~/.aws:/root/.aws:ro -e AWS_PROFILE=<profile>
+  compass connect account=<id> region=<r>` once, then `docker compose up -d`.
+  Remove `AWS_PROFILE` from `.env` and the `~/.aws` mount from an edited
+  compose file. An install that assumed a role keeps it as the read role; one
+  that used the profile runs nothing against the account until `connect` has run.
+- Decoys planted before this release report to the old queue until
+  `honeypot replant-alerts` has opened and you have merged its pull request.
+
 ## 0.6.0 — unreleased
 
 The map moves from DynamoDB to a SQLite file and keeps its history: scans of a

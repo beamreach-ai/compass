@@ -24,12 +24,16 @@ from typing import Any, Dict, List, Optional
 from compass_core import anthropic_model, captains, dispatch, llm
 
 CORE_SHORTHAND = {
-    "init_config", "init_tables", "init_alerts", "serve", "api", "login", "captains", "enable", "disable", "configure", "catalog",
-    "install", "uninstall", "validate", "migrate", "update",
+    "init_config", "init_tables", "serve", "api", "login", "captains", "enable", "disable", "configure", "catalog",
+    "install", "uninstall", "validate", "migrate", "update", "connect", "access",
 }
 # `compass update check` reads better than `compass update verb=check`: the bare word after
 # these commands becomes their `verb`.
-VERB_COMMANDS = {"update": ("check", "apply", "rollback")}
+VERB_COMMANDS = {
+    "update": ("check", "apply", "rollback"),
+    "connect": ("template", "verify", "rotate"),
+    "access": ("list", "accept", "decline", "remove", "verify", "audit", "pr"),
+}
 
 
 def parse_pairs(pairs: List[str]) -> Dict[str, Any]:

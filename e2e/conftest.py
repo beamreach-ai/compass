@@ -258,7 +258,7 @@ def make_install(project: Path) -> Stack:
     shutil.copytree(ROOT / "examples" / "captain-hello", project / "extensions" / "captain-hello-src",
                     ignore=shutil.ignore_patterns("build", "*.egg-info", "__pycache__"))
     stack = Stack(project)
-    stack.env(AWS_PROFILE="default", AWS_REGION=fixture.REGION, AWS_DIR="./aws", GITHUB_TOKEN="e2e-token", COMPASS_VERSION=VERSION,
+    stack.env(AWS_PROFILE=None, AWS_REGION=fixture.REGION, GITHUB_TOKEN="e2e-token", COMPASS_VERSION=VERSION,
               COMPASS_PORT=str(WEB_PORT), E2E_MOTO_PORT=str(MOTO_PORT), E2E_FAKES_PORT=str(FAKES_PORT), PIP_NO_INDEX="1",
               COMPASS_UPDATER_HEALTH_SECONDS="120", **IMAGES)
     return stack
@@ -298,6 +298,9 @@ def stack() -> Iterator[Stack]:
                                                  f"github_repo={fixture.REPO}", f"terraform_root={fixture.TERRAFORM_ROOT}")
         stack.records["init_tables"] = stack.cli("init_tables")
         stack.records["init_tables_again"] = stack.cli("init_tables")
+        # the profile, used once: moto's static keys stand in for it (compose.e2e.yml passes them to this one run)
+        stack.records["connect"] = stack.cli("connect", f"account={fixture.ACCOUNT}", f"region={fixture.REGION}", f"state_bucket={fixture.STATE_BUCKET}")
+        stack.records["connect_again"] = stack.cli("connect", f"account={fixture.ACCOUNT}", f"region={fixture.REGION}")
         stack.compose("up", "-d")
         stack.wait_healthy()
         # The world is seeded once everything runs: moto and the fakes keep it in memory, and

@@ -1,9 +1,11 @@
 # Compass, locally: the dashboard and API on http://localhost:8080, the daemon,
-# and a DynamoDB on this machine. The host needs Docker, an AWS profile in
-# ~/.aws and a GitHub token (.env); no source, no Python.
+# and a DynamoDB on this machine. The host needs Docker and a GitHub token (.env);
+# an AWS profile is used once, by `connect`, to create the roles Compass reads
+# through; the running services never see it. No source, no Python.
 #
 #   docker compose run --rm compass init_config workspace=local region=us-east-1 github_repo=<owner>/<repo> terraform_root=<root>
 #   docker compose run --rm compass init_tables
+#   docker compose run --rm -v ~/.aws:/root/.aws:ro -e AWS_PROFILE=<profile> compass connect account=<id> region=us-east-1
 #   docker compose up -d                     # http://localhost:8080 (sign in with APP_USERNAME / APP_PASSWORD from .env)
 #
 # Images: ghcr.io/beamreach-ai/compass, compass-dashboard and compass-updater, published by
@@ -19,8 +21,11 @@ x-compass: &compass
   env_file: .env
   environment:
     AWS_ENDPOINT_URL_DYNAMODB: http://dynamodb:8000
-    AWS_PROFILE: ${AWS_PROFILE:-default}
+    # The control region (SES, Secrets Manager; DynamoDB-local does not care). No AWS_PROFILE
+    # here and no ~/.aws mount: the services run as the runtime identity `connect` created
+    # (config/local.json) and refuse to start with a profile in reach.
     AWS_REGION: ${AWS_REGION:-us-east-1}
+    AWS_DEFAULT_REGION: ${AWS_REGION:-us-east-1}
     # What this compose file asked to pull; the dashboard says when it differs from what runs.
     COMPASS_VERSION: ${COMPASS_VERSION:-0.4.0}
     # Extra captains: pip requirements (PyPI name, git URL, or a wheel dropped in
@@ -37,7 +42,6 @@ x-compass: &compass
     # A named volume, not a bind mount: SQLite's WAL needs the file locks a Docker Desktop bind
     # mount does not guarantee. `compass mapper backup` copies it out while the stack runs.
     - map-data:/compass/data
-    - ${AWS_DIR:-~/.aws}:/root/.aws:ro
   depends_on:
     - dynamodb
   restart: unless-stopped
@@ -99,8 +103,6 @@ services:
       COMPASS_UPDATER_HEALTH_SECONDS: ${COMPASS_UPDATER_HEALTH_SECONDS:-300}
       COMPASS_REGISTRY: ${COMPASS_REGISTRY:-ghcr.io/beamreach-ai}
       COMPASS_VERSION: ${COMPASS_VERSION:-0.4.0}
-      # ~ in this file (the AWS profile mount) must expand to the host's home, not the container's
-      HOME: ${HOME}
     restart: unless-stopped
 
 volumes:

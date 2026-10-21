@@ -8,7 +8,6 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Union
 
-import boto3
 from boto3.dynamodb.conditions import Key
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse
@@ -28,6 +27,7 @@ from compass_api.routes._workspace import (
     get_workspace_dynamodb_config,
     save_config,
 )
+from compass_core import sessions
 from compass_core.keys import (
     honeypot_alert_prefix,
     honeypot_alert_sort_key,
@@ -913,7 +913,6 @@ def arm_honeytoken(request: Request, honeytoken_id: str) -> Dict[str, Any]:
     the token armed. Refuses with the failed checks when anything is missing,
     notably when no CloudTrail trail is logging."""
     from captains.honeypot import arm
-    from compass_core.aws import build_target_session
 
     table = _resolve_table(request)
     pk = _ws_pk(request)
@@ -931,16 +930,11 @@ def arm_honeytoken(request: Request, honeytoken_id: str) -> Dict[str, Any]:
         region = token.get("region") or region_of_arns(
             (placement or {}).get("service_arn"), (placement or {}).get("cluster_arn"), (placement or {}).get("resource_arn")
         )
-        session = build_target_session(get_workspace_config(request), capability="read", region=region)
+        session = sessions.target("read", region=region, config=get_workspace_config(request))
         if session is not None and region and session.region_name != region:
-            # build_target_session lets the workspace's configured region win
-            # over the default; pin the session to the placement's region.
-            frozen = session.get_credentials().get_frozen_credentials()
-            session = boto3.Session(
-                aws_access_key_id=frozen.access_key, aws_secret_access_key=frozen.secret_key,
-                aws_session_token=frozen.token, region_name=region,
-            )
-        result = arm.verify_honeytoken(session, _to_native(token), placement)
+            # the workspace's configured region wins in target(); pin the session to the placement's region
+            session = sessions.with_region(session, region)
+        result = arm.verify_honeytoken(session, _to_native(token), placement, config=get_workspace_config(request))
     except Exception as exc:
         result = {"ok": False, "checks": [{"name": "target_account_access", "ok": False, "detail": str(exc)[:300]}]}
     if not result["ok"]:
@@ -1032,7 +1026,7 @@ def ingest_alert(request: Request, body: InboundAlertPayload) -> Dict[str, Any]:
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    table = boto3.resource("dynamodb", region_name=region).Table(table_name)
+    table = sessions.control(region=region).resource("dynamodb").Table(table_name)
 
     try:
         item = record_alert(

@@ -159,14 +159,63 @@ def _verify_db_credential(session: Any, token: Dict[str, Any]) -> Dict[str, Any]
     return _result(checks)
 
 
-def verify_honeytoken(session: Any, token: Dict[str, Any], placement: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """Read-only verification. Returns {ok, checks[{name, ok, detail}], access_key_id?}."""
+def verify_honeytoken(session: Any, token: Dict[str, Any], placement: Optional[Dict[str, Any]] = None, *,
+                      config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Read-only verification. Returns {ok, checks[{name, ok, detail}], access_key_id?}.
+    With the workspace config, also checks that the alert queue for the token's region
+    accepts deliveries from the target account (the misconfiguration that would otherwise
+    show at the first real trip)."""
     cls = normalize_class(token.get("honeytoken_class") or token.get("asset_class") or "")
     if cls == "aws_credential":
-        return _verify_aws_credential(session, token)
-    if cls == "db_credential":
-        return _verify_db_credential(session, token)
-    return _result([_check("verification", True, f"no automated verification for {cls or 'this class'}")])
+        result = _verify_aws_credential(session, token)
+    elif cls == "db_credential":
+        result = _verify_db_credential(session, token)
+    else:
+        return _result([_check("verification", True, f"no automated verification for {cls or 'this class'}")])
+    if config is not None:
+        queue_check = _check_alert_queue(config, str(token.get("region") or ""))
+        if queue_check is not None:
+            result["checks"].append(queue_check)
+            result["ok"] = result["ok"] and queue_check["ok"]
+    return result
+
+
+def _check_alert_queue(config: Dict[str, Any], region: str) -> Optional[Dict[str, Any]]:
+    """The queue in the control account that the rule delivers to must let the target
+    account's roles send: its policy names arn:aws:iam::<target>:root (what `connect`
+    writes). None when no queue is configured (the arm says so elsewhere)."""
+    import json
+
+    from compass_core import sessions
+    from compass_core.aws import alert_queues, resolve_target_account_id, resolve_target_region
+
+    queues = alert_queues(config)
+    if not queues:
+        return None
+    region = region or resolve_target_region(config) or ""
+    queue = queues.get(region) or next(iter(queues.values()))
+    target = resolve_target_account_id(config) or ""
+    try:
+        queue_region = queue["arn"].split(":")[3] if queue.get("arn", "").count(":") >= 5 else region
+        sqs = sessions.control(region=queue_region).client("sqs")
+        policy = json.loads(sqs.get_queue_attributes(QueueUrl=queue["url"], AttributeNames=["Policy"])["Attributes"].get("Policy") or "{}")
+    except Exception as exc:  # noqa: BLE001 - the queue is gone, or the base identity may not read it
+        return _check("alert_queue", False, f"queue {queue.get('arn')}: {_err(exc)}")
+    if region not in queues:
+        return _check("alert_queue", False, f"no alert queue in {region}: EventBridge cannot deliver to {queue['arn']} from there; run `compass connect regions={region}`")
+    allowed = any(
+        "sqs:SendMessage" in (s.get("Action") if isinstance(s.get("Action"), list) else [s.get("Action")])
+        and s.get("Effect") == "Allow"
+        and (
+            (s.get("Principal") or {}).get("AWS") in (f"arn:aws:iam::{target}:root", "*")
+            or ((s.get("Principal") or {}).get("Service") == "events.amazonaws.com"
+                and str(((s.get("Condition") or {}).get("StringEquals") or {}).get("aws:SourceAccount") or target) == target)
+        )
+        for s in policy.get("Statement", [])
+    )
+    return _check("alert_queue", allowed,
+                  f"queue {queue['arn']} accepts deliveries from account {target}" if allowed
+                  else f"queue {queue['arn']} does not let account {target} send: run `compass connect` to re-apply its policy")
 
 
 # ── Test fire ────────────────────────────────────────────────────────────────

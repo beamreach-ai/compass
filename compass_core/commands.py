@@ -2,7 +2,7 @@
 
     compass init_config workspace=local region=us-east-1 github_repo=org/infra
     compass init_tables
-    compass init_alerts
+    compass connect account=123456789012 region=us-east-1     # with the operator's profile, once
     compass serve
 
 and what an install does over its life: ``compass migrate`` on a new version,
@@ -19,11 +19,9 @@ import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-import boto3
-
 from compass_core import config as core_config
-from compass_core import dispatch
-from compass_core.tables import tables
+from compass_core import dispatch, sessions
+from compass_core.tables import dynamo_table, tables
 from compass_core.workspace import resolve
 
 logger = logging.getLogger("compass.commands")
@@ -65,6 +63,7 @@ def config_template(
     github_org: Optional[str],
     terraform_root: Optional[str],
     table_prefix: str,
+    state_bucket: Optional[str] = None,
 ) -> Dict[str, Any]:
     github: Dict[str, Any] = {"default_branch": "main", "max_repos": 25}
     if github_token:
@@ -83,7 +82,7 @@ def config_template(
         "name": workspace_id,
         "target": workspace_id,
         "org_id": workspace_id,
-        "aws": {"auth_mode": "local_iam", "region": region},
+        "aws": {"region": region, "install_id": secrets.token_hex(3), **({"state_buckets": [state_bucket]} if state_bucket else {})},
         "aws_region": region,
         "aws_regions": [region],
         "github": github,
@@ -140,16 +139,8 @@ def init_config(payload: Dict[str, Any]) -> Dict[str, Any]:
         github_org=payload.get("github_org"),
         terraform_root=payload.get("terraform_root"),
         table_prefix=str(payload.get("table_prefix") or "compass"),
+        state_bucket=str(payload.get("state_bucket") or "") or None,
     )
-    try:
-        from compass_core.aws import build_target_session
-
-        session = build_target_session(cfg, capability="read", region=cfg["aws"]["region"])
-        account_id = session.client("sts").get_caller_identity()["Account"]
-        cfg["aws"]["account_id"] = str(account_id)
-        cfg["aws"]["account_name"] = str(account_id)
-    except Exception as exc:  # noqa: BLE001 - the dashboard looks it up again later
-        logger.warning("could not read the AWS account from the credentials (%s); check AWS_PROFILE", exc)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(cfg, indent=2) + "\n", encoding="utf-8")
     try:
@@ -167,7 +158,7 @@ def init_config(payload: Dict[str, Any]) -> Dict[str, Any]:
     source = "argument" if payload.get("github_token") else ("GITHUB_TOKEN" if os.getenv("GITHUB_TOKEN") else "gh CLI")
     return {
         "path": str(out),
-        "aws_account": cfg["aws"].get("account_id") or "unknown: check AWS_PROFILE and the credentials in ~/.aws",
+        "aws_account": "not connected yet: run `compass connect account=<id> region=<region>` with your profile",
         "config": shown,
         "github_token": f"from {source}" if token else "missing",
         "login": dashboard_login(cfg),
@@ -229,7 +220,7 @@ def table_specs(config: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 def create_tables(config: Dict[str, Any], *, client: Any = None) -> Dict[str, List[str]]:
     """Create the missing tables; idempotent. boto3 honours AWS_ENDPOINT_URL_DYNAMODB for DynamoDB-local."""
-    client = client or boto3.client("dynamodb")
+    client = client or sessions.control().client("dynamodb")
     existing = set()
     for page in client.get_paginator("list_tables").paginate():
         existing.update(page["TableNames"])
@@ -267,60 +258,62 @@ def migrate(payload: Dict[str, Any]) -> Dict[str, Any]:
         return migrations.run(workspace.config, workspace_id=workspace.workspace_id)
 
 
-# ── init_alerts ──────────────────────────────────────────────────────────────
+# ── connect ──────────────────────────────────────────────────────────────────
 
-def queue_policy(queue_arn: str, account_id: str) -> Dict[str, Any]:
-    """EventBridge rules in the account (what a planted decoy creates) and the
-    account's own principals (the listener's task role) may send to the queue."""
-    return {
-        "Version": "2012-10-17",
-        "Statement": [
-            {
-                "Sid": "DecoyEventBridgeRules",
-                "Effect": "Allow",
-                "Principal": {"Service": "events.amazonaws.com"},
-                "Action": "sqs:SendMessage",
-                "Resource": queue_arn,
-                "Condition": {"StringEquals": {"aws:SourceAccount": account_id}},
-            },
-            {
-                "Sid": "AccountPrincipals",
-                "Effect": "Allow",
-                "Principal": {"AWS": f"arn:aws:iam::{account_id}:root"},
-                "Action": ["sqs:SendMessage", "sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:GetQueueAttributes"],
-                "Resource": queue_arn,
-            },
-        ],
-    }
+def connect(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """account=<id> region=<r> [verb=template|verify|rotate]: create this installation's roles in the
+    target account and its runtime identity and alert queues in the control account, verify them
+    and record them. Writes to the accounts named; run it once with the operator's profile mounted."""
+    from compass_core.connect import connect as _connect
+
+    return _connect(payload)
 
 
-def create_alert_queue(config: Dict[str, Any], *, workspace_id: str, region: str, session: Any = None) -> Dict[str, str]:
-    """Create (or find) the decoy alert queue in the target account and set its policy."""
-    from compass_core.aws import build_target_session
+# ── access ───────────────────────────────────────────────────────────────────
 
-    session = session or build_target_session(config, capability="write", region=region)
-    account_id = session.client("sts").get_caller_identity()["Account"]
-    sqs = session.client("sqs", region_name=region)
-    name = f"compass-decoy-alerts-{workspace_id}"
-    url = sqs.create_queue(QueueName=name, Attributes={"MessageRetentionPeriod": "345600"})["QueueUrl"]
-    arn = sqs.get_queue_attributes(QueueUrl=url, AttributeNames=["QueueArn"])["Attributes"]["QueueArn"]
-    sqs.set_queue_attributes(QueueUrl=url, Attributes={"Policy": json.dumps(queue_policy(arn, account_id))})
-    return {"queue_url": url, "queue_arn": arn, "account_id": account_id, "region": region}
+def access(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """list | accept id=<grant> [mode=approve|autopilot] | decline id= | remove id= | verify | audit | pr:
+    the actions Compass may run in the account and their grants. accept and remove open the pull
+    request that grants or revokes exactly that action (the `pr` verb is the job that opens it)."""
+    from compass_core import grants as _grants
+    from compass_core.keys import workspace_pk
 
-
-def init_alerts(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Create the SQS queue planted decoys report to, and record it in the config file."""
     workspace = resolve(payload)
-    region = str(payload.get("region") or (workspace.config.get("aws") or {}).get("region") or workspace.config.get("aws_region") or os.getenv("AWS_REGION") or "us-east-1")
-    created = create_alert_queue(workspace.config, workspace_id=workspace.workspace_id, region=region)
-    path = core_config.config_path(workspace.workspace_id)
-    if path is not None:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        hp = data.setdefault("honeypot", {})
-        hp["alert_queue_arn"] = created["queue_arn"]
-        hp["alert_queue_url"] = created["queue_url"]
-        path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-    return {"workspace_id": workspace.workspace_id, **created, "config": str(path) if path else None}
+    config = dict(workspace.config)
+    config.setdefault("workspace_id", workspace.workspace_id)
+    verb = str(payload.get("verb") or "list").strip().lower()
+    table = dynamo_table(tables(config).items)
+    pk = workspace_pk(workspace.workspace_id)
+    actor = str(payload.get("user_id") or payload.get("actor") or "") or None
+    if verb == "list":
+        rows = _grants.list_grants(table, pk)
+        return {"workspace_id": workspace.workspace_id, "roles": config.get("aws", {}).get("roles"), "summary": _grants.summary(table, pk),
+                "grants": [{k: r.get(k) for k in ("action_id", "captain", "action_type", "scope", "mode", "risk_max", "grant_status", "grant_pr", "verified_at")} for r in rows]}
+    if verb == "verify":
+        return {"workspace_id": workspace.workspace_id, **_grants.refresh(table, pk, config, actor=actor)}
+    if verb == "pr":
+        from compass_core.access_pr import open_pr
+
+        return {"workspace_id": workspace.workspace_id, **open_pr(config, workspace_id=workspace.workspace_id, actor=actor, reason=str(payload.get("reason") or ""), table=table)}
+    if verb == "audit":
+        from compass_core import access_audit
+
+        return access_audit.run(config, workspace_id=workspace.workspace_id, table=table, actor=actor)
+    grant_id = str(payload.get("id") or payload.get("grant_id") or "")
+    if not grant_id:
+        raise ValueError(f"{verb} needs id=<grant id> (see `compass access list`)")
+    try:
+        if verb == "accept":
+            row = _grants.accept(table, pk, grant_id, config=config, actor=actor, mode=str(payload.get("mode") or "") or None)
+        elif verb == "decline":
+            row = _grants.decline(table, pk, grant_id, actor=actor)
+        elif verb == "remove":
+            row = _grants.remove(table, pk, grant_id, config=config, actor=actor)
+        else:
+            raise ValueError(f"unknown verb {verb!r}: access [list | accept | decline | remove | verify | audit | pr]")
+    except _grants.GrantError as exc:
+        raise ValueError(str(exc)) from exc
+    return {"workspace_id": workspace.workspace_id, "grant": {k: v for k, v in row.items() if k not in ("pk", "sk")}}
 
 
 # ── serve ────────────────────────────────────────────────────────────────────
@@ -335,6 +328,12 @@ def api(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Serve the open API (the dashboard's backend) until stopped: host=0.0.0.0 port=8001."""
     import uvicorn
 
+    try:
+        workspace = resolve(payload)
+    except LookupError:
+        workspace = None  # no workspace yet: the API serves the setup pages
+    if workspace is not None:
+        sessions.assert_runtime(workspace.config)  # a profile in the container is a setup mistake; say so before anything runs
     host = str(payload.get("host") or os.getenv("COMPASS_API_HOST") or "0.0.0.0")
     port = int(payload.get("port") or os.getenv("COMPASS_API_PORT") or 8001)
     uvicorn.run("compass_api.app:create_app", factory=True, host=host, port=port, log_level="info", proxy_headers=True)
@@ -498,9 +497,10 @@ def update(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 COMMANDS = {
-    "init_config": init_config, "init_tables": init_tables, "init_alerts": init_alerts, "serve": serve, "api": api, "login": login,
+    "init_config": init_config, "init_tables": init_tables, "serve": serve, "api": api, "login": login,
     "captains": captains, "enable": enable, "disable": disable, "configure": configure, "catalog": catalog,
     "install": install, "uninstall": uninstall, "validate": validate, "migrate": migrate, "update": update,
+    "connect": connect, "access": access,
 }
 
 dispatch.register("core", COMMANDS)

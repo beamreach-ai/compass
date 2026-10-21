@@ -19,7 +19,9 @@ def test_ins_2_init_config_prints_a_login_that_signs_in_and_a_wrong_password_doe
     login = stack.records["init_config"]["login"]
     assert login["url"].endswith(str(stack.web.rsplit(":", 1)[1])) and login["username"] == "admin" and len(login["password"]) >= 12
     assert stack.records["init_config"]["github_token"] == "from GITHUB_TOKEN"
-    assert stack.records["init_config"]["aws_account"] == fixture.ACCOUNT
+    assert stack.records["init_config"]["aws_account"].startswith("not connected yet"), "init_config reads no account: connect does"
+    assert stack.records["connect"]["aws"]["account_id"] == fixture.ACCOUNT and stack.records["connect"]["verification"]["assumed"]["read"]["ok"]
+    assert not any(s.get("created") for s in stack.records["connect_again"]["steps"]), "a second connect changes nothing"
     good = stack.anonymous().post("/api/auth/login", json={"username": "admin", "password": login["password"]})
     assert good.status_code == 200
     bad = stack.anonymous().post("/api/auth/login", json={"username": "admin", "password": "not-it"})

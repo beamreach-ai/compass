@@ -26,7 +26,12 @@ export const statusTool = defineTool({
     }
     if (u.pinned_differs) lines.push(`Update: the compose file asks for ${u.pinned} but ${u.running} is running; run \`docker compose up -d\``);
     const t = s.target || {};
-    lines.push(`AWS: ${t.aws_connected ? `connected (${t.aws?.mode}, account ${t.aws?.account_id || "?"}, ${t.aws?.region || "?"})` : "not connected"}`);
+    const access = s.access || {};
+    lines.push(
+      `AWS: ${t.aws_connected ? `account ${t.aws?.account_id || "?"} (${t.aws?.region || "?"}) · read ${t.aws?.verified_at ? "✓" : "unverified"}` : "not connected: `compass account connect`"}` +
+        (access.actions_total != null ? ` · ${access.actions_armed ?? 0} of ${access.actions_total} actions armed` : "") +
+        (access.audited_at ? ` · audited ${access.audited_at}` : ""),
+    );
     lines.push(`GitHub: ${t.github_connected ? `connected (${t.github?.login || "app"}, ${t.github?.repositories_count ?? "?"} repos)` : "not connected"}`);
     const scan = s.infra_scan || {};
     lines.push(`Infra map: ${scan.scanned ? "scanned" : scan.status || "pending"}${scan.latest_message ? ` — ${scan.latest_message}` : ""}`);

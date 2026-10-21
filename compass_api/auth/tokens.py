@@ -22,10 +22,10 @@ import threading
 import time
 from typing import Any, Dict, List, Optional
 
-import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 
 from compass_api.auth.principal import ApiPrincipal, normalize_scope
+from compass_core import sessions
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +103,7 @@ class _MemoryStore:
 class _DynamoStore:
     def __init__(self, table_name: str) -> None:
         region = os.getenv("WORKSPACES_TABLE_REGION") or os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION")
-        self._table = boto3.resource("dynamodb", region_name=region).Table(table_name)
+        self._table = sessions.control(region=region).resource("dynamodb").Table(table_name)
         self._hash_key = os.getenv("WORKSPACES_TABLE_HASH_KEY", "pk")
         self._range_key = os.getenv("WORKSPACES_TABLE_RANGE_KEY", "sk")
 
@@ -336,7 +336,7 @@ def _load_bootstrap_secret() -> Optional[str]:
     value: Optional[str] = None
     try:
         region = os.getenv("WORKSPACE_SECRETS_REGION") or os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION")
-        client = boto3.client("secretsmanager", region_name=region) if region else boto3.client("secretsmanager")
+        client = sessions.control(region=region).client("secretsmanager")
         payload = client.get_secret_value(SecretId=arn).get("SecretString") or ""
         payload = payload.strip()
         if payload.startswith("{"):

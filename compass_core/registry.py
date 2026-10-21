@@ -15,6 +15,7 @@ import time
 from decimal import Decimal
 from typing import Any, Dict, List, Optional, Tuple
 
+from compass_core import sessions
 from compass_core.keys import pr_prefix, pr_sort_key, workspace_from_config, workspace_pk
 from compass_core.tables import tables
 
@@ -132,9 +133,8 @@ class PRRegistry:
 
     def _dynamo_table(self):
         if self._table is None:
-            import boto3
 
-            self._table = boto3.resource("dynamodb", region_name=self._region).Table(self.table_name)
+            self._table = sessions.control(region=self._region).resource("dynamodb").Table(self.table_name)
         return self._table
 
     def _mem(self) -> Dict[str, Dict[str, Any]]:

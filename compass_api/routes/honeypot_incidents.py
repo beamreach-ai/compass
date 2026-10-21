@@ -129,13 +129,13 @@ class ApprovePayload(BaseModel):
     action_id: str
 
 
-def _respond_args(request: Request) -> Dict[str, Any]:
+def _respond_args(request: Request, *, approver: Optional[str] = None) -> Dict[str, Any]:
     cfg = get_workspace_config(request) or {}
     region = resolve_target_region(cfg) or "us-east-1"
     return {
         "region": region,
         "account_id": resolve_target_account_id(cfg, "respond") or resolve_target_account_id(cfg, "read") or "",
-        "session_factory": responder_session_factory(cfg, region),
+        "session_factory": responder_session_factory(cfg, region, approver=approver),
     }
 
 
@@ -145,10 +145,11 @@ def approve_action(request: Request, incident_id: str, body: ApprovePayload) -> 
     table = hp._resolve_table(request)
     pk = hp._ws_pk(request)
     actor = get_actor_ids(request)
+    approved_by = str(actor.get("user_id") or actor.get("email") or "user")
     try:
         return approve_pending_action(
             table=table, pk=pk, incident_id=incident_id, action_id=body.action_id,
-            approved_by=str(actor.get("user_id") or actor.get("email") or "user"), **_respond_args(request),
+            approved_by=approved_by, **_respond_args(request, approver=approved_by),
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

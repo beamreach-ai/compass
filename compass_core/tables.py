@@ -12,6 +12,8 @@ import os
 from dataclasses import dataclass
 from typing import Any, Dict, Mapping, Optional
 
+from compass_core import sessions
+
 
 def _dynamodb_config(config: Any) -> Dict[str, Any]:
     """Accepts a workspace config (with a `dynamodb_config` block) or the block itself."""
@@ -73,7 +75,6 @@ def tables(config: Any) -> Tables:
 
 def dynamo_table(name: str):
     """A boto3 Table in the configured region, the way every route and captain builds one."""
-    import boto3
 
     region = os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION")
-    return boto3.resource("dynamodb", region_name=region).Table(name)
+    return sessions.control(region=region).resource("dynamodb").Table(name)

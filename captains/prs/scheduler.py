@@ -11,6 +11,8 @@ import os
 import threading
 from typing import Any, Dict, Iterable, List, Optional
 
+from compass_core import sessions
+
 logger = logging.getLogger("prs.scheduler")
 
 _thread: Optional[threading.Thread] = None
@@ -29,10 +31,9 @@ def workspace_ids() -> List[str]:
     if not table_name:
         default = os.getenv("DEFAULT_WORKSPACE") or os.getenv("TARGET")
         return [default] if default else []
-    import boto3
     from boto3.dynamodb.conditions import Attr
 
-    table = boto3.resource("dynamodb", region_name=os.getenv("WORKSPACES_TABLE_REGION") or os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION")).Table(table_name)
+    table = sessions.control(region=os.getenv("WORKSPACES_TABLE_REGION") or os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION")).resource("dynamodb").Table(table_name)
     hash_key = os.getenv("WORKSPACES_TABLE_HASH_KEY", "pk")
     range_key = os.getenv("WORKSPACES_TABLE_RANGE_KEY", "sk")
     ids: List[str] = []

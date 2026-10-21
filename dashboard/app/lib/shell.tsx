@@ -36,16 +36,30 @@ export type SessionSummary = {
 
 export type AwsSettingsSummary = {
   configured: boolean;
-  mode: "assume_role" | "access_key" | "local_iam" | null;
+  connected?: boolean;
+  mode: "roles" | null;
   region?: string | null;
+  regions?: string[];
   account_id?: string | null;
   account_name?: string | null;
+  install_id?: string | null;
+  roles?: { read?: string | null; act?: string | null };
   role_name?: string | null;
   external_id?: string | null;
   external_id_configured?: boolean;
-  access_key_id_hint?: string | null;
+  source_identity?: boolean;
+  runtime_arn?: string | null;
+  credential_source?: "access_key" | "ambient" | string | null;
+  alert_queues?: Record<string, string | null>;
+  state_buckets?: string[];
+  connected_at?: string | null;
+  verified_at?: string | null;
+  verification?: Record<string, unknown> | null;
+  migrated_from?: string | null;
+  connect_command?: string | null;
   last_validated_at?: string | null;
   beamreach_account_id?: string | null;
+  compass_account_id?: string | null;
   suggested_role_name?: string | null;
 };
 
@@ -145,6 +159,7 @@ export type CaptainSummary = {
   reason?: string | null;
   install_hint?: string | null;
   installed_from?: "page" | "env" | null;
+  permissions?: import("../components/WillUse").PermissionsSummary | null;
 };
 
 // The bootstrap's `update`: compass_core.updates.UpdateState.to_dict()

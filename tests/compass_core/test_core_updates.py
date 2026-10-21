@@ -356,7 +356,7 @@ def test_migrate_creates_tables_and_runs_each_step_once(monkeypatch, tmp_path):
         assert second["created"] == [] and second["migrations"] == ["0.6.0"] and ran == ["0.5.0", "0.6.0"]
         assert migrations.applied(config, workspace_id="local") == ["0.5.0", "0.6.0"]
         # the registered steps: 0.6.0 moves the map to SQLite (here: no map table, so it only marks the config)
-        assert migrations.run(config, workspace_id="local", client=client)["migrations"] == ["0.6.0-map-sqlite"]
+        assert migrations.run(config, workspace_id="local", client=client)["migrations"] == ["0.6.0-map-sqlite", "0.7.0-access-model", "0.7.0-grants"]
         assert saved[-1][1]["map"]["store"] == "sqlite"
         assert migrations.run(config, workspace_id="local", client=client)["migrations"] == []
 

@@ -7,7 +7,7 @@ page), and the setup commands."""
 from __future__ import annotations
 
 from compass_core import __version__
-from compass_core.captains import CaptainManifest, TabSpec
+from compass_core.captains import AwsPermissions, CaptainManifest, Permissions, ServiceSpec, Statement, TabSpec
 
 MANIFEST = CaptainManifest(
     name="core",
@@ -27,8 +27,28 @@ MANIFEST = CaptainManifest(
         "compass_api.routes.slack_connect:router",
         "compass_api.routes.captains:router",
         "compass_api.routes.updates:router",
+        "compass_api.routes.access:router",
     ),
-    admin_write_prefixes=("/api/captains/", "/api/updates/"),
+    admin_write_prefixes=("/api/captains/", "/api/updates/", "/api/access"),
+    # the grant tick: a merged pull request arms an action without anyone remembering to click;
+    # the self-audit: what the roles hold against what the manifests and grants explain, daily
+    services=(
+        ServiceSpec(name="grant-verify", start="compass_core.grants:run_service", interval=300, interval_setting="grant_verify"),
+        ServiceSpec(name="access-audit", start="compass_core.access_audit:run_service", interval=86400, interval_setting="access_audit"),
+    ),
+    # the block every install needs: the self-audit reads the two Compass roles and nothing else
+    permissions=Permissions(
+        aws=AwsPermissions(
+            read=(
+                Statement(
+                    sid="SelfAudit",
+                    actions=("iam:GetRole", "iam:GetRolePolicy", "iam:ListRolePolicies", "iam:ListAttachedRolePolicies",
+                             "iam:GetPolicy", "iam:GetPolicyVersion", "iam:SimulatePrincipalPolicy"),
+                    resources=("{read_role_arn}", "{act_role_arn}"),
+                ),
+            ),
+        ),
+    ),
     tabs=(
         TabSpec(key="queue", label="Queue", group="platform", feature="queue"),
         TabSpec(key="settings", label="Settings", group="platform", feature="settings"),

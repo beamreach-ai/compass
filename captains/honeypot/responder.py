@@ -15,6 +15,7 @@ from typing import Any, Callable, Dict, Optional
 
 from captains.honeypot.actions import get_action
 from captains.honeypot.actions.base import ActionContext, ActionScope, ResponseAction, ScopeError
+from compass_core import grants, sessions
 from compass_core.keys import honeypot_audit_sort_key
 
 logger = logging.getLogger("honeypot-responder")
@@ -80,12 +81,19 @@ def run_response_action(
         "error": None,
         "finished_at": None,
     }
+    if not grants.is_armed(row):
+        audit.update(status="refused", error=f"wait_for_grant: {row.get('action_type')} is {row.get('grant_status') or 'not granted'}, not armed", finished_at=_now())
+        audit_log.write(audit)
+        return audit
     try:
         action.check_scope(scope, ctx)
     except ScopeError as exc:
         audit.update(status="refused", error=str(exc), finished_at=_now())
         audit_log.write(audit)
         return audit
+    info = sessions.session_info(session)
+    if info is not None:
+        audit["session"] = {"name": info.name, "role_arn": info.role_arn, "source_identity": info.source_identity, "policy_hash": info.policy_hash}
     audit_log.write(audit)
 
     try:

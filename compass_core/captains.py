@@ -36,6 +36,8 @@ from importlib import metadata
 from typing import Any, Callable, Dict, FrozenSet, Iterable, List, Literal, Mapping, Optional, Tuple
 
 from compass_core import __version__ as _core_version
+from compass_core import permissions as _permissions
+from compass_core.permissions import AwsPermissions, Permissions, Statement, permission_errors  # noqa: F401 - re-exported for manifests
 
 logger = logging.getLogger("compass.captains")
 
@@ -110,6 +112,7 @@ class CaptainManifest:
     requires_core: str = ">=0.1"
     version: str = "0.0.0"
     install_hint: Optional[str] = None             # how to install it when a licence names it and it is missing
+    permissions: Optional[Permissions] = None      # what it reads in the target account and what it may propose to do (compass_core.permissions)
 
     @property
     def section(self) -> str:
@@ -151,6 +154,7 @@ class CaptainManifest:
             _specifier(self.requires_core)
         except ValueError as exc:
             problems.append(f"requires_core {self.requires_core!r}: {exc}")
+        problems.extend(f"permissions: {p}" for p in permission_errors(self.permissions))
         return problems
 
 
@@ -457,6 +461,7 @@ class CaptainState:
             "active": self.active,
             "reason": self.reason,
             "install_hint": m.install_hint,
+            "permissions": _permissions.describe(m.permissions),
         }
 
 

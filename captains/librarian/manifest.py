@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from compass_core import __version__
-from compass_core.captains import CaptainManifest
+from compass_core.captains import CaptainManifest, Permissions
 
 MANIFEST = CaptainManifest(
     name="librarian",
@@ -14,6 +14,7 @@ MANIFEST = CaptainManifest(
     routers=("compass_api.routes.librarian:router",),
     route_prefixes=("/api/librarian",),
     depends_on=("mapper",),
+    permissions=Permissions(),   # reads the map, never AWS
     requires_core=">=0.1,<1",
     version=__version__,
 )

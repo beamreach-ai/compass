@@ -175,11 +175,25 @@ def progress_item(
 
 
 # ── Honeypot response actions and audits ──
+def grant_sort_key(captain: str, grant_id: str) -> str:
+    """A grant: one action a captain may run, with its scope and lifecycle (compass_core.grants).
+    The decoy captain's whitelist rows are its grants; `0.7.0-grants` renamed their keys."""
+    return f"GRANT#{captain}#{grant_id}"
+
+
+def grant_prefix(captain: Optional[str] = None) -> str:
+    return f"GRANT#{captain}#" if captain else "GRANT#"
+
+
 def honeypot_action_sort_key(action_id: str) -> str:
-    return f"HONEYPOT#ACTION#{action_id}"
+    return grant_sort_key("honeypot", action_id)
 
 
 def honeypot_action_prefix() -> str:
+    return grant_prefix("honeypot")
+
+
+def legacy_honeypot_action_prefix() -> str:
     return "HONEYPOT#ACTION#"
 
 

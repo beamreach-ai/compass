@@ -6,10 +6,10 @@ import time
 import uuid
 from typing import Any, Dict, List, Optional
 
-import boto3
 from boto3.dynamodb.conditions import Attr, Key
 from botocore.exceptions import BotoCoreError, ClientError
 
+from compass_core import sessions
 from compass_core.job_models import CaptainJob
 from compass_core.local_state import local_state_store
 
@@ -90,11 +90,7 @@ class CaptainJobStore:
         self._table = None
         if self.table_name:
             try:
-                resource = (
-                    boto3.resource("dynamodb", region_name=self.region_name)
-                    if self.region_name
-                    else boto3.resource("dynamodb")
-                )
+                resource = sessions.control(region=self.region_name).resource("dynamodb")
                 self._table = resource.Table(self.table_name)
             except (BotoCoreError, ClientError) as exc:
                 logger.warning(
