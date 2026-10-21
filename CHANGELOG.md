@@ -5,11 +5,14 @@ workflow refuses a tag without one, and reads from it what the dashboard shows
 next to the Update button: the first paragraph is the summary, the bullets under
 `### After the update` are the notes an operator needs after applying it.
 
-## 0.8.0 — unreleased
+## 0.8.0 — 2026-10-21
 
 Demo mode: with `APP_MODE=demo` this image runs a public demo the way
 demo.beamreach.ai does, a synthetic account on the map beside a real one.
-[docs/demo.md](docs/demo.md) says how. The quickstart does not change.
+[docs/demo.md](docs/demo.md) says how. The quickstart does not change. This
+release also carries 0.5.0 to 0.7.0, which were not released on their own:
+read their sections below, and their "After the update" notes apply to an
+install coming from 0.4.1.
 
 - `compass demo seed [resources=…] [seed=…]` writes the benchmark's synthetic
   world (`infra_map/synthetic.py`, until now `tests/benchmark/world.py`) to the
@@ -50,7 +53,7 @@ demo.beamreach.ai does, a synthetic account on the map beside a real one.
   last reset, the next one, the trips in force, the open visitor pull
   requests and this week's tour completions.
 
-## 0.7.0 — unreleased
+## 0.7.0 — 2026-10-21
 
 Compass only reads your account, through a role it creates once, and writes
 nothing without a pull request you merge. The operator's profile is used by
@@ -107,7 +110,7 @@ one command, `compass connect`; the running services never see it.
 - Decoys planted before this release report to the old queue until
   `honeypot replant-alerts` has opened and you have merged its pull request.
 
-## 0.6.0 — unreleased
+## 0.6.0 — 2026-10-21
 
 The map moves from DynamoDB to a SQLite file and keeps its history: scans of a
 100,000-resource account take seconds instead of the better part of an hour,
@@ -124,7 +127,7 @@ and the map reads that took tens of seconds take milliseconds.
 - Every reader of the map goes through one interface, `GraphStore`
   (`infra_map.graph_store`), with `set_graph_store_factory` for a deployment
   that brings its own store. A Postgres store implements it too:
-  `pip install compass[postgres]` and `map: {store: postgres, dsn: …}`.
+  `pip install compass-open[postgres]` and `map: {store: postgres, dsn: …}`.
 - `compass mapper backup out=<path>` copies the map while the stack runs.
 - The map benchmark (`docs/benchmark.md`): a synthetic account of 10k, 100k or
   1M resources, run against each store. 10k runs on every pull request with
@@ -142,7 +145,7 @@ and the map reads that took tens of seconds take milliseconds.
 - To go back to the DynamoDB map, set `COMPASS_MAP_STORE=dynamodb` in `.env`
   and restart; the next scan brings the table up to date.
 
-## 0.5.2 — unreleased
+## 0.5.2 — 2026-10-21
 
 An end-to-end suite that runs on every pull request, and the bugs it found on
 its first runs.
@@ -202,7 +205,7 @@ its first runs.
   headline. `COMPASS_RELEASE_NOTES_URL` points at a mirror or a file; `off`
   stops just the notes. Notes that cannot be read do not hold up the update.
 
-## 0.5.1 — unreleased
+## 0.5.1 — 2026-10-21
 
 Dashboard polish: readable buttons, Settings in sections, a progress bar for
 map scans.
@@ -228,7 +231,7 @@ map scans.
   the page (the PR watcher adds one every five minutes) the Queue tab and the
   progress bar could miss the job that was running.
 
-## 0.5.0 — unreleased
+## 0.5.0 — 2026-10-21
 
 Updates: the dashboard says when a release is out and applies it with one
 click when the updater service runs; `compass update check | apply | rollback`

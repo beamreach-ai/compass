@@ -742,3 +742,61 @@ change it; a scan costs a few minutes of the daemon.
 recreated weekly (specified) versus none. *Keep it*: without it the Pull
 requests tab is empty until a visitor writes, and the PR watcher's reply is
 one of the three model-backed things in the product.
+
+## Decisions taken (2026-10-21, the seven open decisions)
+
+1. **Visitor pull requests go to `beamreach-ai/beamreach-demo-infra` itself**, not a
+   sandbox repository: the workspace's `honeypot_repo` and `iac_repo` already point
+   there and the pre-armed decoys were planted from it. Guard rails, in that
+   repository: the `apply` job's environment gets a required reviewer so no merge
+   applies without a person; visitor pull requests carry the label `demo` and
+   branches `beamreach/<captain>/<slug>`, and the reset closes every open pull
+   request Compass opened there. `demo.sandbox_repo` is named `demo.visitor_repo`
+   in the config block.
+2. **Attribution on screen is "by a visitor" / "by you"**; the Cognito user id goes in
+   the audit row and in `SourceIdentity`, never an email.
+3. **The world is 2,500 resources** (about 4,000 nodes, the dashboard's draw-whole
+   limit) until the map at scale (4.2) and the paged query API (1.3) ship; then
+   `demo.world.resources` goes to 10,000.
+4. **The cooldown is 5 minutes per decoy**, shared by all visitors. Because that is
+   shorter than CloudTrail delivery plus the response, the route also refuses while
+   the decoy is not yet `armed` again (the re-arm after `action_verified_at`): the
+   effective pacing is five minutes or until the decoy is re-armed, whichever is
+   later, and the visitor lands on the open incident either way.
+5. **Tour state is server-side per Cognito user** (`DEMO#TOUR#<user>`).
+6. **The real account is rescanned only on reset**: `COMPASS_MAP_INTERVAL` stays 0
+   and `compass demo reset` starts the scan (step 5). Nothing a visitor does is
+   ever applied, so the real part does not change between resets.
+7. **The seeded reviewed pull request stays**: one file, one reviewer comment from
+   the bot account, recreated by every reset.
+
+## Implementation notes (2026-10-21, as built in 0.8.0)
+
+What the code showed that the text above assumed otherwise; `docs/demo.md` is
+the reference for what shipped.
+
+- **The synthetic world is told apart by scope, not source.** Coverage, the
+  suggestions, the IaC tab and the mapper's own annotation all filter on
+  `source == "aws_scan"`; a `demo_world` source would have left the world out of
+  every one of them. The rows carry the collectors' sources (`aws_scan`,
+  `git_scan`, `tf_state`; the generator's old `github`/`tfstate` matched nothing
+  real) under the one scope `demo:seed:<n>`, and the mapper's scan lists the
+  `(source, scope)` pairs it covers (it scanned the whole org before: a rescan
+  would have closed the world). The synthetic repositories live under
+  `acme-demo/` so no synthetic row shares an id with a real one.
+- **"Trip it" is `test-fire` without the test flag.** `test-fire` already made the
+  real STS call for `aws_credential` decoys; the trip is the same call under a
+  user agent that marks it a trip, as the job `honeypot trip`. The pre-armed
+  decoys' keys reach Compass through `honeypot arm … secret_access_key=…`
+  (new), which `fire` and the trip read.
+- **The re-arm and the reset's decoy work belong to the honeypot captain**
+  (`captains/honeypot/demo_rearm.py`, `demo_reset.py`, the service `demo-rearm` on
+  its manifest), not to the core: the core names no captain.
+- **The tour's API carries facts, the dashboard decides where a step opens**: the
+  step "What Terraform doesn't manage" is `unmanaged`, and `?q=`, `?token=` and
+  `?incident=` on the tabs are what the panel links to.
+- **One visitor in the open edition.** The cookie login has no user id, so every
+  visitor is the same one there; the product's Cognito id makes trips, tours and
+  "by you" per visitor.
+- **The release is one, `v0.8.0`**, carrying 0.5.0 to 0.7.0 and demo mode together,
+  not 0.7.0 then 0.8.0; the product bumps once.
