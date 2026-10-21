@@ -14,6 +14,7 @@ from typing import Any, Dict, Iterable, List, Optional
 
 from captains.honeypot.actions import get_action
 from captains.honeypot.actions.base import ActionScope
+from compass_core.grants import context_entries
 
 DEFAULT_ROLE_NAME = "svc-ops-responder"
 MODULE_DIR = "services/_responder"
@@ -110,6 +111,9 @@ def simulate_actions(iam_client: Any, role_arn: str, policy: Dict[str, Any]) -> 
         kwargs: Dict[str, Any] = {"PolicySourceArn": role_arn, "ActionNames": actions}
         if resources != ["*"]:
             kwargs["ResourceArns"] = [r for r in resources if "*" not in r.split(":")[-1].split("/")[0]] or resources
+        context = context_entries(stmt)
+        if context:
+            kwargs["ContextEntries"] = context  # a conditioned statement is implicitDeny without its context
         resp = iam_client.simulate_principal_policy(**kwargs)
         for r in resp.get("EvaluationResults", []):
             results.append({"action": r["EvalActionName"], "resource": r.get("EvalResourceName"), "decision": r["EvalDecision"]})
