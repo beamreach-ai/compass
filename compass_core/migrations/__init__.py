@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from compass_core.keys import workspace_pk
 from compass_core.tables import dynamo_table, tables
@@ -123,8 +123,11 @@ def applied(config: Dict[str, Any], *, workspace_id: str, table: Any = None) -> 
         kwargs["ExclusiveStartKey"] = page["LastEvaluatedKey"]
 
 
-def run(config: Dict[str, Any], *, workspace_id: str, client: Any = None, table: Any = None, steps: Optional[List[Step]] = None) -> Dict[str, Any]:
-    """Create missing tables, then run every step not yet recorded, in order."""
+def run(config: Dict[str, Any], *, workspace_id: str, client: Any = None, table: Any = None, steps: Optional[List[Step]] = None,
+        rerun: Optional[Sequence[str]] = None) -> Dict[str, Any]:
+    """Create missing tables, then run every step not yet recorded, in order. ``rerun`` names
+    recorded steps to run again (an operator's call after a step ran against the wrong
+    store or saved nothing); every step is safe to repeat."""
     from compass_core.commands import create_tables
     from compass_core.updates import running_version
 
@@ -136,7 +139,7 @@ def run(config: Dict[str, Any], *, workspace_id: str, client: Any = None, table:
         raise LookupError("no items table in the workspace config to record migrations in (dynamodb_config.items)")
     if todo:
         table = table or dynamo_table(name)
-        done = set(applied(config, workspace_id=workspace_id, table=table))
+        done = set(applied(config, workspace_id=workspace_id, table=table)) - {str(v) for v in (rerun or [])}
         for version, step in todo:
             if version in done:
                 continue

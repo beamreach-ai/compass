@@ -98,7 +98,9 @@ one command, `compass connect`; the running services never see it.
 - The 0.6.0 map migration copies the DynamoDB map into the store the workspace
   names (`map.store`, or `COMPASS_MAP_STORE`; Postgres for a deployment that set
   it) and keeps that setting, instead of always writing a SQLite file and
-  pointing the workspace at it.
+  pointing the workspace at it. `compass migrate rerun=<version>[,…]` runs a
+  recorded step again, and every step gets the workspace id whatever loader
+  gave it the config.
 
 ### After the update
 

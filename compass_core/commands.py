@@ -248,15 +248,18 @@ def init_tables(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def migrate(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """What a new version does on first start: create missing tables, run the migration steps not yet recorded."""
+    """What a new version does on first start: create missing tables, run the migration steps not
+    yet recorded. `rerun=<version>[,<version>]` runs recorded steps again (every step is safe to repeat)."""
     from compass_core import extensions, migrations
 
     workspace = resolve(payload)
+    raw = payload.get("rerun")
+    rerun = [str(v).strip() for v in (raw if isinstance(raw, list) else str(raw or "").split(",")) if str(v).strip()]
     root = extensions.directory()
     if root is None:
-        return migrations.run(workspace.config, workspace_id=workspace.workspace_id)
+        return migrations.run(workspace.config, workspace_id=workspace.workspace_id, rerun=rerun)
     with extensions.lock(root):  # the API and the daemon start together
-        return migrations.run(workspace.config, workspace_id=workspace.workspace_id)
+        return migrations.run(workspace.config, workspace_id=workspace.workspace_id, rerun=rerun)
 
 
 # ── connect ──────────────────────────────────────────────────────────────────

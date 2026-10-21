@@ -166,3 +166,7 @@ def test_compass_migrate_runs_the_step_once_per_workspace(tmp_path, monkeypatch)
         config.pop("workspace_id", None)
         migrations.run(config, workspace_id="ws", client=client, table=table, steps=[("9.9.9-test", lambda c: seen.append(c.get("workspace_id")))])
         assert seen == ["ws"]
+        # an operator runs a recorded step again
+        assert migrations.run(config, workspace_id="ws", client=client, table=table, steps=[("9.9.9-test", lambda c: seen.append("again"))])["migrations"] == []
+        again = migrations.run(config, workspace_id="ws", client=client, table=table, steps=[("9.9.9-test", lambda c: seen.append("again"))], rerun=["9.9.9-test"])
+        assert again["migrations"] == ["9.9.9-test"] and seen == ["ws", "again"]
