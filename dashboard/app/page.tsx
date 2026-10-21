@@ -66,7 +66,7 @@ export default function LandingPage() {
           </h1>
           <p className="mt-2 text-sm text-gray-600">
             {isDemo
-              ? "Use Google for one-click access to the Beamreach demo, then continue to production if you want your own workspace."
+              ? "Use Google to open the shared demo account: a synthetic map beside a real one, decoys you can trip, pull requests that are never applied. It resets on Sunday."
               : "Use Google for one-click access, or continue with email and password through Cognito."}
           </p>
         </div>
@@ -106,14 +106,14 @@ export default function LandingPage() {
                 : 'cursor-not-allowed border-gray-200 text-gray-400'
             }`}
           >
-            {isDemo ? 'Self-host' : 'Register'}
+            {isDemo ? 'Run it yourself' : 'Register'}
           </a>
         </div>
 
         <p className="mt-6 text-center text-xs text-gray-500">
           {authConfigured
             ? isDemo
-              ? 'The demo environment is shared and read-only.'
+              ? 'The demo account is shared with every visitor and resets on Sunday.'
               : 'After authentication, access is still limited by Beamreach workspace membership.'
             : 'Authentication is not configured for this environment yet.'}
         </p>

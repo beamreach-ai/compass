@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional
 
+from compass_core import sessions
 from compass_core.aws import resolve_target_region
 from compass_core.events import emit_job_event
 from infra_map.graph_store import open_store
@@ -187,7 +188,8 @@ class IACImportJob:
             PRRegistry.from_config(self.config).record(
                 url=pr_url,
                 pr_type="iac_import",
-                origin={"captain": "iac", "command": "import", "job_id": current_job_id(), "resource_ids": list(resource_ids)},
+                origin={"captain": "iac", "command": "import", "job_id": current_job_id(), "resource_ids": list(resource_ids),
+                        "user_id": sessions.current_requester()},
                 intent=intent_for_iac_import(addresses=addresses, resource_ids=resource_ids, files=files, verified=verified, plan_clean=plan_clean),
                 branch=branch,
                 base_branch=base_branch,

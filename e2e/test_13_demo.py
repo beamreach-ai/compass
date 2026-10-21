@@ -3,6 +3,7 @@ through the CLI beside the scanned account, a rescan that leaves it alone."""
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Dict
 
 import pytest
@@ -64,7 +65,53 @@ def test_demo_1_the_world_is_seeded_beside_the_account_and_a_rescan_leaves_it_al
     assert (again["scan"]["added"], again["scan"]["changed"], again["scan"]["removed"]) == (0, 0, 0), again["scan"]
 
 
+def _within(inner: Dict[str, float], outer: Dict[str, float]) -> bool:
+    return inner["x"] >= outer["x"] - 1 and inner["y"] >= outer["y"] - 1 and \
+        inner["x"] + inner["width"] <= outer["x"] + outer["width"] + 1 and inner["y"] + inner["height"] <= outer["y"] + outer["height"] + 1
+
+
+def test_demo_2_the_demo_is_marked_on_every_screen_and_in_the_exported_map(stack, page, phone_page, mapped, demo_mode):
+    shots = Path("e2e/.artifacts/demo")
+    shots.mkdir(parents=True, exist_ok=True)
+
+    page.open("/workspace?tab=maps", wait_for="Target account")
+    page.locator("aside [data-demo-badge]").first.wait_for()
+    page.wait_for_function("document.title.includes('demo')")  # set once the shell knows the mode
+    banner = page.locator("[data-demo-banner]")
+    banner.wait_for()
+    assert "resets on Sunday" in banner.inner_text()
+    watermark = page.locator("[data-map-watermark]")
+    watermark.wait_for()
+    card = watermark.locator("xpath=../..")  # the map card the canvas sits in
+    box, card_box = watermark.bounding_box(), card.bounding_box()
+    assert box and card_box and _within(box, card_box), (box, card_box)
+    assert box["x"] + box["width"] > card_box["x"] + card_box["width"] * 0.7 and box["y"] > card_box["y"] + card_box["height"] * 0.7, "lower right"
+    watermark.scroll_into_view_if_needed()
+    page.screenshot(path=str(shots / "maps-desktop.png"), full_page=False)
+    run_it = page.locator("aside").get_by_role("link", name="Run it yourself")
+    assert run_it.get_attribute("href") == "https://beamreach.ai/compass/install.html"
+    page.get_by_role("button", name="Dismiss the demo notice").click()
+    assert banner.count() == 0
+    page.open("/workspace?tab=honeypots", wait_for="Target account")
+    assert banner.count() == 0, "dismissed for the session"
+    page.locator("aside [data-demo-badge]").first.wait_for()
+
+    phone_page.open("/workspace?tab=maps")
+    phone_page.get_by_role("button", name="Open menu").wait_for()
+    phone_page.locator("[data-demo-badge]").first.wait_for()  # the top bar's chip, the drawer closed
+    phone_page.locator("[data-map-watermark]").wait_for()
+    phone_page.screenshot(path=str(shots / "maps-phone.png"), full_page=False)
+    phone_page.locator("[data-map-watermark]").scroll_into_view_if_needed()
+    phone_page.screenshot(path=str(shots / "maps-phone-canvas.png"), full_page=False)
+
+    exported = stack.cli("mapper", "export", "format=html", "out=/compass/map/demo-export.html")
+    assert exported["nodes"] > 0
+    html = stack.read("map/demo-export.html") or ""
+    assert 'id="wm"' in html and "Synthetic resource (demo world)" in html
+
+
 def test_demo_1b_outside_demo_mode_the_seed_refuses_in_one_line(stack):
+    """Last in the file: it leaves demo mode off, as the module fixture does."""
     stack.env(APP_MODE=None)
     stack.restart("api", "compass")
     err = stack.cli("demo", "seed", "resources=100", expect=2)

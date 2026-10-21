@@ -21,6 +21,13 @@ demo.beamreach.ai does, a synthetic account on the map beside a real one.
   nothing; other numbers replace the world. Demo mode only.
 - The map store answers `scopes(org_id)`: the `(source, scope)` pairs with
   current rows and their counts, on SQLite, Postgres and DynamoDB.
+- Demo mode is marked: a `DEMO` chip beside the account and in the phone's
+  top bar, `Compass · demo` as the title, a watermark on the map canvas and on
+  exported map pages, one dismissable banner saying what the demo is, "Run it
+  yourself" to the install page, "by you" / "by a visitor" on pull requests,
+  "Fixed in the demo" on the settings the demo pins, and "Synthetic resource
+  (demo world)" on a synthetic node's detail. The read-only notice stays its
+  own thing (`READ_ONLY`). `APP_MODE` reaches the dashboard from `.env`.
 
 ## 0.7.0 — unreleased
 

@@ -24,6 +24,7 @@ def load_graph(config: Dict[str, Any], *, org_id: str, workspace_id: str) -> Dic
             "region": n.region,
             "terraform": bool(n.terraform),
             "tf_address": getattr(n.terraform, "resource_address", None) if n.terraform else None,
+            "synthetic": bool((n.attributes or {}).get("synthetic")),
         }
         for n in graph.get("nodes", [])
     ]
@@ -63,7 +64,8 @@ _HTML = """<!doctype html>
   #side h3 { margin:0 0 8px; font-size:14px; } #side dt { color:var(--muted); margin-top:6px; } #side dd { margin:0; word-break:break-all; }
   svg { width:100vw; height:100vh; } .link { stroke:#475569; stroke-opacity:.6; } .node circle { stroke:#0f172a; stroke-width:1px; cursor:pointer; }
   .node text { font-size:9px; fill:var(--muted); pointer-events:none; } .dim { opacity:.15; }
-</style></head><body>
+  #wm { position:fixed; right:24px; bottom:16px; z-index:3; font:900 40px/1 system-ui,sans-serif; letter-spacing:.3em; text-transform:uppercase; color:rgba(251,191,36,.45); pointer-events:none; user-select:none; }
+</style></head><body>__WATERMARK__
 <div id="top"><strong>Infra map</strong><span id="stats"></span>
   <input id="q" placeholder="filter by name, id, type…" size="32"><select id="t"><option value="">all types</option></select>
   <label><input type="checkbox" id="tfonly"> in Terraform only</label></div>
@@ -93,7 +95,7 @@ node.on('click', (ev, d) => {
   const out = links.filter(l => l.source.id === d.id).map(l => `${l.type} → ${l.target.name || l.target.id}`);
   const inn = links.filter(l => l.target.id === d.id).map(l => `${l.source.name || l.source.id} → ${l.type}`);
   side.className = 'open';
-  side.innerHTML = `<h3>${d.name || d.id}</h3><dl><dt>type</dt><dd>${d.type}</dd><dt>id</dt><dd>${d.id}</dd><dt>account / region</dt><dd>${d.account_id||''} ${d.region||''}</dd><dt>terraform</dt><dd>${d.tf_address || (d.terraform ? 'yes' : 'not in Terraform')}</dd><dt>outgoing (${out.length})</dt><dd>${out.join('<br>')||'—'}</dd><dt>incoming (${inn.length})</dt><dd>${inn.join('<br>')||'—'}</dd></dl>`;
+  side.innerHTML = `<h3>${d.name || d.id}</h3><dl><dt>type</dt><dd>${d.type}</dd><dt>id</dt><dd>${d.id}</dd><dt>account / region</dt><dd>${d.account_id||''} ${d.region||''}</dd><dt>terraform</dt><dd>${d.tf_address || (d.terraform ? 'yes' : 'not in Terraform')}</dd>${d.synthetic ? '<dt>demo</dt><dd>Synthetic resource (demo world)</dd>' : ''}<dt>outgoing (${out.length})</dt><dd>${out.join('<br>')||'—'}</dd><dt>incoming (${inn.length})</dt><dd>${inn.join('<br>')||'—'}</dd></dl>`;
 });
 function applyFilter() {
   const q = document.getElementById('q').value.toLowerCase(), t = sel.value, tf = document.getElementById('tfonly').checked;
@@ -105,8 +107,10 @@ function applyFilter() {
 """
 
 
-def to_html(graph: Dict[str, List[Dict[str, Any]]]) -> str:
-    return _HTML.replace("__DATA__", json.dumps(graph).replace("</", "<\\/"))
+def to_html(graph: Dict[str, List[Dict[str, Any]]], *, demo: bool = False) -> str:
+    """The one-page viewer; in demo mode with a DEMO watermark in the lower right, in the pixels of any screenshot."""
+    watermark = '<div id="wm" aria-hidden="true">demo</div>' if demo else ""
+    return _HTML.replace("__WATERMARK__", watermark).replace("__DATA__", json.dumps(graph).replace("</", "<\\/"))
 
 
 def write_map(config: Dict[str, Any], *, org_id: str, workspace_id: str, fmt: str, out: str) -> Dict[str, Any]:
@@ -116,7 +120,9 @@ def write_map(config: Dict[str, Any], *, org_id: str, workspace_id: str, fmt: st
     elif fmt == "dot":
         text = to_dot(graph)
     elif fmt == "html":
-        text = to_html(graph)
+        from compass_core import demo
+
+        text = to_html(graph, demo=demo.enabled())
     else:
         raise ValueError("format must be json, dot or html")
     path = Path(out)

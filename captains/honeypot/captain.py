@@ -683,7 +683,8 @@ class HoneypotCaptain:
             PRRegistry.from_config(self.config, workspace_id=self.workspace_id).record(
                 url=pr_url,
                 pr_type={"plant": "honeypot_plant", "decommission": "honeypot_decommission"}.get(command, "honeypot_responder"),
-                origin={"captain": "honeypot", "command": command, "job_id": current_job_id(), "honeytoken_id": honeytoken.get("honeytoken_id")},
+                origin={"captain": "honeypot", "command": command, "job_id": current_job_id(), "honeytoken_id": honeytoken.get("honeytoken_id"),
+                        "user_id": sessions.current_requester()},
                 intent=intent_for_honeypot(command, honeytoken=honeytoken, module_name=module, root_file=f"{prefix}{ROOT_FILE}", module_dir=directory, files=files),
                 branch=branch,
                 base_branch=base_branch,

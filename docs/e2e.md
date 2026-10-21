@@ -333,6 +333,7 @@ policy the module renders into moto, as the apply would.
 | ID | Test | Via |
 |---|---|---|
 | DEMO-1 | With `APP_MODE=demo`, `compass demo seed` puts the synthetic world on the map beside the scanned account, a rescan leaves it alone, the same seed again changes nothing; outside demo mode the command refuses | CLI, API |
+| DEMO-2 | The demo is marked: the chip beside the account and in the phone's top bar, the title, the watermark over the map, the banner that dismisses for the session, "Run it yourself" to the install page, a synthetic node's detail says so; the exported map page carries the watermark | UI, CLI |
 
 The stack runs these with `APP_MODE=demo` in `.env` and puts it back afterwards; the
 read-only test (AUT-5) keeps `READ_ONLY=1` as its own thing.

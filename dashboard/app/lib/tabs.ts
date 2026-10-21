@@ -31,6 +31,8 @@ export type TabDetail = {
   feature?: string | null;
 };
 
+import type { DemoConfig } from "./demo";
+
 export type AppConfigSummary = {
   mode?: "production" | "demo" | null;
   read_only?: boolean;
@@ -40,6 +42,7 @@ export type AppConfigSummary = {
   tabs?: TabDetail[] | null;
   disabled_features?: string[] | null;
   production_url?: string | null;
+  demo?: DemoConfig | null;
 };
 
 const SLUG = /^[a-z][a-z0-9_-]*$/;

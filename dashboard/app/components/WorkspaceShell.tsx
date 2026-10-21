@@ -3,13 +3,29 @@
 import Link from "next/link";
 import { Suspense, useEffect, useState } from "react";
 
+import DemoBadge from "./DemoBadge";
 import Sidebar from "./Sidebar";
 import { COMPANY_NAME, LOGO_URL, PRODUCT_NAME } from "../lib/edition";
 
 // The sidebar is a fixed column from md up and an off-canvas drawer below it,
 // opened from a slim top bar. Attendees open the demo stand from their phones.
-export default function WorkspaceShell({ children }: { children: React.ReactNode }) {
+export default function WorkspaceShell({ children, demo: demoFromServer = false }: { children: React.ReactNode; demo?: boolean }) {
   const [open, setOpen] = useState(false);
+  // the server's APP_MODE when the layout rendered with it; else the bootstrap says, so a
+  // statically rendered shell and a product build without the env still mark themselves
+  const [demo, setDemo] = useState(demoFromServer);
+  useEffect(() => {
+    if (demoFromServer) return;
+    fetch("/api/settings/bootstrap")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setDemo(d?.app?.mode === "demo"))
+      .catch(() => undefined);
+  }, [demoFromServer]);
+  useEffect(() => {
+    if (!demo) return;
+    const base = PRODUCT_NAME;
+    if (!document.title.includes("demo")) document.title = `${base} · demo`;
+  }, [demo]);
 
   useEffect(() => {
     if (!open) return;
@@ -37,6 +53,7 @@ export default function WorkspaceShell({ children }: { children: React.ReactNode
         <Link href="/workspace" className="flex items-center gap-2 text-sm font-semibold">
           {LOGO_URL && <img src={LOGO_URL} alt={COMPANY_NAME} className="h-6 w-auto" />}
           {PRODUCT_NAME}
+          {demo && <DemoBadge />}
         </Link>
       </div>
 

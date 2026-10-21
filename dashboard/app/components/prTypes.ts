@@ -39,7 +39,7 @@ export type PRRecord = {
   base_branch?: string | null;
   type: string;
   state?: "open" | "merged" | "closed" | null;
-  origin?: { captain?: string; command?: string; finding_id?: string | null; honeytoken_id?: string | null; rope_id?: string | null; job_id?: string | null } | null;
+  origin?: { captain?: string; command?: string; finding_id?: string | null; honeytoken_id?: string | null; rope_id?: string | null; job_id?: string | null; user_id?: string | null } | null;
   intent?: {
     goal?: string;
     action_family?: string;

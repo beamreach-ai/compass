@@ -5,6 +5,8 @@ import axios from "axios";
 import Graphin, { Behaviors, Components as GraphinComponents } from "@antv/graphin";
 import "@antv/graphin/dist/index.css";
 import MappingProgressBar from "./MappingProgressBar";
+import { isDemoApp } from "../lib/demo";
+import { useShell } from "../lib/shell";
 
 type InfraNode = {
   org_id: string;
@@ -530,9 +532,11 @@ const computeSubgraph = (
   return { nodes, edges };
 };
 
-const GraphCard: React.FC<{ title: string; loading?: boolean; children: React.ReactNode }> = ({
+// `watermark` is drawn over the canvas, lower right, so it is in the pixels of every screenshot (the demo)
+const GraphCard: React.FC<{ title: string; loading?: boolean; watermark?: string | null; children: React.ReactNode }> = ({
   title,
   loading = false,
+  watermark = null,
   children,
 }) => (
   <div className="bg-white border rounded-lg shadow-sm h-[520px] flex flex-col">
@@ -540,7 +544,18 @@ const GraphCard: React.FC<{ title: string; loading?: boolean; children: React.Re
       <span>{title}</span>
       {loading && <span className="text-xs text-blue-500 animate-pulse">Loading…</span>}
     </div>
-    <div className="flex-1 min-h-0">{children}</div>
+    <div className="relative flex-1 min-h-0">
+      {children}
+      {watermark && (
+        <div
+          data-map-watermark
+          aria-hidden="true"
+          className="pointer-events-none absolute bottom-3 right-4 z-10 select-none text-4xl font-black uppercase tracking-[0.3em] text-amber-600/40"
+        >
+          {watermark}
+        </div>
+      )}
+    </div>
   </div>
 );
 
@@ -977,6 +992,8 @@ const relationshipLabel = (edge: InfraEdge): string =>
   `${edge.relationship_type} → ${edge.to_resource_id.split(":").pop() || edge.to_resource_id}`;
 
 const MapsTab: React.FC<MapsTabProps> = ({ infraScan = null, mapperJob = null, onMapperTriggered }) => {
+  const { settingsBootstrap } = useShell();
+  const demo = isDemoApp(settingsBootstrap?.app);
   const [mapData, setMapData] = useState<InfraMapResponse | null>(null);
   const [mapLoading, setMapLoading] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
@@ -1471,7 +1488,7 @@ const toggleCategoryFilter = useCallback(
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-1 gap-4">
-        <GraphCard title="AntV Graphin" loading={mapLoading}>
+        <GraphCard title="AntV Graphin" loading={mapLoading} watermark={demo ? "demo" : null}>
           {filteredGraph.nodes.length === 0 ? (
             <div className="h-full flex items-center justify-center text-sm text-gray-500">
               {mapLoading ? "Loading map…" : "No graph data available"}
@@ -1515,6 +1532,9 @@ const toggleCategoryFilter = useCallback(
                 </span>
               </h3>
               <p className="text-sm text-gray-600">{selectedNode.name}</p>
+              {selectedNode.attributes?.synthetic === true && (
+                <p className="text-xs font-medium text-amber-700">Synthetic resource (demo world)</p>
+              )}
             </div>
             <div className="grid md:grid-cols-2 gap-4 text-sm">
               <div className="space-y-1">

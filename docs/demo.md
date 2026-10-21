@@ -76,6 +76,28 @@ synthetic ones marked:
 The seed needs the target account (`aws.account_id`, set by `compass connect`)
 and runs on whichever store the workspace names, SQLite or Postgres.
 
+## Marked as a demo
+
+Nobody mistakes the demo for their own account. In demo mode the dashboard
+shows a `DEMO` chip beside the target account in the sidebar and in the
+phone's top bar, the page title reads `Compass · demo`, and the map canvas
+and every exported map page carry a `DEMO` watermark in the lower right,
+drawn over the graph so it is in the pixels of a screenshot. None of these
+can be dismissed. One banner says what the demo is ("Demo account. Plant,
+open pull requests, trip a decoy and watch the response: it all runs against
+a shared demo account that resets on Sunday.") and can be dismissed for the
+session; the read-only notice is a separate thing and shows only when
+`READ_ONLY` is also on. The sidebar's "Run it yourself" goes to
+`demo.links.install` (else `PRODUCTION_URL`), with "Source on GitHub" under
+it. A synthetic node's detail panel says "Synthetic resource (demo world)"
+under its name.
+
+Writes a visitor makes are attributed "by you" or "by a visitor", never a
+name or an email: the pull request list has a By column in demo mode, from
+the requester a job recorded on the pull request's origin. The settings the
+demo fixes (`demo.pinned_settings`: the AWS access, GitHub, the demo block,
+the notification endpoints) are read-only with "Fixed in the demo" on them.
+
 ## The API
 
 `GET /api/demo` (read scope) is what the dashboard asks: the mode, the world
