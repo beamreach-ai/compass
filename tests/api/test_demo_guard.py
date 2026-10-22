@@ -113,6 +113,11 @@ def test_without_a_sign_in_proxy_the_oidc_header_is_not_believed(client):
     assert client.post("/api/settings/aws", headers={"x-amzn-oidc-data": _oidc(ADMIN)}).status_code == 403
 
 
+def test_a_call_that_skipped_the_proxy_is_not_believed_either(client):
+    # the ALB forwards Bearer calls without Cognito, so their OIDC headers are whatever the caller sent
+    assert client.post("/api/settings/aws", headers={"x-amzn-oidc-data": _oidc(ADMIN), "Authorization": "Bearer other"}).status_code == 403
+
+
 def test_outside_demo_mode_nothing_is_refused(client, monkeypatch):
     monkeypatch.setenv("APP_MODE", "production")
     assert client.post("/api/settings/aws").status_code == 200

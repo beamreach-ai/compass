@@ -68,6 +68,8 @@ def request_email(request: Request) -> Optional[str]:
     the CLI or an admin API token."""
     if not any(name.lower().startswith("x-amzn-oidc") for name in extensions.identity_headers()):
         return None  # no sign-in proxy vouches for the headers: anyone could send them
+    if request.headers.get("authorization"):
+        return None  # token calls skip the proxy's sign-in (the ALB's bearer rule): its headers are the caller's own
     oidc = request.headers.get("x-amzn-oidc-data", "")
     email = ""
     if oidc.count(".") >= 2:
