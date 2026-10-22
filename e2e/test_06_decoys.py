@@ -296,7 +296,10 @@ def test_dec_7_responses_recommend_wait_for_approval_or_run_by_their_mode(stack)
     action_id = _action(stack, "approve")
     gated = armed_decoy(stack, "e2e-respond-approve")
     send_alert(stack, gated["id"], gated["key"], "203.0.113.11", user=gated["user"])
-    parked = wait_incident(stack, "203.0.113.11", until=lambda d: "approv" in json.dumps(d).lower())
+    # wait for the parked action itself: the decoy's own name has "approve" in it, so the word is in the
+    # incident from its first alert, before the daemon has decided anything
+    parked = wait_incident(stack, "203.0.113.11", until=lambda d: any(
+        p.get("action_id") == action_id for p in (((d.get("incident") or d).get("action") or {}).get("pending") or [])))
     assert _key_status(stack, gated) == "Active", "nothing runs before approval"
     incident_id = (parked.get("incident") or parked)["incident_id"]
     approved = stack.api.post(f"/api/honeypots/incidents/{incident_id}/approve", json={"action_id": action_id})
