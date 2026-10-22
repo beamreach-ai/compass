@@ -223,3 +223,23 @@ def test_the_migration_turns_assumed_roles_into_roles_and_the_profile_into_nothi
     done = {"workspace_id": "w", "aws": {"roles": {"read": "arn"}}}
     _access_model(done)
     assert len(saved) == 2, "an install that already has roles is left alone"
+
+
+def test_the_migration_keeps_each_roles_external_id_and_the_targets_region(tmp_path, monkeypatch):
+    """A product install whose read and act roles came from different templates: each role keeps
+    the external id its trust names, and the target's region survives (the demo's act role trusts
+    another id than its read role, and the replay runs in us-east-1 while the control plane is in
+    eu-central-1)."""
+    from compass_core import aws as core_aws
+    from compass_core.migrations import _access_model
+
+    monkeypatch.setattr(core_config, "save_workspace_config", lambda ws, c: None)
+    cfg = {"workspace_id": "w", "aws_region": "eu-central-1", "aws": {"auth_mode": "assume_role",
+           "assume_role": {"account_id": ACCOUNT, "role_name": "BeamreachCompassRole", "external_id": "read-ext", "region": "us-east-1"},
+           "assume_role_respond": {"account_id": ACCOUNT, "role_name": "service/svc-ops-responder", "external_id": "act-ext", "region": "us-east-1"}}}
+    _access_model(cfg)
+    aws = cfg["aws"]
+    assert aws["external_id"] == "read-ext" and aws["external_ids"] == {"act": "act-ext"} and aws["region"] == "us-east-1"
+    assert core_aws.external_id(cfg, "read") == "read-ext" and core_aws.external_id(cfg, "act") == "act-ext"
+    assert core_aws.external_id(cfg) == "read-ext"
+    assert core_aws.external_id({"aws": {"external_id": "one"}}, "act") == "one", "one id for both roles stays the default"

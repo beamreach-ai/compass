@@ -46,8 +46,14 @@ def _access_model(config: Dict[str, Any]) -> None:
         legacy = aws.get(key)
         if isinstance(legacy, dict) and legacy.get("account_id") and legacy.get("role_name") and kind not in roles:
             roles[kind] = f"arn:aws:iam::{legacy['account_id']}:role/{legacy['role_name']}"
-            if legacy.get("external_id") and not aws.get("external_id"):
-                aws["external_id"] = str(legacy["external_id"])
+            if legacy.get("external_id"):
+                if not aws.get("external_id"):
+                    aws["external_id"] = str(legacy["external_id"])
+                elif str(legacy["external_id"]) != aws["external_id"]:
+                    # the roles came from different templates: each keeps the id its trust names
+                    aws.setdefault("external_ids", {})[kind] = str(legacy["external_id"])
+            if legacy.get("region") and not aws.get("region"):
+                aws["region"] = str(legacy["region"])  # the target's region, not the control plane's
             aws.setdefault("account_id", str(legacy["account_id"]))
     if aws.get("generated_external_id") and not aws.get("external_id"):
         aws["external_id"] = str(aws["generated_external_id"])

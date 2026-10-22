@@ -372,7 +372,7 @@ def _build(request: SessionRequest) -> Any:
     name = session_name(request.captain, request.job, prefix=aws_cfg.get("session_prefix"))
     source_identity = _source_identity(aws_cfg, request)
     policy, policy_arns = _narrowing(request)
-    creds = _assumed_credentials(request, role_arn=arn, external_id=external_id(config), name=name, source_identity=source_identity,
+    creds = _assumed_credentials(request, role_arn=arn, external_id=external_id(config, request.capability), name=name, source_identity=source_identity,
                                  region=region, policy=policy, policy_arns=policy_arns)
     session = boto3.Session(
         aws_access_key_id=creds["AccessKeyId"],

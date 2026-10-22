@@ -71,8 +71,15 @@ def role_arn(config: Any, capability: str) -> Optional[str]:
     return roles(config).get(key)
 
 
-def external_id(config: Any) -> Optional[str]:
-    value = _aws_config(config).get("external_id")
+def external_id(config: Any, capability: Optional[str] = None) -> Optional[str]:
+    """The external id the role for ``capability`` trusts: ``aws.external_ids.<capability>``
+    when a role was set up with its own (an install from before 0.7.0 whose read and act
+    roles came from different templates), else the one ``aws.external_id``."""
+    aws = _aws_config(config)
+    per_role = aws.get("external_ids") if isinstance(aws.get("external_ids"), dict) else {}
+    value = per_role.get(capability) if capability else None
+    if not (isinstance(value, str) and value.strip()):
+        value = aws.get("external_id")
     return str(value).strip() if isinstance(value, str) and value.strip() else None
 
 

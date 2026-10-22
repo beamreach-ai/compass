@@ -71,6 +71,11 @@ install coming from 0.4.1.
   deterministic from the seed. `compass_core.demo.register_seeder(name, fn)`
   runs `fn(config, workspace_id, world)` after every seed, for what a larger
   deployment derives from the world; the open edition registers none.
+- Fixed: the 0.7.0 access-model migration kept one external id and dropped
+  the target's region. An install whose read and act roles trusted different
+  external ids now keeps the act role's as `aws.external_ids.act` (the broker
+  uses a role's own id first), and the old blocks' `region` becomes
+  `aws.region`. An install already migrated sets both by hand.
 - Fixed: the map store's `fetch_graph(limit)` spent the budget on nodes first,
   so a map just under the dashboard's 4,000 came back with every node and no
   edge. The limit is a node budget and the edges between the kept nodes all
