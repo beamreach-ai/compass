@@ -58,6 +58,14 @@ def register_status_section(name: str, fn: StatusSection) -> None:
     _status_sections[name] = fn
 
 
+def register_inbox_source(name: str, fn: Any) -> None:
+    """Items the product adds to the inbox: ``fn(ctx) -> [compass_core.inbox.Item]``
+    (docs/specs/one-inbox.md §3.3)."""
+    from compass_core import inbox
+
+    inbox.register_source(name, fn)
+
+
 def register_aws_saved_hook(fn: AwsSavedHook) -> None:
     if fn not in _aws_saved_hooks:
         _aws_saved_hooks.append(fn)

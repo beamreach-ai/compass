@@ -156,6 +156,41 @@ hands you a set event so you tick exactly once. `interval_setting` names the
 serve payload key or `COMPASS_<SETTING>` variable that overrides the interval;
 0 means the service is not started.
 
+## 6.1 Inbox items
+
+Anything your captain needs a person for is an inbox item: a decision to take,
+a repair to make, a merge to do. The inbox (`compass_core.inbox`,
+[docs/inbox.md](inbox.md)) derives the list from state on every request, so you
+store nothing: write a function that reads your rows and returns the items
+that exist right now, and name it in the manifest.
+
+```python
+# captains/finops/inbox.py
+from compass_core.inbox import Action, Context, Item
+
+def items(ctx: Context) -> list[Item]:
+    return [Item(id=f"finops.fix:{row['id']}", kind="finops.fix", verb="approve", severity="normal",
+                 captain="finops", tab="finops", title=f"Downsize {row['name']}", summary=f"saves ${row['saving']}/month",
+                 since=row["found_at"], subject={"fix_id": row["id"]},
+                 actions=[Action(key="apply", label="Apply", method="POST", path=f"/api/finops/fixes/{row['id']}/apply",
+                                 scope="operate", confirm=f"Resizes {row['name']}."),
+                          Action(key="open", label="Open", href=f"/workspace?tab=finops&fix={row['id']}")],
+                 detail={"before": row["before"], "after": row["after"]})
+            for row in open_fixes(ctx.table, ctx.pk)]
+```
+
+```python
+MANIFEST = CaptainManifest(..., inbox="captains.finops.inbox:items")
+```
+
+The id is deterministic (`<kind>:<subject>`), `since` is when the state began
+(epoch ms; the feed is newest first), `actions` are the routes your tab already
+calls (the dashboard, the CLI and the MCP tool render them and know nothing
+about your kind), and `detail` is what your tab shows before the same click,
+as data. A function that raises is logged and skipped; it never breaks the
+list. A captain that is not a distribution of its own registers the same
+function with `compass_api.extensions.register_inbox_source(name, fn)`.
+
 ## 7. Installing it into the open Compass
 
 From the catalog: Settings → Captains → Available → Install, then Restart

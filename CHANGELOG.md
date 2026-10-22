@@ -5,6 +5,32 @@ workflow refuses a tag without one, and reads from it what the dashboard shows
 next to the Update button: the first paragraph is the summary, the bullets under
 `### After the update` are the notes an operator needs after applying it.
 
+## 0.9.0 — unreleased
+
+The inbox: everything that needs a person, as one list. `GET /api/inbox` derives
+it from state on every call (a parked decoy response, a grant to accept, a
+decoy waiting for its merge or its arm, a pull request with a revision to
+approve or that the watcher gave up on, a failed job, an access finding, an
+available update, an incomplete setup), newest first, each item carrying the
+routes that act on it. Nothing is stored and nothing is marked read: an item
+leaves when the state changes. [docs/inbox.md](docs/inbox.md).
+
+- `GET /api/inbox` with `tab=`, `kind=`, `verb=`, `include_snoozed=`; counts per
+  tab and per verb. `POST`/`DELETE /api/inbox/{id}/snooze` for the three kinds
+  with a natural end (a failed job until it fails again, an update until the
+  next release, "no model" on purpose). `/api/status` gains an `inbox` section
+  with the counts and the line `compass status` prints.
+- In the dashboard: a count beside every tab that has something, the total
+  beside the brand that opens the whole feed, a "Needs you" view on the Decoys,
+  Pull requests and Queue tabs, Settings opening with its items, and inline
+  actions (Run, Accept, Retry, Arm, Approve the revision, Acknowledge) with the
+  confirmation before anything that changes the account or a pull request.
+- `POST /api/honeypots/incidents/{id}/decline` drops one parked response and
+  records who decided against it; the incident stays open.
+- A captain contributes items through `inbox=` in its manifest
+  (`compass_core.inbox`, [docs/writing_a_captain.md](docs/writing_a_captain.md) §6.1);
+  a product registers a source with `compass_api.extensions.register_inbox_source`.
+
 ## 0.8.0 — 2026-10-21
 
 Demo mode: with `APP_MODE=demo` this image runs a public demo the way

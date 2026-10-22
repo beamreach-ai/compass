@@ -159,6 +159,16 @@ def _honeypots_section(request: Request) -> Dict[str, Any]:
     return {"total": len(tokens), "by_status": by_status, "active_alerts": active_alerts}
 
 
+def _inbox_section(request: Request, config: Dict[str, Any], workspace_id: Optional[str]) -> Dict[str, Any]:
+    """What `compass status` prints on its "Needs you" line: the counts and the three newest items."""
+    from compass_api.routes.inbox import context_for
+    from compass_core import inbox
+
+    feed = inbox.items(context_for(request, config=config, workspace_id=workspace_id))
+    return {"counts": feed["counts"], "line": inbox.status_line(feed["counts"]),
+            "newest": [{"id": i["id"], "kind": i["kind"], "verb": i["verb"], "severity": i["severity"], "title": i["title"]} for i in feed["items"][:3]]}
+
+
 @router.get("/api/status")
 def get_status(request: Request) -> Dict[str, Any]:
     errors: Dict[str, str] = {}
@@ -190,6 +200,7 @@ def get_status(request: Request) -> Dict[str, Any]:
         "jobs": _section(errors, "jobs_summary", lambda: _jobs_section(jobs), default={}),
         "prs": _section(errors, "prs", lambda: _prs_section(jobs, _section(errors, "pr_registry", lambda: _pr_records(config, workspace_id), default=[])), default={}),
         "honeypots": _section(errors, "honeypots", lambda: _honeypots_section(request), default={}),
+        "inbox": _section(errors, "inbox", lambda: _inbox_section(request, config, workspace_id), default={}),
         # billing, findings: the product's sections (compass_api.extensions); absent in the open edition
         **{name: _section(errors, name, lambda fn=fn: fn(request, config, workspace_id), default={}) for name, fn in extensions.status_sections().items()},
         "errors": errors,

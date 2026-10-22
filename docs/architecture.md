@@ -118,6 +118,7 @@ model. Each seam is a module-level default plus an `install`/`set_*` hook:
 | AWS sessions | `compass_core.sessions`: the runtime identity for the control side; the two roles `connect` created for the target, every session named `compass-<captain>-<job>` and narrowed to the captain's declaration | `set_session_factory` |
 | Model | Anthropic (`ANTHROPIC_API_KEY`) or none | `set_model_factory` |
 | Email | SMTP endpoint you configure | `set_email_relay` |
+| Inbox sources | the core's kinds plus each active captain's `inbox` function | `compass_core.inbox.register_source` (`compass_api.extensions.register_inbox_source`) |
 | API: workspace, status sections, bootstrap hooks, auth paths and scopes, tabs | one workspace, open sections, `/api/` gated | `compass_api.workspace.install`, `compass_api.extensions` |
 | Dashboard: tabs, settings sections, banners | the open tabs | `app/lib/extensions.ts` (`productTabs`, `productSettingsSections`, `productBanners`, `productProviders`) |
 

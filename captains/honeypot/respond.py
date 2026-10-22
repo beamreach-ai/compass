@@ -244,3 +244,20 @@ def agent_invoke_from_env() -> Optional[Callable[[str, str], Any]]:
     from captains.honeypot.summary import default_invoke
 
     return default_invoke
+
+
+def decline_pending_action(*, table: Any, pk: str, incident_id: str, action_id: str, declined_by: str) -> Dict[str, Any]:
+    """Drop one parked action from the incident, recording who decided against it; the
+    incident stays open. The inbox's "Decline" (docs/specs/one-inbox.md §3.3)."""
+    incident = incidents.get_incident(table, pk, incident_id)
+    if not incident:
+        raise KeyError(f"incident {incident_id} not found")
+    act = dict(incident.get("action") or {})
+    pending = [p for p in (act.get("pending") or []) if p.get("action_id") == action_id]
+    if not pending:
+        raise ValueError(f"action {action_id} is not pending approval on this incident")
+    act["pending"] = [p for p in act.get("pending") or [] if p.get("action_id") != action_id]
+    act.setdefault("decisions", []).append({"action_id": action_id, "action_type": pending[0].get("action_type"), "decision": "declined",
+                                            "reason": f"declined by {declined_by}", "risk": pending[0].get("risk"), "at": _now()})
+    incidents.mark(table, pk, incident_id, action=act)
+    return {"incident_id": incident_id, "action_id": action_id, "declined_by": declined_by, "pending": act["pending"]}

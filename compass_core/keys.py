@@ -263,3 +263,13 @@ def demo_reset_sort_key(timestamp_ms: int) -> str:
 
 def demo_reset_prefix() -> str:
     return "DEMO#RESET#"
+
+
+# ── Inbox snoozes (compass_core.inbox) ─────────────────────────────────────
+
+def inbox_snooze_sort_key(item_id: str) -> str:
+    return f"INBOX#SNOOZE#{item_id}"
+
+
+def inbox_snooze_prefix() -> str:
+    return "INBOX#SNOOZE#"

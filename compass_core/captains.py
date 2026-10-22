@@ -113,6 +113,7 @@ class CaptainManifest:
     version: str = "0.0.0"
     install_hint: Optional[str] = None             # how to install it when a licence names it and it is missing
     permissions: Optional[Permissions] = None      # what it reads in the target account and what it may propose to do (compass_core.permissions)
+    inbox: Optional[str] = None                    # "module:function" returning the captain's inbox items (compass_core.inbox)
 
     @property
     def section(self) -> str:
@@ -145,6 +146,8 @@ class CaptainManifest:
         for service in self.services:
             if ":" not in service.start:
                 problems.append(f"service {service.name!r} start {service.start!r} is not module:attribute")
+        if self.inbox and ":" not in self.inbox:
+            problems.append(f"inbox {self.inbox!r} is not module:attribute")
         for prefix in self.route_prefixes + self.admin_write_prefixes:
             if not prefix.startswith("/"):
                 problems.append(f"prefix {prefix!r} does not start with /")
