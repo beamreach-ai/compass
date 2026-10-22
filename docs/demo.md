@@ -7,6 +7,51 @@ turns it on with configuration; the quickstart does not advertise it, and the
 e2e suite runs it against the fakes (`e2e/test_13_demo.py`).
 [docs/specs/demo-mode.md](specs/demo-mode.md) is the design.
 
+## Run a demo, step by step
+
+From an install that already works ([quickstart.md](quickstart.md) sections
+1–3: a workspace, `connect`, one `aws_credential` decoy merged, applied and
+armed). `c` below is `docker compose run --rm compass`; the workspace is
+`local`, its config `./config/local.json`.
+
+1. **Turn it on.** `APP_MODE=demo` in `.env`, then `docker compose up -d`. The
+   dashboard shows the `DEMO` chip beside the account.
+2. **Let Compass fire the decoy.** Store its key's secret with it, and put the
+   response on autopilot if it is not yet:
+   ```sh
+   c honeypot arm honeytoken_id=<id> secret_access_key=<from the apply output>
+   c honeypot action_set action_type=iam_deactivate_key mode=autopilot risk_max=2
+   ```
+3. **Say what the demo is.** Add a `demo` block to `./config/local.json` (the
+   keys under [Turning it on](#turning-it-on); every one has a default). The
+   least that makes "Trip it" work:
+   ```json
+   "demo": {"trippable": ["<id>"], "world": {"resources": 2500, "seed": 7, "edges": 20000}}
+   ```
+   Add `visitor_repo` (where visitors' pull requests go: a sandbox repository
+   whose apply needs a reviewer), `links.slack` (an invite to the channel the
+   alerts go to) and `seeded_pr` when you want them.
+4. **Seed the world.** `c demo seed`: the synthetic account beside the real
+   one, in about a second. The result lists the map's rows per scope.
+5. **Walk it.** Open the dashboard: the tour opens bottom-right. Trip the decoy
+   from step 2 and watch the incident open in one to five minutes, the key go
+   inactive, and the `demo-rearm` service arm it again.
+6. **Reset it.** `c demo reset` brings the golden world back (incidents
+   closed, keys rolled back, visitors' pull requests closed, the world
+   reseeded); `c demo status` says when it last ran. Schedule it weekly: a
+   cron line on the host (`0 3 * * 0 cd /opt/compass && docker compose run
+   --rm compass demo reset`) or, on AWS, an EventBridge schedule running the
+   worker image with `compass demo reset`.
+7. **Before strangers use it.** Put sign-in in front of it (the open login is
+   one shared account, so the per-visitor limits and the tour are shared too),
+   keep `READ_ONLY` off, and set a model spend limit with your provider: every
+   trip runs one investigation, and the open edition has no model budget of
+   its own.
+
+To leave demo mode, remove `APP_MODE` and `docker compose up -d`; the seeded
+world stays on the map, marked synthetic, under its own scope; a rescan
+never touches it.
+
 ## Turning it on
 
 `APP_MODE=demo` in `.env`. The API, the daemon and the dashboard read the same
