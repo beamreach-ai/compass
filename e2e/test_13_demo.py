@@ -390,7 +390,7 @@ def test_demo_5_the_reset_brings_the_golden_world_back_and_status_reads_it(stack
     decoy = stack.records.get("demo_decoy")
     assert decoy, "DEMO-3 planted the decoy whose pull request the reset closes"
     # the block names the world DEMO-1 and DEMO-4 seeded, so the reset's seed is a no-op scan
-    _write_demo_block(stack, trippable=[decoy["id"]], visitor_repo=fixture.REPO, seeded_pr={"reviewer": "demo-reviewer"}, world={"resources": 1000, "seed": 7})
+    _write_demo_block(stack, trippable=[decoy["id"]], visitor_repo=fixture.REPO, seeded_pr={"reviewer": "demo-reviewer", "reviewer_token": "ghp_demo_reviewer"}, world={"resources": 1000, "seed": 7})
     stack.restart("api", "compass")
     try:
         assert any(not i.get("closed_at") for i in incidents(stack)), "DEMO-3 and DEMO-4 left open incidents"

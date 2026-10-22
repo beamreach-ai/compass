@@ -21,6 +21,7 @@ from typing import Any, Callable, Dict, List, Optional
 from boto3.dynamodb.conditions import Key
 
 from compass_core import demo, grants
+from compass_core.errors import public as public_error
 from compass_core.github import client as github_client
 from compass_core.github import resolve_github_token
 from compass_core.github_prs import commit_files, ensure_branch, open_or_update_pr
@@ -169,14 +170,26 @@ def _seed_pr(config: Dict[str, Any], settings: Dict[str, Any], *, workspace_id: 
         pull.add_to_labels(VISITOR_LABEL)
     except Exception:  # noqa: BLE001 - a repository without the label still gets the pull request
         pass
-    reviewer_token = str(seeded.get("reviewer_token") or "") or token
-    reviewer = github_client(reviewer_token).get_repo(repo_name).get_pull(published.number)
-    reviewer.create_review(body=str(seeded.get("comment") or SEEDED_COMMENT), event="REQUEST_CHANGES")
+    # the reviewer's request comes from the bot account: GitHub refuses a review requesting changes
+    # from the pull request's own author (Compass), so without the bot's token there is no review,
+    # and a review that fails never stops the reset
+    review: Dict[str, Any] = {}
+    reviewer_token = str(seeded.get("reviewer_token") or "")
+    if not reviewer_token:
+        review = {"review": "skipped: set demo.seeded_pr.reviewer_token (the bot account's) for the reviewer's request"}
+    else:
+        try:
+            reviewer = github_client(reviewer_token).get_repo(repo_name).get_pull(published.number)
+            reviewer.create_review(body=str(seeded.get("comment") or SEEDED_COMMENT), event="REQUEST_CHANGES")
+            review = {"review": "requested changes"}
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("demo reset: the seeded pull request's review failed: %s", exc)
+            review = {"review_error": public_error(exc, context="the seeded pull request's review")}
     registry = PRRegistry.from_config(config, workspace_id=workspace_id)
     registry.record(url=published.url, pr_type="demo_seeded", origin={"command": "seed_pr", "seeded": True, "workspace_id": workspace_id},
                     intent={"goal": "describe the payments service's variables", "scope": {"files": [path]}, "action_family": "iac_change"},
                     branch=SEEDED_BRANCH, base_branch=base, title=SEEDED_TITLE)
-    return {"url": published.url, "number": published.number, "reviewer": seeded.get("reviewer") or "compass"}
+    return {"url": published.url, "number": published.number, "reviewer": seeded.get("reviewer") or None, **review}
 
 
 # ── jobs, rows, the world ───────────────────────────────────────────────────

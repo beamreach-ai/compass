@@ -293,8 +293,9 @@ each step counted in the result and in the row `DEMO#RESET#<ts>` it writes:
    (`demo.seeded_pr.path`, default `services/payments/variables.tf`) on the
    branch `beamreach/demo/payments-variables`, labelled `demo`, and one review
    requesting changes from the bot account (`demo.seeded_pr.reviewer_token`;
-   Compass's own token without one), registered so the PR watcher lists it
-   under Needs you.
+   without one there is no review, since GitHub refuses a review requesting
+   changes from the pull request's own author, and the result says so),
+   registered so the PR watcher lists it under Needs you.
 4. **Jobs** older than `demo.reset.prune_jobs_days` (7) pruned; every
    `DEMO#COOLDOWN#`, `DEMO#VISITOR#` and `DEMO#TOUR#` row cleared.
 5. **The world** seeded again (a no-op scan when unchanged) and a real rescan

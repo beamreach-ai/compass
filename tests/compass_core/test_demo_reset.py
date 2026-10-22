@@ -72,7 +72,7 @@ def env(fake_github, monkeypatch, tmp_path):
         "aws": {"account_id": "123456789012", "region": "us-east-1"},
         "github": {"token": "ghp_test", "iac_repo": REPO},
         "map": {"store": "sqlite", "path": str(tmp_path / "map.sqlite")},
-        "demo": {"world": {"resources": 60, "seed": 3}, "visitor_repo": REPO, "trippable": [], "seeded_pr": {"reviewer": "demo-reviewer"}},
+        "demo": {"world": {"resources": 60, "seed": 3}, "visitor_repo": REPO, "trippable": [], "seeded_pr": {"reviewer": "demo-reviewer", "reviewer_token": "ghp_reviewer"}},
     }
     monkeypatch.setattr(config_module, "_loader", lambda ws: dict(config))
     with mock_aws():
@@ -185,3 +185,15 @@ def test_outside_demo_mode_the_reset_and_the_status_refuse(env, monkeypatch):
         demo_reset.reset(config, workspace_id=WS, decoys=dict, rescan=lambda: None)
     with pytest.raises(ValueError, match="runs only in demo mode"):
         demo_reset.status(config, workspace_id=WS)
+
+
+def test_without_the_reviewers_token_the_reset_completes_and_says_why_there_is_no_review(env, fake_github):
+    """GitHub refuses a review requesting changes from the pull request's own author, so without
+    the bot account's token the seeded pull request has no review, and the reset still finishes."""
+    config, table, session = env
+    config["demo"]["seeded_pr"] = {"reviewer": "demo-reviewer"}
+    result = demo_reset.reset(config, workspace_id=WS, decoys=dict, rescan=lambda: None)
+    seeded = result["seeded_pr"]
+    assert seeded["number"] and "reviewer_token" in seeded["review"] and result["world"]["scope"], result
+    reviews = httpx.get(f"{fake_github}/github/repos/acme/infra/pulls/{seeded['number']}/reviews", headers={"Authorization": "token ghp_test"}).json()
+    assert reviews == [], "no review from Compass on its own pull request"
