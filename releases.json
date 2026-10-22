@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "channels": {
+    "stable": "0.8.0",
+    "prerelease": "0.8.0"
+  },
+  "releases": [
+    {
+      "version": "0.8.0",
+      "published_at": "2026-10-22T11:20:45Z",
+      "notes_url": "https://github.com/beamreach-ai/compass/releases/tag/v0.8.0",
+      "summary": "Demo mode: with `APP_MODE=demo` this image runs a public demo the way demo.beamreach.ai does, a synthetic account on the map beside a real one. [docs/demo.md](docs/demo.md) says how. The quickstart does not change. This release also carries 0.5.0 to 0.7.0, which were not released on their own: read their sections below, and their \"After the update\" notes apply to an install coming from 0.4.1.",
+      "images": {
+        "compass": "sha256:2ab3100463a727cceb05af6fcfe5703fb738aa9aaf70a025916130e7343db952",
+        "compass-dashboard": "sha256:f10c6e8dd8634c574b4536c760eb341d9ff4e7ae15b40be217adf2b31a602042",
+        "compass-updater": "sha256:3b9fa325fd73ac2237d96ab3ff26e1bd08231bec9a09d923b67f63aa96d852fb"
+      },
+      "min_from": "0.7.0",
+      "requires_restart": [
+        "api",
+        "compass",
+        "dashboard"
+      ],
+      "notes": []
+    }
+  ]
+}
