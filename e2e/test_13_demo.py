@@ -8,7 +8,6 @@ import time
 from pathlib import Path
 from typing import Any, Dict
 
-import httpx
 import pytest
 
 from e2e import fixture
@@ -36,15 +35,15 @@ def demo_mode(stack):
     _wait_for_quiet_mapper(stack)
     created = stack.api.post("/api/auth/tokens", json={"name": "e2e demo operator", "scope": "admin"})
     assert created.status_code == 201, created.text
-    session = stack.api
-    stack.records["demo_session"] = session
     stack.env(APP_MODE="demo")
     stack.restart("api", "compass", "dashboard")
-    stack._api = httpx.Client(base_url=stack.web, headers={"Authorization": f"Bearer {created.json()['token']}"}, timeout=60)
+    stack.operator_token = created.json()["token"]
+    stack._api = None
     try:
         yield
     finally:
-        stack._api = session
+        stack.operator_token = None
+        stack._api = None
         stack.env(APP_MODE=None)
         stack.restart("api", "compass", "dashboard")
 
@@ -151,9 +150,9 @@ def _visitor(stack, user_id: str) -> Dict[str, str]:
     return {"X-User-Id": user_id}
 
 
-def _visitor_api(stack) -> httpx.Client:
+def _visitor_api(stack):
     """A signed-in session, as a visitor has: no token, so no operator's calls."""
-    return stack.records["demo_session"]
+    return stack.visitor
 
 
 def test_demo_3_a_visitor_trips_a_pre_armed_decoy_and_it_re_arms_after_the_response(stack, page, mapped, demo_mode):
