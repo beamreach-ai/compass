@@ -41,7 +41,8 @@ DEFAULTS: Dict[str, Any] = {
     "reset": {"schedule": "cron(0 3 ? * SUN *)", "prune_jobs_days": 7},
     "tour": {"import_resource": "acme-legacy-exports"},  # the real, unmanaged resource step 3 imports
     "pinned_settings": ["github", "aws", "demo", "notifications.endpoints"],
-    "links": {"install": "https://beamreach.ai/compass/install.html", "repository": "https://github.com/beamreach-ai/compass"},
+    "links": {"install": "https://beamreach.ai/compass/install.html", "repository": "https://github.com/beamreach-ai/compass",
+              "slack": ""},  # slack: an invite link to the channel the alerts go to; empty hides it
 }
 
 
@@ -346,7 +347,7 @@ def tour(table: Any, pk: str, config: Dict[str, Any], *, user_id: Optional[str],
             detail["search"] = settings_["tour"]["import_resource"]
         elif spec["id"] in ("decoys", "trip"):
             detail["token"] = trippable[0] if trippable else None
-        elif spec["id"] == "run_it":
+        elif spec["id"] in ("response", "run_it"):
             detail["links"] = settings_["links"]
         steps.append({**spec, "done": done, "skipped": bool(entry.get("skipped_at")), "done_at": entry.get("done_at") if not fact else None, "detail": detail})
     completed = sum(1 for s in steps if s["done"])

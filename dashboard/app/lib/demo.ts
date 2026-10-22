@@ -2,7 +2,7 @@
 // dashboard uses for it. `app.mode === "demo"` is the switch; the block is only there then.
 
 export type DemoConfig = {
-  links?: { install?: string | null; repository?: string | null } | null;
+  links?: { install?: string | null; repository?: string | null; slack?: string | null } | null;
   pinned_settings?: string[] | null;
   world?: { resources?: number; seed?: number } | null;
   cooldown_seconds?: number | null;

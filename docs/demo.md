@@ -30,7 +30,8 @@ a default (`compass_core/demo.py`):
   "reset": {"schedule": "cron(0 3 ? * SUN *)", "prune_jobs_days": 7},
   "pinned_settings": ["github", "aws", "demo", "notifications.endpoints"],
   "links": {"install": "https://beamreach.ai/compass/install.html",
-            "repository": "https://github.com/beamreach-ai/compass"}
+            "repository": "https://github.com/beamreach-ai/compass",
+            "slack": ""}
 }
 ```
 
@@ -103,7 +104,9 @@ a shared demo account that resets on Sunday.") and can be dismissed for the
 session; the read-only notice is a separate thing and shows only when
 `READ_ONLY` is also on. The sidebar's "Run it yourself" goes to
 `demo.links.install` (else `PRODUCTION_URL`), with "Source on GitHub" under
-it. A synthetic node's detail panel says "Synthetic resource (demo world)"
+it, and "See the alerts in Slack" when `demo.links.slack` is set: an invite
+link to the channel the workspace's Slack endpoint posts to. The tour's
+"Watch the response" step shows the same link. Empty hides both. A synthetic node's detail panel says "Synthetic resource (demo world)"
 under its name.
 
 Writes a visitor makes are attributed "by you" or "by a visitor", never a

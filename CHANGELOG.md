@@ -52,6 +52,9 @@ install coming from 0.4.1.
   a row of counts and one line to Slack. `compass demo status` prints the
   last reset, the next one, the trips in force, the open visitor pull
   requests and this week's tour completions.
+- `demo.links.slack`: an invite link to the channel the alerts go to; when
+  set, the sidebar shows "See the alerts in Slack" and the tour's response
+  step links it.
 - `demo.world.edges` (default 20,000; `compass demo seed edges=…`): the world
   has at least that many edges, more of the kinds the rules already produce,
   deterministic from the seed. `compass_core.demo.register_seeder(name, fn)`

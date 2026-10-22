@@ -99,7 +99,7 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void } = {}
   const [appMode, setAppMode] = useState<string | null>(null);
   const [settingsEnabled, setSettingsEnabled] = useState(true);
   const [productionUrl, setProductionUrl] = useState<string | null>(null);
-  const [demoLinks, setDemoLinks] = useState<{ install?: string | null; repository?: string | null } | null>(null);
+  const [demoLinks, setDemoLinks] = useState<{ install?: string | null; repository?: string | null; slack?: string | null } | null>(null);
   const [billingPlan, setBillingPlan] = useState<"free" | "cloud" | "enterprise" | null>(null);
   const [triageLimit, setTriageLimit] = useState<number | null>(null);
   const [fixLimit, setFixLimit] = useState<number | null>(null);
@@ -401,6 +401,16 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void } = {}
             className="block w-full text-center text-xs text-gray-500 hover:text-gray-700 hover:underline"
           >
             Source on GitHub
+          </a>
+        )}
+        {isDemoMode && demoLinks?.slack && (
+          <a
+            href={demoLinks.slack}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="block w-full text-center text-xs text-gray-500 hover:text-gray-700 hover:underline"
+          >
+            See the alerts in Slack
           </a>
         )}
         {SUPPORT_WHATSAPP && <div className="pt-2 border-t border-gray-100">

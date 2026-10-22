@@ -127,6 +127,16 @@ export default function TourPanel() {
                       </button>
                     </div>
                   )}
+                  {active && step.id === "response" && step.detail?.links?.slack && (
+                    <a
+                      href={String(step.detail.links.slack)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-2 block text-xs font-semibold text-blue-700 hover:underline"
+                    >
+                      The alert lands in Slack too: join the channel →
+                    </a>
+                  )}
                   {active && step.id === "run_it" && (
                     <div className="mt-2 space-y-1.5 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-xs">
                       <a
