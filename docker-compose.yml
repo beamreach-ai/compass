@@ -17,7 +17,7 @@
 # click when the updater service runs: `docker compose --profile updater up -d`. The updater
 # holds the Docker socket, which is root on this machine; it is off unless you turn it on.
 x-compass: &compass
-  image: ${COMPASS_IMAGE:-${COMPASS_REGISTRY:-ghcr.io/beamreach-ai}/compass:${COMPASS_VERSION:-0.4.0}}
+  image: ${COMPASS_IMAGE:-${COMPASS_REGISTRY:-ghcr.io/beamreach-ai}/compass:${COMPASS_VERSION:-0.8.0}}
   env_file: .env
   environment:
     AWS_ENDPOINT_URL_DYNAMODB: http://dynamodb:8000
@@ -27,7 +27,7 @@ x-compass: &compass
     AWS_REGION: ${AWS_REGION:-us-east-1}
     AWS_DEFAULT_REGION: ${AWS_REGION:-us-east-1}
     # What this compose file asked to pull; the dashboard says when it differs from what runs.
-    COMPASS_VERSION: ${COMPASS_VERSION:-0.4.0}
+    COMPASS_VERSION: ${COMPASS_VERSION:-0.8.0}
     # Extra captains: pip requirements (PyPI name, git URL, or a wheel dropped in
     # ./extensions/wheels), installed on start and kept in ./extensions.
     COMPASS_EXTENSIONS: ${COMPASS_EXTENSIONS:-}
@@ -67,7 +67,7 @@ services:
     command: ["api"]
 
   dashboard:
-    image: ${COMPASS_DASHBOARD_IMAGE:-${COMPASS_REGISTRY:-ghcr.io/beamreach-ai}/compass-dashboard:${COMPASS_VERSION:-0.4.0}}
+    image: ${COMPASS_DASHBOARD_IMAGE:-${COMPASS_REGISTRY:-ghcr.io/beamreach-ai}/compass-dashboard:${COMPASS_VERSION:-0.8.0}}
     environment:
       # demo with APP_MODE=demo in .env: the API and the daemon read the same line through env_file
       APP_MODE: ${APP_MODE:-production}
@@ -93,7 +93,7 @@ services:
   # inside the updater are the host's.
   updater:
     profiles: ["updater"]
-    image: ${COMPASS_UPDATER_IMAGE:-${COMPASS_REGISTRY:-ghcr.io/beamreach-ai}/compass-updater:${COMPASS_VERSION:-0.4.0}}
+    image: ${COMPASS_UPDATER_IMAGE:-${COMPASS_REGISTRY:-ghcr.io/beamreach-ai}/compass-updater:${COMPASS_VERSION:-0.8.0}}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${PWD}:${PWD}
@@ -103,7 +103,7 @@ services:
       COMPASS_PROJECT: ${PWD}
       COMPASS_UPDATER_HEALTH_SECONDS: ${COMPASS_UPDATER_HEALTH_SECONDS:-300}
       COMPASS_REGISTRY: ${COMPASS_REGISTRY:-ghcr.io/beamreach-ai}
-      COMPASS_VERSION: ${COMPASS_VERSION:-0.4.0}
+      COMPASS_VERSION: ${COMPASS_VERSION:-0.8.0}
     restart: unless-stopped
 
 volumes:
