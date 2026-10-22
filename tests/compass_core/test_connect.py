@@ -243,3 +243,11 @@ def test_the_migration_keeps_each_roles_external_id_and_the_targets_region(tmp_p
     assert core_aws.external_id(cfg, "read") == "read-ext" and core_aws.external_id(cfg, "act") == "act-ext"
     assert core_aws.external_id(cfg) == "read-ext"
     assert core_aws.external_id({"aws": {"external_id": "one"}}, "act") == "one", "one id for both roles stays the default"
+
+
+def test_an_alert_queue_recorded_by_its_arn_alone_gets_its_url():
+    from compass_core.aws import alert_queues
+
+    arn = "arn:aws:sqs:us-east-1:662863386798:beamreach-honeypot-alerts-demo"
+    assert alert_queues({"honeypot": {"alert_queue_arn": arn}}) == {"us-east-1": {"arn": arn, "url": "https://sqs.us-east-1.amazonaws.com/662863386798/beamreach-honeypot-alerts-demo"}}
+    assert alert_queues({"aws": {"control": {"alert_queues": {"us-east-1": {"arn": arn, "url": "https://x"}}}}})["us-east-1"]["url"] == "https://x"

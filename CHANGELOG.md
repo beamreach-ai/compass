@@ -71,6 +71,8 @@ install coming from 0.4.1.
   deterministic from the seed. `compass_core.demo.register_seeder(name, fn)`
   runs `fn(config, workspace_id, world)` after every seed, for what a larger
   deployment derives from the world; the open edition registers none.
+- Fixed: an alert queue recorded by its ARN alone gets its URL from the ARN;
+  `arm` asked SQS for an empty URL and refused the decoy.
 - Fixed: the 0.7.0 access-model migration kept one external id and dropped
   the target's region. An install whose read and act roles trusted different
   external ids now keeps the act role's as `aws.external_ids.act` (the broker

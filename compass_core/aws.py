@@ -94,12 +94,23 @@ def alert_queues(config: Any) -> Dict[str, Dict[str, str]]:
     decoy captain's own keys (honoured for one release)."""
     found = control_config(config).get("alert_queues")
     if isinstance(found, dict) and found:
-        return {str(r): {"arn": str(q.get("arn") or ""), "url": str(q.get("url") or "")} for r, q in found.items() if isinstance(q, dict)}
+        return {str(r): {"arn": str(q.get("arn") or ""), "url": str(q.get("url") or "") or _queue_url(str(q.get("arn") or ""))}
+                for r, q in found.items() if isinstance(q, dict)}
     legacy = config.get("honeypot") if isinstance(config, dict) and isinstance(config.get("honeypot"), dict) else {}
     arn, url = legacy.get("alert_queue_arn"), legacy.get("alert_queue_url")
     if isinstance(arn, str) and arn.count(":") >= 5:
-        return {arn.split(":")[3]: {"arn": arn, "url": str(url or "")}}
+        return {arn.split(":")[3]: {"arn": arn, "url": str(url or "") or _queue_url(arn)}}
     return {}
+
+
+def _queue_url(arn: str) -> str:
+    """An SQS queue's URL from its ARN (``arn:aws:sqs:<region>:<account>:<name>``), for a config
+    that recorded only the ARN; empty for anything else."""
+    parts = arn.split(":")
+    if len(parts) != 6 or parts[2] != "sqs":
+        return ""
+    suffix = ".amazonaws.com.cn" if parts[1] == "aws-cn" else ".amazonaws.com"
+    return f"https://sqs.{parts[3]}{suffix}/{parts[4]}/{parts[5]}"
 
 
 def has_target_aws_access(config: Any, capability: str = "read") -> bool:
