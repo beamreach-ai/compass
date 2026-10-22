@@ -6,6 +6,8 @@ export type DemoConfig = {
   pinned_settings?: string[] | null;
   world?: { resources?: number; seed?: number } | null;
   cooldown_seconds?: number | null;
+  // the signed-in user is one of demo.admins (or an admin token): the only one who sees Settings
+  admin?: boolean | null;
 };
 
 export const isDemoApp = (app?: { mode?: string | null } | null): boolean => app?.mode === "demo";

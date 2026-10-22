@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict
 
+import httpx
 import pytest
 
 from e2e import fixture
@@ -28,13 +29,22 @@ def _wait_for_quiet_mapper(stack, timeout: float = 900) -> None:
 
 @pytest.fixture(scope="module")
 def demo_mode(stack):
-    """APP_MODE=demo on every service for this file, production again afterwards."""
+    """APP_MODE=demo on every service for this file, production again afterwards. In demo mode
+    the operator's calls (arm a decoy, a rescan, the response's mode, a PR sync) are refused to a
+    signed-in session (compass_api.demo_guard): `stack.api` is the operator's admin API token for
+    the file, and the visitors are the signed-in session (`_visitor_api`) and the page."""
     _wait_for_quiet_mapper(stack)
+    created = stack.api.post("/api/auth/tokens", json={"name": "e2e demo operator", "scope": "admin"})
+    assert created.status_code == 201, created.text
+    session = stack.api
+    stack.records["demo_session"] = session
     stack.env(APP_MODE="demo")
     stack.restart("api", "compass", "dashboard")
+    stack._api = httpx.Client(base_url=stack.web, headers={"Authorization": f"Bearer {created.json()['token']}"}, timeout=60)
     try:
         yield
     finally:
+        stack._api = session
         stack.env(APP_MODE=None)
         stack.restart("api", "compass", "dashboard")
 
@@ -141,6 +151,11 @@ def _visitor(stack, user_id: str) -> Dict[str, str]:
     return {"X-User-Id": user_id}
 
 
+def _visitor_api(stack) -> httpx.Client:
+    """A signed-in session, as a visitor has: no token, so no operator's calls."""
+    return stack.records["demo_session"]
+
+
 def test_demo_3_a_visitor_trips_a_pre_armed_decoy_and_it_re_arms_after_the_response(stack, page, mapped, demo_mode):
     """Trip it through the fake alert path: the trip job's STS call hits moto, the test puts the
     alert on the queue as CloudTrail would, the autopilot deactivates the key, the demo-rearm
@@ -161,17 +176,26 @@ def test_demo_3_a_visitor_trips_a_pre_armed_decoy_and_it_re_arms_after_the_respo
     stack.restart("api", "compass")
     try:
         assert stack.api.post(f"/api/honeypots/tokens/{planted['id']}/test-fire").status_code == 404, "test-fire is not part of the demo"
+        # the operator's settings are the operator's: a visitor's session is refused, and the dashboard hides Settings from it
+        visitor = _visitor_api(stack)
+        for method, path in (("GET", f"/api/honeypots/tokens/{planted['id']}/material"), ("POST", f"/api/honeypots/tokens/{planted['id']}/arm"),
+                             ("PUT", "/api/honeypots/settings"), ("POST", "/api/maps/reindex"), ("POST", "/api/auth/tokens")):
+            refused = visitor.request(method, path, json={})
+            assert refused.status_code == 403 and refused.json().get("code") == "demo_admin_only", (method, path, refused.status_code, refused.text)
+        boot = visitor.get("/api/settings/bootstrap").json()["app"]
+        assert boot["settings_enabled"] is False and boot["demo"]["admin"] is False
+        assert stack.api.get("/api/settings/bootstrap").json()["app"]["demo"]["admin"] is True, "an admin token is the operator"
         before = stack.api.get("/api/demo").json()
         assert planted["id"] in before["trippable"] and before["cooldowns"] == []
 
-        tripped = stack.api.post(f"/api/honeypots/tokens/{planted['id']}/trip", headers=_visitor(stack, "visitor-a"))
+        tripped = _visitor_api(stack).post(f"/api/honeypots/tokens/{planted['id']}/trip", headers=_visitor(stack, "visitor-a"))
         assert tripped.status_code == 200, tripped.text
         first = tripped.json()
         assert first["state"] == "tripped" and first["by"] == "you" and first["job_id"] and 290 <= first["seconds_left"] <= 300
         stack.records["demo_decoy"] = {**planted, "key": key}
 
         # the second visitor, in the cooldown, is told and gets no second fire
-        again = stack.api.post(f"/api/honeypots/tokens/{planted['id']}/trip", headers=_visitor(stack, "visitor-b")).json()
+        again = _visitor_api(stack).post(f"/api/honeypots/tokens/{planted['id']}/trip", headers=_visitor(stack, "visitor-b")).json()
         assert again["state"] == "cooldown" and again["by"] == "a visitor" and again["job_id"] == first["job_id"]
 
         # the job used the key (one STS call against moto) and now waits for CloudTrail; the test is CloudTrail
@@ -194,7 +218,7 @@ def test_demo_3_a_visitor_trips_a_pre_armed_decoy_and_it_re_arms_after_the_respo
         assert incident_id in {i["incident_id"] for i in incidents(stack)}
         detail = stack.api.get(f"/api/honeypots/incidents/{incident_id}").json()
         assert not (detail.get("incident") or detail).get("is_test"), "a trip is a real incident"
-        late = stack.api.post(f"/api/honeypots/tokens/{planted['id']}/trip", headers=_visitor(stack, "visitor-c")).json()
+        late = _visitor_api(stack).post(f"/api/honeypots/tokens/{planted['id']}/trip", headers=_visitor(stack, "visitor-c")).json()
         assert late["state"] == "cooldown" and late["incident_id"] == incident_id, "a late visitor lands on the open incident"
 
         # the response runs on its own and verifies; then the key is rolled back and the decoy armed again
@@ -230,7 +254,8 @@ def test_demo_3_a_visitor_trips_a_pre_armed_decoy_and_it_re_arms_after_the_respo
 
 
 def _tour(stack) -> Dict[str, Any]:
-    return stack.api.get("/api/demo/tour").json()
+    # the page's tour: the visitor's session, not the operator's token
+    return _visitor_api(stack).get("/api/demo/tour").json()
 
 
 def _wait_step(stack, step: str, *, timeout: float = 60) -> Dict[str, Any]:
@@ -391,7 +416,7 @@ def test_demo_5_the_reset_brings_the_golden_world_back_and_status_reads_it(stack
         assert seeded["state"] == "open" and "demo" in labels and seeded["head"] == "beamreach/demo/payments-variables", seeded
         reviews = stack.fakes.get(f"/github/repos/{owner}/{name}/pulls/{seeded['number']}/reviews", headers={"Authorization": "token x"}).json()
         assert reviews and reviews[0]["state"] == "CHANGES_REQUESTED"
-        assert stack.api.get("/api/demo").json()["cooldowns"] == [] and stack.api.get("/api/demo/tour").json()["completed"] == 0
+        assert stack.api.get("/api/demo").json()["cooldowns"] == [] and _visitor_api(stack).get("/api/demo/tour").json()["completed"] == 0
         assert stack.api.get(f"/api/honeypots/tokens/{decoy['id']}").json()["status"] == "armed"
         job = stack.wait_job(result["rescan_job_id"], timeout=900)
         assert job["status"] == "completed", job

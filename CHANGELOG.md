@@ -52,6 +52,17 @@ install coming from 0.4.1.
   a row of counts and one line to Slack. `compass demo status` prints the
   last reset, the next one, the trips in force, the open visitor pull
   requests and this week's tour completions.
+- Demo mode keeps the operator's settings to the operator: a signed-in
+  visitor is refused (403 `demo_admin_only`) what an admin token needs, every
+  settings write, rescans, PR actions, incident close and respond, a decoy's
+  arm, change and `material`, and a forced summary; the tour stays open. The
+  operator is `demo.admins` (the email the sign-in proxy vouches for) or an
+  admin API token; the Settings tab is hidden from everyone else. The identity
+  a proxy sets now wins over a browser's `X-User-Id`.
+- A model budget: every model call claims from `limits.model_calls_per_hour` and
+  `limits.model_calls_per_day` (60 and 300 by default in demo mode, none
+  otherwise) with a conditional write, and is refused past it before it
+  reaches the provider (`compass_core.model_budget`).
 - `demo.links.slack`: an invite link to the channel the alerts go to; when
   set, the sidebar shows "See the alerts in Slack" and the tour's response
   step links it.

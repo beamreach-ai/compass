@@ -41,6 +41,7 @@ DEFAULTS: Dict[str, Any] = {
     "reset": {"schedule": "cron(0 3 ? * SUN *)", "prune_jobs_days": 7},
     "tour": {"import_resource": "acme-legacy-exports"},  # the real, unmanaged resource step 3 imports
     "pinned_settings": ["github", "aws", "demo", "notifications.endpoints"],
+    "admins": [],  # the email addresses that may change the demo from the dashboard (compass_api.demo_guard)
     "links": {"install": "https://beamreach.ai/compass/install.html", "repository": "https://github.com/beamreach-ai/compass",
               "slack": ""},  # slack: an invite link to the channel the alerts go to; empty hides it
 }

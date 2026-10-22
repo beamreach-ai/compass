@@ -252,6 +252,11 @@ def demo_tour_prefix() -> str:
     return "DEMO#TOUR#"
 
 
+def model_calls_sort_key(window: str, window_id: str) -> str:
+    """A workspace's model calls in one hour (``H#2026-10-22T09``) or day (``D#2026-10-22``)."""
+    return f"MODEL#CALLS#{'H' if window == 'hour' else 'D'}#{window_id}"
+
+
 def demo_reset_sort_key(timestamp_ms: int) -> str:
     return f"DEMO#RESET#{int(timestamp_ms):013d}"
 

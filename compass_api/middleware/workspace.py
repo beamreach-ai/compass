@@ -12,8 +12,10 @@ from compass_api import workspace as api_workspace
 
 
 def _identity_from_headers(request: Request) -> Optional[str]:
-    """The signed-in user's id: X-User-Id, or a header the product registered (an ALB's OIDC headers)."""
-    for name in ("X-User-Id",) + extensions.identity_headers():
+    """The signed-in user's id: a header the deployment registered (an ALB's OIDC headers, which
+    the proxy sets on every request it passes on) first, else X-User-Id. In that order, so behind
+    the proxy a browser cannot name itself someone else (the demo's per-visitor limits)."""
+    for name in extensions.identity_headers() + ("X-User-Id",):
         value = request.headers.get(name)
         if value:
             return value

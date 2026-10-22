@@ -42,11 +42,12 @@ armed). `c` below is `docker compose run --rm compass`; the workspace is
    cron line on the host (`0 3 * * 0 cd /opt/compass && docker compose run
    --rm compass demo reset`) or, on AWS, an EventBridge schedule running the
    worker image with `compass demo reset`.
-7. **Before strangers use it.** Put sign-in in front of it (the open login is
-   one shared account, so the per-visitor limits and the tour are shared too),
-   keep `READ_ONLY` off, and set a model spend limit with your provider: every
-   trip runs one investigation, and the open edition has no model budget of
-   its own.
+7. **Before strangers use it.** Put a sign-in proxy in front of it and name
+   yourself in `demo.admins`: the open login is one shared account, so without
+   a proxy the per-visitor limits and the tour are shared and nobody is the
+   operator in the dashboard ([Who may change what](#who-may-change-what)).
+   Keep `READ_ONLY` off. Check the [model budget](#the-model-budget) (60 calls
+   an hour, 300 a day by default) and set a spend limit with your provider too.
 
 To leave demo mode, remove `APP_MODE` and `docker compose up -d`; the seeded
 world stays on the map, marked synthetic, under its own scope; a rescan
@@ -79,6 +80,52 @@ a default (`compass_core/demo.py`):
             "slack": ""}
 }
 ```
+
+## Who may change what
+
+A public demo lets strangers sign in, and a signed-in session has no scope (API
+tokens do: [access.md](access.md)). So in demo mode the requests that change how
+the demo works are the operator's alone (`compass_api.demo_guard`), answered
+403 `demo_admin_only` to anyone else:
+
+- everything an API token needs `admin` for (settings, the AWS account, GitHub,
+  tokens, the decoys' defaults, the response actions, access grants);
+- every write under `/api/settings`, `/api/captains`, `/api/notifications`,
+  `/api/updates`, `/api/prs/`, a rescan (`/api/maps/reindex`, `/api/iac/scan`),
+  `/api/iac/fix-drift`, `/api/honeypots/autopilot` and the audits' rollback;
+- an incident's close, approve and respond (the incident stays for the next
+  visitor; the response runs on autopilot under its grant);
+- a decoy's change, delete, `arm`, runbook and placement, and its `material`
+  and `lure` (the pre-armed key never leaves the server);
+- forcing a new incident summary when one exists (one model call each);
+- what a larger deployment adds (`extensions.register_demo_admin_prefixes`).
+
+The tour stays open: the map, the import pull request, planting a decoy,
+"Trip it", the incident, the summary there is. The operator is an address in
+`demo.admins`, matched against the email the sign-in proxy vouches for
+(an ALB's `x-amzn-oidc-data`, believed only when the deployment registered the
+ALB's identity headers), or any API token with the admin scope. The bootstrap
+says `app.demo.admin` and turns `settings_enabled` off for everyone else, so the
+Settings tab is not there for them. An install without a sign-in proxy has one
+shared login and so no operator in the dashboard: change it with the CLI, the
+config file or an admin token.
+
+Behind the proxy, the identity the proxy sets wins over a browser's `X-User-Id`,
+so a visitor cannot pose as another to get round the per-visitor limits.
+
+## The model budget
+
+Every model call claims one unit of the workspace's budget first
+(`compass_core.model_budget`): `limits.model_calls_per_hour` and
+`limits.model_calls_per_day`, counted in the items table under
+`MODEL#CALLS#H#<hour>` and `MODEL#CALLS#D#<day>` with one conditional write
+each, so racing callers never pass the limit. Past it the call is refused
+(`ModelBudgetExceeded`) before it reaches the provider, and each caller's "no
+model" path answers instead (the decoys' deterministic plan, a template
+reply). Outside demo mode an unset limit is no limit; in demo mode the defaults
+are 60 an hour and 300 a day. A model the deployment builds itself says
+`budgeted = True` and claims through the same function, so no call is counted
+twice.
 
 ## The world: `compass demo seed`
 
