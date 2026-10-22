@@ -9,6 +9,8 @@ import DemoBadge from "./DemoBadge";
 import type { DemoConfig } from "../lib/demo";
 import { ALL_WORKSPACE_TABS, SETTINGS_VIEWS, TAB_GROUPS, asWorkspaceTab, viewHref, viewLabel } from "../lib/tabs";
 import type { TabDetail, WorkspaceTab } from "../lib/tabs";
+import InboxCount from "./InboxCount";
+import { useInbox } from "../lib/inbox";
 
 // The groups before the bootstrap has answered (or from an API that lists no
 // tab details): the first-party tabs as they have always been grouped.
@@ -17,10 +19,10 @@ const LEGACY_TABS: TabDetail[] = [
   { key: "iac", label: "IAC", group: "cost" },
   { key: "audits", label: "DevSecOps", group: "security" },
   { key: "compliance", label: "Compliance", group: "security" },
-  { key: "honeypots", label: "Honeypots", group: "security", views: ["overview", "honeytokens", "history", "settings"] },
+  { key: "honeypots", label: "Honeypots", group: "security", views: ["overview", "honeytokens", "needs_you", "history", "settings"] },
   { key: "prs", label: "Pull requests", group: "platform", views: ["open", "needs_you", "history"] },
   { key: "maps", label: "Maps", group: "platform" },
-  { key: "queue", label: "Queue", group: "platform" },
+  { key: "queue", label: "Queue", group: "platform", views: ["jobs", "needs_you"] },
   { key: "policies", label: "Policies", group: "platform" },
   { key: "settings", label: "Settings", group: "platform" },
 ];
@@ -113,6 +115,10 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void } = {}
   const [tabDetails, setTabDetails] = useState<TabDetail[] | null>(null);
   const [simpleAuthEnabled, setSimpleAuthEnabled] = useState(false);
   const [accountLoading, setAccountLoading] = useState(true);
+  // what needs a person, per tab and in all (docs/inbox.md); the chips sit beside the links, never inside them
+  const { feed: inbox } = useInbox();
+  const inboxByTab = inbox?.counts?.by_tab || {};
+  const inboxUrgentTabs = new Set((inbox?.items || []).filter((i) => !i.snooze && i.severity === "urgent").map((i) => i.tab));
 
   useEffect(() => {
     let cancelled = false;
@@ -272,25 +278,29 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void } = {}
         : [];
     return (
       <li key={navItem.key}>
-        {navItem.disabled ? (
-          <span aria-disabled="true" className={className}>{navItem.label}</span>
-        ) : (
-          <Link href={navItem.href} className={className} onClick={onNavigate}>{navItem.label}</Link>
-        )}
+        <div className="flex items-center gap-2">
+          {navItem.disabled ? (
+            <span aria-disabled="true" className={`${className} flex-1`}>{navItem.label}</span>
+          ) : (
+            <Link href={navItem.href} className={`${className} flex-1`} onClick={onNavigate}>{navItem.label}</Link>
+          )}
+          {!navItem.disabled && <InboxCount count={inboxByTab[navItem.key] || 0} urgent={inboxUrgentTabs.has(navItem.key)} />}
+        </div>
         {subItems.length > 0 && (
           <ul className="ml-4 mt-1 space-y-0.5 border-l border-gray-200 pl-2" aria-label={`${navItem.label} sections`}>
             {subItems.map((view) => (
-              <li key={view.key}>
+              <li key={view.key} className="flex items-center gap-2">
                 <Link
                   href={view.href}
                   onClick={onNavigate}
                   aria-current={view.active ? "page" : undefined}
-                  className={`block rounded px-2 py-1 text-[13px] transition ${
+                  className={`block flex-1 rounded px-2 py-1 text-[13px] transition ${
                     view.active ? "bg-blue-50 font-semibold text-blue-700" : "text-gray-600 hover:bg-gray-100"
                   }`}
                 >
                   {view.label}
                 </Link>
+                {view.key === "needs_you" && <InboxCount count={inboxByTab[navItem.key] || 0} urgent={inboxUrgentTabs.has(navItem.key)} />}
               </li>
             ))}
           </ul>
@@ -303,12 +313,31 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void } = {}
     <>
       {/* Header / Brand */}
       <div className="p-6 border-b">
-        <Link href="/workspace" className="flex items-center gap-3">
-          {LOGO_URL && <img src={LOGO_URL} alt={COMPANY_NAME} className="h-8 w-auto" />}
-          <div className="flex flex-col leading-tight text-base font-semibold">
-            {isOpenEdition ? <span>Compass</span> : (<><span>Beamreach</span><span>Compass</span></>)}
-          </div>
-        </Link>
+        <div className="flex items-center justify-between gap-3">
+          <Link href="/workspace" className="flex items-center gap-3">
+            {LOGO_URL && <img src={LOGO_URL} alt={COMPANY_NAME} className="h-8 w-auto" />}
+            <div className="flex flex-col leading-tight text-base font-semibold">
+              {isOpenEdition ? <span>Compass</span> : (<><span>Beamreach</span><span>Compass</span></>)}
+            </div>
+          </Link>
+          {/* the total: everything that needs a person, across the tabs; opens the whole feed */}
+          <Link
+            href="/workspace?tab=inbox"
+            onClick={onNavigate}
+            data-inbox-total={inbox?.counts?.total ?? ""}
+            title={inbox ? `${inbox.counts.total} need${inbox.counts.total === 1 ? "s" : ""} you` : "Needs you"}
+            aria-label={`Needs you${inbox ? `: ${inbox.counts.total}` : ""}`}
+            className={`inline-flex min-w-[1.75rem] items-center justify-center rounded-full px-2 py-1 text-xs font-semibold transition ${
+              !inbox || inbox.counts.total === 0
+                ? "bg-gray-100 text-gray-500 hover:bg-gray-200"
+                : inbox.counts.urgent > 0
+                  ? "bg-red-100 text-red-700 hover:bg-red-200"
+                  : "bg-amber-100 text-amber-800 hover:bg-amber-200"
+            }`}
+          >
+            {inbox ? inbox.counts.total : "…"}
+          </Link>
+        </div>
       </div>
       {/* Nav */}
       <nav className="flex flex-1 flex-col p-4">

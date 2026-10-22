@@ -3,6 +3,8 @@
 // restart. The shell owns the job list and its polling (useShell().queueJobs).
 import axios from "axios";
 import React, { useCallback, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import InboxFeed from "./InboxFeed";
 import { formatTimestamp } from "../lib/format";
 import { useShell } from "../lib/shell";
 
@@ -27,6 +29,7 @@ const SCAN_GATED_CAPTAINS = ["engine", "finops_engine", "triage", "finops_triage
 
 export default function QueueTab() {
   const { queueJobs, queueError, fetchQueueJobs, infraScan, infraScanBlocked } = useShell();
+  const view = useSearchParams()?.get("view") || "jobs";
   const [restartPending, setRestartPending] = useState<string | null>(null);
   const [restartError, setRestartError] = useState<string | null>(null);
 
@@ -49,6 +52,15 @@ export default function QueueTab() {
   );
 
   const error = restartError || queueError;
+
+  if (view === "needs_you") {
+    return (
+      <div className="space-y-4">
+        <h1 className="text-2xl font-bold">Queue</h1>
+        <InboxFeed tab="queue" empty="Nothing needs you here. A failed or dead job would be listed until a newer run of the same command completes." />
+      </div>
+    );
+  }
 
   return (
     <div>

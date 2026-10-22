@@ -6,11 +6,14 @@ import { Suspense, useEffect, useState } from "react";
 import DemoBadge from "./DemoBadge";
 import Sidebar from "./Sidebar";
 import { COMPANY_NAME, LOGO_URL, PRODUCT_NAME } from "../lib/edition";
+import { useInbox } from "../lib/inbox";
 
 // The sidebar is a fixed column from md up and an off-canvas drawer below it,
 // opened from a slim top bar. Attendees open the demo stand from their phones.
 export default function WorkspaceShell({ children, demo: demoFromServer = false }: { children: React.ReactNode; demo?: boolean }) {
   const [open, setOpen] = useState(false);
+  const { feed: inbox } = useInbox();
+  const inboxTotal = inbox?.counts?.total || 0;
   // the server's APP_MODE when the layout rendered with it; else the bootstrap says, so a
   // statically rendered shell and a product build without the env still mark themselves
   const [demo, setDemo] = useState(demoFromServer);
@@ -44,11 +47,21 @@ export default function WorkspaceShell({ children, demo: demoFromServer = false 
           onClick={() => setOpen(true)}
           aria-label="Open menu"
           aria-expanded={open}
-          className="rounded-md border border-gray-200 bg-white p-2 text-gray-700 hover:bg-gray-50"
+          className="relative rounded-md border border-gray-200 bg-white p-2 text-gray-700 hover:bg-gray-50"
         >
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
             <path d="M4 7h16M4 12h16M4 17h16" />
           </svg>
+          {inboxTotal > 0 && (
+            <span
+              data-inbox-total={inboxTotal}
+              className={`absolute -right-1.5 -top-1.5 inline-flex min-w-[1.1rem] items-center justify-center rounded-full px-1 text-[10px] font-semibold leading-4 ${
+                (inbox?.counts?.urgent || 0) > 0 ? "bg-red-500 text-white" : "bg-amber-400 text-amber-950"
+              }`}
+            >
+              {inboxTotal > 99 ? "99+" : inboxTotal}
+            </span>
+          )}
         </button>
         <Link href="/workspace" className="flex items-center gap-2 text-sm font-semibold">
           {LOGO_URL && <img src={LOGO_URL} alt={COMPANY_NAME} className="h-6 w-auto" />}

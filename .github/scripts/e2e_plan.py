@@ -37,8 +37,8 @@ from typing import Dict, Iterable, List, Optional
 # The four shards: each a set of files that run on one runner with one stack. Files that
 # build on another's state (the PR watcher on the pull requests code-as-cloud opens) share one.
 SHARDS: Dict[str, Dict[str, object]] = {
-    "A": {"name": "install, sign-in, shell, settings",
-          "files": ["test_00_install.py", "test_01_auth.py", "test_02_shell.py", "test_03_settings.py", "test_13_demo.py"]},
+    "A": {"name": "install, sign-in, shell, settings, inbox",
+          "files": ["test_00_install.py", "test_01_auth.py", "test_02_shell.py", "test_03_settings.py", "test_13_demo.py", "test_14_inbox.py"]},
     "B": {"name": "captains, the map", "files": ["test_04_captains.py", "test_05_map.py"]},
     "C": {"name": "decoys, code-as-cloud, pull requests, access", "files": ["test_06_decoys.py", "test_07_iac.py", "test_08_prs.py", "test_12_access.py"]},
     "D": {"name": "jobs, updates, release", "files": ["test_09_jobs.py", "test_10_updates.py", "test_11_release.py"]},

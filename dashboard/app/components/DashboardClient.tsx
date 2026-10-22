@@ -20,6 +20,8 @@ import CompassSection, { UpdateBanner } from "./CompassUpdates";
 import MappingProgressBar from "./MappingProgressBar";
 import { lastScanDurationMs } from "./mappingProgress";
 import GenericCaptainTab from "./GenericCaptainTab";
+import InboxFeed from "./InboxFeed";
+import { useInbox } from "../lib/inbox";
 import type { QueueEvent, QueueJob, SettingsBootstrap, SettingsSaveParticipant, Shell } from "../lib/shell";
 import { ALL_WORKSPACE_TABS, SETTINGS_VIEWS, TAB_ALIASES, asWorkspaceTab, resolveEnabledTabs, settingsSectionId } from "../lib/tabs";
 import type { DashboardTab, WorkspaceTab } from "../lib/tabs";
@@ -42,6 +44,8 @@ const resolveTab = (
     return fallbackTab;
   }
   const requested = params?.get("tab") || null;
+  // the whole inbox is not a tab a manifest declares; it is reached from the total in the sidebar
+  if (requested === "inbox") return "inbox";
   const tab = (requested && TAB_ALIASES[requested]) || requested;
   const workspaceTab = asWorkspaceTab(tab);
   if (workspaceTab) {
@@ -55,6 +59,38 @@ const resolveTab = (
   }
   return fallbackTab;
 };
+
+const INBOX_VERBS = ["approve", "fix", "merge", "later"] as const;
+
+// The whole feed (?tab=inbox): every item across the tabs, newest first, with a verb filter.
+function InboxPage({ readOnly, jobsToday }: { readOnly: boolean; jobsToday: number }) {
+  const [verb, setVerb] = useState<string | null>(null);
+  const { feed } = useInbox();
+  const counts = feed?.counts;
+  return (
+    <div className="space-y-4">
+      <div>
+        <h1 className="text-2xl font-bold text-gray-900">Needs you</h1>
+        <p className="text-sm text-gray-600">Everything waiting for a person, across the tabs. Each item carries what one click does; expand it to see what the tab would show.</p>
+      </div>
+      <nav className="flex flex-wrap gap-2" aria-label="Inbox filters">
+        <button type="button" onClick={() => setVerb(null)} className={`rounded-full px-3 py-1 text-xs font-medium ${verb === null ? "bg-blue-50 text-blue-700" : "bg-gray-100 text-gray-600"}`}>
+          All{counts ? ` (${counts.total})` : ""}
+        </button>
+        {INBOX_VERBS.map((v) => (
+          <button key={v} type="button" onClick={() => setVerb(v)} className={`rounded-full px-3 py-1 text-xs font-medium capitalize ${verb === v ? "bg-blue-50 text-blue-700" : "bg-gray-100 text-gray-600"}`}>
+            {v}{counts?.by_verb?.[v] ? ` (${counts.by_verb[v]})` : ""}
+          </button>
+        ))}
+      </nav>
+      <InboxFeed
+        verb={verb}
+        readOnly={readOnly}
+        empty={<>Nothing needs you.{jobsToday ? ` The daemon ran ${jobsToday} job${jobsToday === 1 ? "" : "s"} today.` : ""}</>}
+      />
+    </div>
+  );
+}
 
 // One of the Settings page's sections (lib/tabs.ts SETTINGS_VIEWS): the heading the
 // sidebar's sub-link scrolls to.
@@ -113,6 +149,7 @@ export default function DashboardClient() {
   const [queueError, setQueueError] = useState<string | null>(null);
 
   const [activeTab, setActiveTab] = useState<DashboardTab>(resolveTab(searchParams, null));
+  const { feed: inboxFeed } = useInbox();
 
   useEffect(() => {
     const enabledTabs = resolveEnabledTabs(settingsBootstrap?.app);
@@ -658,6 +695,8 @@ export default function DashboardClient() {
               <p className="text-sm text-gray-600">Manage automation behaviour for Compass.</p>
             </div>
 
+            {(inboxFeed?.counts?.by_tab?.settings || 0) > 0 && <InboxFeed tab="settings" title="Needs you" readOnly={isReadOnly} />}
+
             {(!settingsBootstrap?.aws?.configured || !settingsBootstrap?.github?.connected) && (
               <div className="rounded-lg border border-amber-300 bg-amber-50 px-5 py-4">
                 <div className="flex items-start gap-3">
@@ -948,6 +987,8 @@ export default function DashboardClient() {
             Settings are disabled in this environment.
           </div>
           )
+        ) : activeTab === "inbox" ? (
+          <InboxPage readOnly={isReadOnly} jobsToday={queueJobs.filter((j) => j.created_at > Date.now() - 86_400_000).length} />
         ) : activeTabDef ? (
           <activeTabDef.Component />
         ) : enabledWorkspaceTabs.includes(activeTab) ? (

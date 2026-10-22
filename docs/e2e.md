@@ -58,7 +58,7 @@ parallel, each with its own stack:
 
 | Shard | Files |
 |---|---|
-| A | install, sign-in, shell, settings, demo mode (`test_00`–`test_03`, `test_13`) |
+| A | install, sign-in, shell, settings, demo mode, the inbox (`test_00`–`test_03`, `test_13`, `test_14`) |
 | B | captains, the map (`test_04`, `test_05`) |
 | C | decoys, code-as-cloud, pull requests (`test_06`–`test_08`) |
 | D | jobs, updates, release (`test_09`–`test_11`) |
@@ -340,3 +340,12 @@ policy the module renders into moto, as the apply would.
 
 The stack runs these with `APP_MODE=demo` in `.env` and puts it back afterwards; the
 read-only test (AUT-5) keeps `READ_ONLY=1` as its own thing.
+
+### 4.15 The inbox (`test_14_inbox.py`)
+
+| ID | Test | Via |
+|---|---|---|
+| INB-1 | A failed job is an urgent `fix` item on the Queue tab with Retry, Acknowledge and Open job; the stack's missing model is an `info` item on Settings; the feed is newest first, filters by tab, and `/api/status` carries the counts and the line | API |
+| INB-2 | The sidebar counts the tab and the total; the Queue tab's Needs you view lists the item and expanding it shows the job's error | UI |
+| INB-3 | Acknowledge from the feed hides the item (the count drops, `include_snoozed` still shows it), un-snoozing brings it back; Retry from the feed queues the job and the newest failure replaces the item | UI, API |
+| INB-4 | The total opens the whole feed, newest first with the verb filter; the phone's menu button carries the total | UI |

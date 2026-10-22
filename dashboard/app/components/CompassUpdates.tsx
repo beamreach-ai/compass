@@ -10,6 +10,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { DASHBOARD_VERSION } from "../lib/edition";
 import { useShell } from "../lib/shell";
 import type { ReleaseNote, UpdateState } from "../lib/shell";
+import { notifyInboxUpdated } from "../lib/inbox";
 import { dismissVersion, dismissedVersion, httpsLink, noteDate, phaseText, POLICY_LABELS, relativeTime, versionsDiffer, WHATS_NEW_ID } from "./updateViews";
 import type { UpdatesListing } from "./updateViews";
 
@@ -165,6 +166,7 @@ export function UpdateBanner({ update, settingsHref }: { update: UpdateState | n
               aria-label="Dismiss until the next release"
               onClick={() => {
                 dismissVersion(update.latest || "");
+                void fetch(`/api/inbox/update.available:${encodeURIComponent(update.latest || "")}/snooze`, { method: "POST" }).then(() => notifyInboxUpdated()).catch(() => undefined);
                 setDismissed(update.latest || null);
               }}
               className="text-sky-700 hover:text-sky-900"

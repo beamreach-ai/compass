@@ -1,11 +1,12 @@
-// The Honeypots tab is split into four views, selected by ?view=…; the Sidebar
+// The Honeypots tab is split into five views, selected by ?view=…; the Sidebar
 // lists them as sub-items under "Honeypots" and HoneypotsTab renders one.
 
-export type HoneypotView = "overview" | "honeytokens" | "history" | "settings";
+export type HoneypotView = "overview" | "honeytokens" | "needs_you" | "history" | "settings";
 
 export const HONEYPOT_VIEWS: { key: HoneypotView; label: string }[] = [
   { key: "overview", label: "Overview" },
   { key: "honeytokens", label: "Honeytokens" },
+  { key: "needs_you", label: "Needs you" },
   { key: "history", label: "History" },
   { key: "settings", label: "Settings" },
 ];

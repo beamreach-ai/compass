@@ -50,8 +50,8 @@ export const openTabs: CaptainTab[] = [
   { key: "maps", label: "Maps", feature: "maps", group: "platform", Component: MapsTab },
   { key: "iac", label: "IAC", feature: "iac", group: "cost", Component: IACTab },
   { key: "prs", label: "Pull requests", feature: "prs", group: "platform", views: ["open", "needs_you", "history"], Component: PRsTabView as React.ComponentType },
-  { key: "honeypots", label: "Decoys", feature: "honeypots", group: "security", views: ["overview", "honeytokens", "history", "settings"], Component: HoneypotsTabView as React.ComponentType },
-  { key: "queue", label: "Queue", feature: "queue", group: "platform", Component: QueueTabView as React.ComponentType },
+  { key: "honeypots", label: "Decoys", feature: "honeypots", group: "security", views: ["overview", "honeytokens", "needs_you", "history", "settings"], Component: HoneypotsTabView as React.ComponentType },
+  { key: "queue", label: "Queue", feature: "queue", group: "platform", views: ["jobs", "needs_you"], Component: QueueTabView as React.ComponentType },
 ];
 
 // A captain's own settings UI, by the manifest's `settings_component` key.

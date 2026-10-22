@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import PRDrawer from "./PRDrawer";
+import InboxFeed from "./InboxFeed";
 import { BTN_OUTLINE_SM, ReadOnlyContext, relativeTime } from "./honeypotFormat";
 import { attribution, isDemoApp } from "../lib/demo";
 import { PR_VIEWS, asPRView, prViewHref } from "./prViews";
@@ -159,11 +160,13 @@ export default function PRsTab() {
 
         {error && <div className="rounded border border-red-200 bg-red-50 text-red-700 px-4 py-2 text-sm">{error}</div>}
 
-        {loading ? (
+        {view === "needs_you" ? (
+          <InboxFeed tab="prs" readOnly={readOnly} empty="Nothing is waiting for you." />
+        ) : loading ? (
           <div className="text-sm text-gray-500 py-8 text-center">Loading…</div>
         ) : rows.length === 0 ? (
           <div className="rounded-lg border bg-white px-6 py-12 text-center text-sm text-gray-500">
-            {view === "needs_you" ? "Nothing is waiting for you." : view === "history" ? "No merged or closed pull requests yet." : "No pull requests yet. Fix a finding, import unmanaged resources or plant a honeytoken to open one."}
+            {view === "history" ? "No merged or closed pull requests yet." : "No pull requests yet. Fix a finding, import unmanaged resources or plant a honeytoken to open one."}
           </div>
         ) : (
           <>
