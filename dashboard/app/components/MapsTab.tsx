@@ -5,6 +5,9 @@ import axios from "axios";
 import Graphin, { Behaviors, Components as GraphinComponents } from "@antv/graphin";
 import "@antv/graphin/dist/index.css";
 import MappingProgressBar from "./MappingProgressBar";
+import { isDemoApp } from "../lib/demo";
+import { completeTourStep } from "../lib/tour";
+import { useShell } from "../lib/shell";
 
 type InfraNode = {
   org_id: string;
@@ -530,9 +533,11 @@ const computeSubgraph = (
   return { nodes, edges };
 };
 
-const GraphCard: React.FC<{ title: string; loading?: boolean; children: React.ReactNode }> = ({
+// `watermark` is drawn over the canvas, lower right, so it is in the pixels of every screenshot (the demo)
+const GraphCard: React.FC<{ title: string; loading?: boolean; watermark?: string | null; children: React.ReactNode }> = ({
   title,
   loading = false,
+  watermark = null,
   children,
 }) => (
   <div className="bg-white border rounded-lg shadow-sm h-[520px] flex flex-col">
@@ -540,7 +545,18 @@ const GraphCard: React.FC<{ title: string; loading?: boolean; children: React.Re
       <span>{title}</span>
       {loading && <span className="text-xs text-blue-500 animate-pulse">Loading…</span>}
     </div>
-    <div className="flex-1 min-h-0">{children}</div>
+    <div className="relative flex-1 min-h-0">
+      {children}
+      {watermark && (
+        <div
+          data-map-watermark
+          aria-hidden="true"
+          className="pointer-events-none absolute bottom-3 right-4 z-10 select-none text-4xl font-black uppercase tracking-[0.3em] text-amber-600/40"
+        >
+          {watermark}
+        </div>
+      )}
+    </div>
   </div>
 );
 
@@ -977,6 +993,9 @@ const relationshipLabel = (edge: InfraEdge): string =>
   `${edge.relationship_type} → ${edge.to_resource_id.split(":").pop() || edge.to_resource_id}`;
 
 const MapsTab: React.FC<MapsTabProps> = ({ infraScan = null, mapperJob = null, onMapperTriggered }) => {
+  const { settingsBootstrap, searchParams } = useShell();
+  const demo = isDemoApp(settingsBootstrap?.app);
+  const wantedSearch = searchParams?.get("q") ?? null;
   const [mapData, setMapData] = useState<InfraMapResponse | null>(null);
   const [mapLoading, setMapLoading] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
@@ -1005,7 +1024,9 @@ const MapsTab: React.FC<MapsTabProps> = ({ infraScan = null, mapperJob = null, o
       const response = await axios.get<InfraMapResponse>("/api/maps", {
         params: {
           org_id: orgInput || undefined,
-          limit: 4000,
+          // a node budget (the edges between the kept nodes come along); the demo's world plus the
+          // real account is more than the draw-whole 4,000, and the demo is there to be looked at
+          limit: demo ? 10000 : 4000,
         },
       });
       setMapData(response.data);
@@ -1015,7 +1036,7 @@ const MapsTab: React.FC<MapsTabProps> = ({ infraScan = null, mapperJob = null, o
     } finally {
       setMapLoading(false);
     }
-  }, [orgInput]);
+  }, [orgInput, demo]);
 
   const triggerMapper = useCallback(async () => {
     setMapperError(null);
@@ -1249,6 +1270,21 @@ const toggleCategoryFilter = useCallback(
     }
   }, [mapData, searchTerm]);
 
+  // ?q=<term> (the tour's "search payments"): the box filled and the first hit selected, once the map is here
+  const [searchedFromUrl, setSearchedFromUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!wantedSearch || !mapData || searchedFromUrl === wantedSearch) return;
+    setSearchedFromUrl(wantedSearch);
+    setSearchTerm(wantedSearch);
+    const term = wantedSearch.trim().toLowerCase();
+    const hit = mapData.nodes.find((node) => node.name?.toLowerCase().includes(term) || node.resource_id.toLowerCase().includes(term));
+    if (hit) setSelectedNodeId(hit.resource_id);
+  }, [wantedSearch, mapData, searchedFromUrl]);
+  // the tour's first step: a node's detail opened
+  useEffect(() => {
+    if (demo && selectedNodeId) completeTourStep("map");
+  }, [demo, selectedNodeId]);
+
   return (
     <section className="space-y-6">
       <div className="bg-white border rounded-lg shadow-sm p-4 space-y-4">
@@ -1471,7 +1507,7 @@ const toggleCategoryFilter = useCallback(
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-1 gap-4">
-        <GraphCard title="AntV Graphin" loading={mapLoading}>
+        <GraphCard title="AntV Graphin" loading={mapLoading} watermark={demo ? "demo" : null}>
           {filteredGraph.nodes.length === 0 ? (
             <div className="h-full flex items-center justify-center text-sm text-gray-500">
               {mapLoading ? "Loading map…" : "No graph data available"}
@@ -1515,6 +1551,9 @@ const toggleCategoryFilter = useCallback(
                 </span>
               </h3>
               <p className="text-sm text-gray-600">{selectedNode.name}</p>
+              {selectedNode.attributes?.synthetic === true && (
+                <p className="text-xs font-medium text-amber-700">Synthetic resource (demo world)</p>
+              )}
             </div>
             <div className="grid md:grid-cols-2 gap-4 text-sm">
               <div className="space-y-1">

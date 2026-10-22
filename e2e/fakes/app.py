@@ -204,6 +204,17 @@ async def create_ref(owner: str, name: str, request: Request) -> Any:
             "object": {"sha": repo.heads[branch], "type": "commit", "url": ""}}
 
 
+@app.delete("/github/repos/{owner}/{name}/git/refs/{ref:path}", status_code=204)
+def delete_ref(owner: str, name: str, ref: str) -> Response:
+    repo = _repo(owner, name)
+    branch = ref.removeprefix("heads/")
+    if branch not in repo.branches or branch == repo.default_branch:
+        raise HTTPException(422, {"message": "Reference does not exist"})
+    repo.branches.pop(branch, None)
+    repo.heads.pop(branch, None)
+    return Response(status_code=204)
+
+
 @app.get("/github/repos/{owner}/{name}/git/trees/{ref:path}")
 def get_tree(owner: str, name: str, ref: str, request: Request) -> Dict[str, Any]:
     repo = _repo(owner, name)
@@ -337,6 +348,8 @@ async def edit_pull(owner: str, name: str, number: int, request: Request) -> Dic
     for key in ("title", "body", "state"):
         if key in body:
             pull[key] = body[key]
+    if body.get("state") == "closed" and not pull.get("closed_at"):
+        pull["closed_at"] = _now()
     pull["updated_at"] = _now()
     return _pull_json(request, repo, pull)
 
@@ -385,6 +398,24 @@ async def create_issue_comment(owner: str, name: str, number: int, request: Requ
     return comment
 
 
+@app.post("/github/repos/{owner}/{name}/pulls/{number}/reviews")
+async def create_review(owner: str, name: str, number: int, request: Request) -> Dict[str, Any]:
+    """A review by the signed-in login: {"body", "event": COMMENT | APPROVE | REQUEST_CHANGES}."""
+    full = f"{owner}/{name}"
+    pull = _find_pull(_repo(owner, name), number)
+    body = await request.json()
+    state = {"APPROVE": "APPROVED", "REQUEST_CHANGES": "CHANGES_REQUESTED"}.get(str(body.get("event") or "COMMENT"), "COMMENTED")
+    review = {"id": next(_ids), "state": state, "user": _user(), "body": body.get("body") or "", "submitted_at": _now(), "author_association": "MEMBER"}
+    _comments(full, number, "reviews").append(review)
+    if body.get("body"):
+        _comments(full, number, "issue").append({"id": next(_ids), "body": body["body"], "user": _user(), "author_association": "MEMBER",
+                                                 "created_at": _now(), "updated_at": _now()})
+    if state != "COMMENTED":
+        pull["review_decision"] = state
+    pull["updated_at"] = _now()
+    return review
+
+
 @app.post("/github/repos/{owner}/{name}/pulls/{number}/comments/{comment_id}/replies", status_code=201)
 async def reply_review_comment(owner: str, name: str, number: int, comment_id: int, request: Request) -> Dict[str, Any]:
     body = await request.json()
@@ -397,7 +428,9 @@ async def reply_review_comment(owner: str, name: str, number: int, comment_id: i
 @app.post("/github/repos/{owner}/{name}/issues/{number}/labels")
 async def add_labels(owner: str, name: str, number: int, request: Request) -> List[Dict[str, Any]]:
     pull = _find_pull(_repo(owner, name), number)
-    for label in (await request.json()).get("labels") or []:
+    payload = await request.json()
+    # GitHub takes {"labels": [...]} and a bare list (PyGithub sends the list)
+    for label in (payload.get("labels") if isinstance(payload, dict) else payload) or []:
         if label not in pull["labels"]:
             pull["labels"].append(label)
     return [{"name": n} for n in pull["labels"]]

@@ -5,6 +5,7 @@ import logging
 import re
 from typing import Any, Dict, List, Optional
 
+from compass_core import sessions
 from compass_core.github import client as github_client
 from compass_core.github import resolve_github_token
 from compass_core.github_prs import PublishedPR, commit_files, ensure_branch, find_open_pr, open_or_update_pr
@@ -173,7 +174,8 @@ class GitHubPRWriter:
             PRRegistry.from_config(self.config).record(
                 url=pr_url,
                 pr_type="fix_drift",
-                origin={"captain": "iac", "command": "fix_drift", "job_id": current_job_id(), "resource_ids": [str(d.get("resource_id")) for d in drift_data if d.get("resource_id")]},
+                origin={"captain": "iac", "command": "fix_drift", "job_id": current_job_id(), "resource_ids": [str(d.get("resource_id")) for d in drift_data if d.get("resource_id")],
+                        "user_id": sessions.current_requester()},
                 intent=intent_for_fix_drift(drift_data=drift_data, files=files),
                 branch=branch,
                 base_branch=base_branch,

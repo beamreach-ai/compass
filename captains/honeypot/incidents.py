@@ -46,6 +46,7 @@ TIMELINE_FIELDS = (
 MARKABLE_FIELDS = set(TIMELINE_FIELDS) | {
     "correlation", "blast_radius", "summary", "action", "source_task_id", "cluster_arn", "service_arn",
     "status", "audit_ids", "last_event_time", "report_url", "slack_thread", "notified_endpoint_ids",
+    "resolution",  # why it was closed when not by a person ("demo reset")
 }
 
 

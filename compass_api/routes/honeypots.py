@@ -844,7 +844,12 @@ def _real_test_fire(table, pk: str, honeytoken_id: str, honeytoken: Dict[str, An
 def test_fire(request: Request, honeytoken_id: str) -> Dict[str, Any]:
     """Synthetically trigger this honeytoken through the real alert path so the
     user can confirm detection + notification work without waiting for a real
-    intrusion. The resulting alert is flagged as a test."""
+    intrusion. The resulting alert is flagged as a test. Not in demo mode, where
+    "Trip it" (below) is the one way to fire a decoy."""
+    from compass_core import demo as demo_mode
+
+    if demo_mode.enabled():
+        raise HTTPException(status_code=404, detail="Not in the demo: trip a pre-armed decoy instead")
     table = _resolve_table(request)
     pk = _ws_pk(request)
     actor = get_actor_ids(request)
@@ -905,10 +910,61 @@ def test_fire(request: Request, honeytoken_id: str) -> Dict[str, Any]:
     }
 
 
+# ── Trip it (demo mode): a visitor fires a pre-armed decoy for real, paced ───────────
+
+@router.post("/api/honeypots/tokens/{honeytoken_id}/trip")
+def trip_honeytoken(request: Request, honeytoken_id: str) -> Dict[str, Any]:
+    """Demo mode only (404 otherwise). The decoy must be one of ``demo.trippable`` and armed.
+    One trip per decoy per cooldown, shared by every visitor: during it the answer is the trip
+    in force (``state: cooldown``) with the incident it opened, so the visitor is taken there.
+    A visitor gets ``trips_per_visitor_per_hour``. The fire itself is the ``honeypot trip`` job."""
+    from compass_core import demo as demo_mode
+
+    if not demo_mode.enabled():
+        raise HTTPException(status_code=404, detail="Not a demo")
+    table = _resolve_table(request)
+    pk = _ws_pk(request)
+    actor = get_actor_ids(request)
+    settings = demo_mode.settings(get_workspace_config(request))
+    honeytoken = _normalize_item(table.get_item(Key={"pk": pk, "sk": honeytoken_sort_key(honeytoken_id)}).get("Item") or {})
+    if not honeytoken:
+        raise HTTPException(status_code=404, detail="Honeytoken not found")
+    if honeytoken_id not in set(settings["trippable"]):
+        raise HTTPException(status_code=409, detail="Only the pre-armed decoys can be tripped; this one is a plant that was never applied")
+    if honeytoken.get("status") != "armed":
+        raise HTTPException(status_code=409, detail=f"The decoy is {honeytoken.get('status') or 'not armed'}: it re-arms after the response, try again in a minute")
+    material = _to_native(honeytoken.get("material") or {})
+    if not (material.get("access_key_id") and material.get("secret_access_key")):
+        raise HTTPException(status_code=409, detail="The decoy's key is not stored with Compass: arm it again with its secret")
+
+    now = demo_mode.epoch_ms()
+    me = str(actor.get("user_id") or "anonymous")
+    current = demo_mode.cooldown_row(table, pk, honeytoken_id)
+    if demo_mode.in_force(current, now_ms=now):
+        return {"state": "cooldown", **demo_mode.public_cooldown(current, me=me, now_ms=now)}
+    if len(demo_mode.visitor_trips(table, pk, me, now_ms=now)) >= int(settings["trips_per_visitor_per_hour"]):
+        raise HTTPException(status_code=429, detail=f"{settings['trips_per_visitor_per_hour']} trips an hour per visitor: the open incidents below are the same story")
+    claim = demo_mode.claim_trip(table, pk, honeytoken_id, user_id=me, cooldown_seconds=int(settings["cooldown_seconds"]), now_ms=now)
+    if not claim["claimed"]:
+        return {"state": "cooldown", **demo_mode.public_cooldown(claim["row"], me=me, now_ms=now)}
+    demo_mode.record_visitor_trip(table, pk, me, now_ms=now)
+    job = _queue_client.enqueue(
+        captain="honeypot", command="trip",
+        payload={"honeytoken_id": honeytoken_id, "workspace_id": actor.get("workspace_id"), "org_id": actor.get("org_id"), "user_id": actor.get("user_id")},
+    )
+    demo_mode.record_trip(table, pk, honeytoken_id, job_id=job.get("job_id"))
+    return {"state": "tripped", **demo_mode.public_cooldown({**claim["row"], "job_id": job.get("job_id")}, me=me, now_ms=now)}
+
+
 # ── Arm (mark honeytoken verified/active once the PR is applied) ─────────────────
 
+class ArmPayload(BaseModel):
+    # the decoy's secret, from the apply output: stored so Compass can use the key itself (test-fire, the demo's trip)
+    secret_access_key: Optional[str] = None
+
+
 @router.post("/api/honeypots/tokens/{honeytoken_id}/arm")
-def arm_honeytoken(request: Request, honeytoken_id: str) -> Dict[str, Any]:
+def arm_honeytoken(request: Request, honeytoken_id: str, body: ArmPayload = ArmPayload()) -> Dict[str, Any]:
     """Verify the planted resources in the target account (read-only), then mark
     the token armed. Refuses with the failed checks when anything is missing,
     notably when no CloudTrail trail is logging."""
@@ -948,6 +1004,9 @@ def arm_honeytoken(request: Request, honeytoken_id: str) -> Dict[str, Any]:
         names["#ms"] = "status"
         values[":k"] = result["access_key_id"]
         values[":ms"] = "applied"
+    if body.secret_access_key and isinstance(item.get("material"), dict):
+        expr += ", material.secret_access_key = :sec"
+        values[":sec"] = body.secret_access_key
     try:
         resp = table.update_item(
             Key=key, UpdateExpression=expr, ExpressionAttributeNames=names,

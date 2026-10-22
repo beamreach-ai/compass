@@ -156,6 +156,7 @@ class Stack:
         self.compose("up", "-d", "--force-recreate", "--no-deps", *services)
         self.wait_healthy()
         self._api = None
+        self._visitor = None
 
     def wait_healthy(self, timeout: float = 240) -> None:
         deadline = time.time() + timeout
@@ -179,9 +180,22 @@ class Stack:
 
     @property
     def api(self) -> httpx.Client:
+        """The operator: an admin API token when one is set (demo mode, where a session is a
+        visitor's), else the dashboard's signed-in session."""
         if self._api is None:
-            self._api = self.sign_in(httpx.Client(base_url=self.web, timeout=60))
+            token = getattr(self, "operator_token", None)
+            if token:
+                self._api = httpx.Client(base_url=self.web, headers={"Authorization": f"Bearer {token}"}, timeout=60)
+            else:
+                self._api = self.sign_in(httpx.Client(base_url=self.web, timeout=60))
         return self._api
+
+    @property
+    def visitor(self) -> httpx.Client:
+        """A signed-in session with no token: what a visitor has."""
+        if getattr(self, "_visitor", None) is None:
+            self._visitor = self.sign_in(httpx.Client(base_url=self.web, timeout=60))
+        return self._visitor
 
     def anonymous(self) -> httpx.Client:
         return httpx.Client(base_url=self.web, timeout=30)

@@ -12,6 +12,9 @@ import { openTabs } from "../lib/captains";
 import { productBanners, productProviders, productSettingsSections, productTabs } from "../lib/extensions";
 import type { SettingsSlot } from "../lib/extensions";
 import { ShellProvider } from "../lib/shell";
+import { DEMO_BANNER_DISMISSED_KEY, DEMO_BANNER_TEXT, PINNED_TITLE, isDemoApp, isPinned, pinnedProps } from "../lib/demo";
+import { completeTourStep } from "../lib/tour";
+import TourPanel from "./TourPanel";
 import CaptainsSection from "./CaptainsSection";
 import CompassSection, { UpdateBanner } from "./CompassUpdates";
 import MappingProgressBar from "./MappingProgressBar";
@@ -55,6 +58,13 @@ const resolveTab = (
 
 // One of the Settings page's sections (lib/tabs.ts SETTINGS_VIEWS): the heading the
 // sidebar's sub-link scrolls to.
+// a setting the demo fixes: the field is read-only and says so
+const PinnedPill = () => (
+  <span title={PINNED_TITLE} className="ml-2 inline-flex items-center rounded-full border border-gray-300 bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-700">
+    Fixed in the demo
+  </span>
+);
+
 function SettingsHeading({ view, title, children }: { view: string; title: string; children?: React.ReactNode }) {
   return (
     <div id={settingsSectionId(view)} className="scroll-mt-6 border-b border-gray-200 pb-2 pt-4">
@@ -191,6 +201,30 @@ export default function DashboardClient() {
 
   const beamreachAwsAccountId = settingsBootstrap?.aws?.beamreach_account_id || "";
   const isReadOnly = settingsBootstrap?.app?.read_only === true;
+  // demo mode (docs/demo.md): the banner, the pinned settings; the badge and watermark live in the shell and the map
+  const isDemo = isDemoApp(settingsBootstrap?.app);
+  const demoConfig = settingsBootstrap?.app?.demo ?? null;
+  const awsPinned = isDemo && isPinned(demoConfig, "aws");
+  const githubPinned = isDemo && isPinned(demoConfig, "github");
+  const [demoBannerDismissed, setDemoBannerDismissed] = useState(true);
+  useEffect(() => {
+    try {
+      setDemoBannerDismissed(window.sessionStorage.getItem(DEMO_BANNER_DISMISSED_KEY) === "1");
+    } catch {
+      setDemoBannerDismissed(false);
+    }
+  }, []);
+  useEffect(() => {
+    if (isDemo && activeTab === "iac") completeTourStep("unmanaged");
+  }, [isDemo, activeTab]);
+  const dismissDemoBanner = () => {
+    setDemoBannerDismissed(true);
+    try {
+      window.sessionStorage.setItem(DEMO_BANNER_DISMISSED_KEY, "1");
+    } catch {
+      // a browser without storage forgets the dismissal on reload, nothing worse
+    }
+  };
   const enabledWorkspaceTabs = resolveEnabledTabs(settingsBootstrap?.app);
   const queueEnabled = enabledWorkspaceTabs.includes("queue");
   const settingsEnabled = settingsBootstrap?.app?.settings_enabled !== false && enabledWorkspaceTabs.includes("settings");
@@ -569,6 +603,22 @@ export default function DashboardClient() {
             ) : null}
           </div>
         )}
+        {isDemo && !demoBannerDismissed && (
+          <div
+            data-demo-banner
+            className="mb-6 flex items-start justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"
+          >
+            <span>{DEMO_BANNER_TEXT}</span>
+            <button
+              type="button"
+              onClick={dismissDemoBanner}
+              aria-label="Dismiss the demo notice"
+              className="-mr-1 rounded px-1 text-base leading-none text-amber-700 hover:bg-amber-100 hover:text-amber-900"
+            >
+              ×
+            </button>
+          </div>
+        )}
         {productBanners.map((Banner, index) => (
           <Banner key={index} />
         ))}
@@ -633,7 +683,7 @@ export default function DashboardClient() {
 
             {awsIntegrationEnabled && <section className={`bg-white border rounded-lg shadow-sm p-6 space-y-4 ${!settingsBootstrap?.aws?.connected ? "border-amber-400 ring-2 ring-amber-300" : ""}`}>
               <div className="space-y-1">
-                <h2 className="text-lg font-semibold">AWS access {!settingsBootstrap?.aws?.connected && <span className="ml-2 inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800 border border-amber-300">Required</span>}</h2>
+                <h2 className="text-lg font-semibold">AWS access {!settingsBootstrap?.aws?.connected && <span className="ml-2 inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800 border border-amber-300">Required</span>}{awsPinned && <PinnedPill />}</h2>
                 <p className="text-sm text-gray-600">
                   Compass reads the account through a role it creates once; it writes nothing without a pull request you merge.
                 </p>
@@ -709,6 +759,7 @@ export default function DashboardClient() {
                       <span className="text-sm font-medium text-gray-700">Target account ID</span>
                       <input
                         value={awsRoleAccountId}
+                        {...pinnedProps(awsPinned)}
                         onChange={(event) => {
                           markAwsDirty();
                           setAwsRoleAccountId(event.target.value);
@@ -721,6 +772,7 @@ export default function DashboardClient() {
                       <span className="text-sm font-medium text-gray-700">Read role name</span>
                       <input
                         value={awsRoleName}
+                        {...pinnedProps(awsPinned)}
                         onChange={(event) => {
                           markAwsDirty();
                           setAwsRoleName(event.target.value);
@@ -733,6 +785,7 @@ export default function DashboardClient() {
                       <span className="text-sm font-medium text-gray-700">Act role name (optional)</span>
                       <input
                         value={awsActRoleName}
+                        {...pinnedProps(awsPinned)}
                         onChange={(event) => {
                           markAwsDirty();
                           setAwsActRoleName(event.target.value);
@@ -745,6 +798,7 @@ export default function DashboardClient() {
                       <span className="text-sm font-medium text-gray-700">External ID</span>
                       <input
                         value={awsExternalId}
+                        {...pinnedProps(awsPinned)}
                         onChange={(event) => {
                           markAwsDirty();
                           setAwsExternalId(event.target.value);
@@ -766,7 +820,7 @@ export default function DashboardClient() {
                   <button
                     type="button"
                     onClick={handleVerifyAws}
-                    disabled={awsVerifying || settingsLoading || !settingsBootstrap?.aws?.connected}
+                    {...pinnedProps(awsPinned, awsVerifying || settingsLoading || !settingsBootstrap?.aws?.connected)}
                     className="rounded border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {awsVerifying ? "Verifying..." : "Verify now"}
@@ -774,7 +828,7 @@ export default function DashboardClient() {
                   <button
                     type="button"
                     onClick={handleTestAwsSettings}
-                    disabled={awsTesting || settingsLoading || !awsDirty}
+                    {...pinnedProps(awsPinned, awsTesting || settingsLoading || !awsDirty)}
                     className="rounded border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {awsTesting ? "Testing..." : "Test the role"}
@@ -787,7 +841,7 @@ export default function DashboardClient() {
 
             {githubIntegrationEnabled && <section className={`bg-white border rounded-lg shadow-sm p-6 space-y-4 ${!settingsBootstrap?.github?.connected ? "border-amber-400 ring-2 ring-amber-300" : ""}`}>
               <div className="space-y-1">
-                <h2 className="text-lg font-semibold">GitHub {!settingsBootstrap?.github?.connected && <span className="ml-2 inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800 border border-amber-300">Required</span>}</h2>
+                <h2 className="text-lg font-semibold">GitHub {!settingsBootstrap?.github?.connected && <span className="ml-2 inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800 border border-amber-300">Required</span>}{githubPinned && <PinnedPill />}</h2>
                 <p className="text-sm text-gray-600">
                   {isOpenEdition ? "Pull requests go through the token in config/local.json (init_config records it; gh auth token prints yours)." : "Install the Compass GitHub App for this workspace and select the repositories Compass is allowed to access."}
                 </p>
@@ -837,7 +891,7 @@ export default function DashboardClient() {
                 <button
                   type="button"
                   onClick={handleConnectGithub}
-                  disabled={settingsLoading}
+                  {...pinnedProps(githubPinned, settingsLoading)}
                   className="rounded bg-gray-900 px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {settingsBootstrap?.github?.connected ? "Reinstall GitHub App" : "Connect GitHub"}
@@ -911,6 +965,7 @@ export default function DashboardClient() {
   return (
     <ShellProvider value={shell}>
       {productProviders.reduceRight((children, Provider) => <Provider>{children}</Provider>, body)}
+      {isDemo && <TourPanel />}
     </ShellProvider>
   );
 }

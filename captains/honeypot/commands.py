@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
+from captains.honeypot import actions as _actions  # noqa: F401 - loading the commands registers the responses too
 from compass_core import dispatch
 from compass_core.workspace import captain_config, resolve
 
@@ -195,7 +196,8 @@ def _token_item(payload: Dict[str, Any]):
 
 def arm(payload: Dict[str, Any]) -> Dict[str, Any]:
     """After the decoy PR is applied: verify the planted resources (read-only) and mark the token armed.
-    Stores the decoy's access key id on the record; the secret stays with you (apply output)."""
+    Stores the decoy's access key id on the record; the secret stays with you (apply output) unless
+    you pass secret_access_key=…, which Compass keeps so `fire` and the demo's trip can use the key."""
     from captains.honeypot import arm as arming
     from captains.honeypot.catalog import epoch_ms
     from captains.honeypot.placement import to_native
@@ -217,6 +219,9 @@ def arm(payload: Dict[str, Any]) -> Dict[str, Any]:
         names["#ms"] = "status"
         values[":k"] = result["access_key_id"]
         values[":ms"] = "applied"
+    if payload.get("secret_access_key") and isinstance(item.get("material"), dict):
+        expr += ", material.secret_access_key = :sec"
+        values[":sec"] = str(payload["secret_access_key"])
     table.update_item(Key=key, UpdateExpression=expr, ExpressionAttributeNames=names, ExpressionAttributeValues=values)
     return {"status": "armed", "honeytoken_id": token["honeytoken_id"], "access_key_id": result.get("access_key_id"), "checks": result.get("checks")}
 
@@ -261,12 +266,99 @@ def replant_alerts(payload: Dict[str, Any]) -> Dict[str, Any]:
     return HoneypotCaptain(config=captain_config(payload, workspace), workspace_id=workspace.workspace_id).run_replant_alerts(payload=payload)
 
 
+def trip(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Demo mode: a visitor's "Trip it". One real STS call with the pre-armed decoy's stored key,
+    then wait for the alert CloudTrail delivers and the incident it opens, writing each step to the
+    job and to the decoy's cooldown row (compass_core.demo). The route paces who may call this."""
+    import time
+
+    from captains.honeypot import arm as arming
+    from captains.honeypot.placement import to_native
+    from compass_core import demo as demo_mode
+    from compass_core.events import current_job_id, emit_job_event
+    from compass_core.keys import workspace_pk
+
+    demo_mode.require_demo_mode("honeypot trip")
+    workspace, config, table, key, item = _token_item(payload)
+    token = to_native(item)
+    material = token.get("material") or {}
+    key_id, secret = material.get("access_key_id"), material.get("secret_access_key")
+    if not (key_id and secret):
+        raise ValueError("the decoy's key is not stored: `honeypot arm honeytoken_id=… secret_access_key=…` keeps it for the trip")
+    region = str(token.get("region") or material.get("region") or (config.get("aws") or {}).get("region") or "us-east-1")
+    pk = workspace_pk(workspace.workspace_id)
+    token_id = str(token["honeytoken_id"])
+    since = arming.now_iso()
+    emit_job_event("Using the decoy's key: one read-only STS call", event_type="progress", status="running", data={"fired_at": since})
+    arming.fire_aws_credential(str(key_id), str(secret), region, user_agent=arming.TRIP_USER_AGENT)
+    demo_mode.record_trip(table, pk, token_id, fired_at=since, job_id=current_job_id())
+    timeout = float(payload.get("timeout") or 420)  # CloudTrail delivers in one to five minutes
+    emit_job_event("Waiting for CloudTrail to deliver the event", event_type="progress", status="running", data={"timeout_s": timeout})
+    alert = arming.wait_for_test_alert(table, pk, token_id, since, timeout_s=timeout, user_agent=arming.TRIP_USER_AGENT)
+    out: Dict[str, Any] = {"honeytoken_id": token_id, "fired_at": since}
+    if not alert:
+        out.update(status="not_delivered", note=f"no alert within {int(timeout)} s; CloudTrail delivery is best effort")
+        emit_job_event("No alert arrived", event_type="progress", status="running", data=out)
+        return out
+    alert = to_native(alert)
+    received = str(alert.get("received_at") or alert.get("processed_at") or arming.now_iso())
+    # the incident id lands on the alert a moment after the alert itself; the daemon writes both
+    incident_id = alert.get("incident_id")
+    deadline = time.monotonic() + 30
+    while not incident_id and time.monotonic() < deadline:
+        time.sleep(1)
+        fresh = table.get_item(Key={"pk": pk, "sk": alert["sk"]}).get("Item") or {}
+        incident_id = fresh.get("incident_id")
+    out.update(status="delivered", alert_id=alert.get("alert_id"), alert_received_at=received, incident_id=incident_id)
+    demo_mode.record_trip(table, pk, token_id, alert_id=alert.get("alert_id"), alert_received_at=received, incident_id=incident_id)
+    emit_job_event("The alert arrived and opened an incident" if incident_id else "The alert arrived", event_type="progress", status="running",
+                   data={"alert_received_at": received, "incident_id": incident_id})
+    return out
+
+
+def demo_reset(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Demo mode: close every open incident, roll back every key deactivation, arm the pre-armed
+    decoys again, wait for the replay service's steady state. `compass demo reset` runs it first."""
+    from captains.honeypot.demo_reset import demo_reset as run
+
+    return run(payload)
+
+
+def notify_line(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """One line to every Slack endpoint the workspace has (the demo's reset summary); returns how many."""
+    from boto3.dynamodb.conditions import Key
+
+    from captains.honeypot import alert_dispatcher
+    from compass_core.keys import notification_endpoint_prefix, workspace_pk
+    from compass_core.tables import dynamo_table, tables
+
+    workspace = resolve(payload)
+    config = captain_config(payload, workspace)
+    table = dynamo_table(tables(config).items)
+    pk = workspace_pk(workspace.workspace_id)
+    text = str(payload.get("text") or "").strip()
+    if not text:
+        raise ValueError("text is required")
+    sent = 0
+    rows = table.query(KeyConditionExpression=Key("pk").eq(pk) & Key("sk").begins_with(notification_endpoint_prefix())).get("Items", [])
+    for row in rows:
+        endpoint = alert_dispatcher.resolve_endpoint({k: v for k, v in row.items() if k not in ("pk", "sk")}, config)
+        if endpoint.get("type") != "slack":
+            continue
+        alert_dispatcher._send(endpoint, subject=text, text_body=text, html_body=None, severity="low")
+        sent += 1
+    return {"sent": sent, "text": text}
+
+
 COMMANDS = {
     "create": create,
     "incidents": incidents,
     "endpoint_add": endpoint_add,
     "action_set": action_set,
     "arm": arm,
+    "trip": trip,
+    "demo_reset": demo_reset,
+    "notify_line": notify_line,
     "fire": fire,
     "plant": plant,
     "decommission": decommission,

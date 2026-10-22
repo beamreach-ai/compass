@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import PRDrawer from "./PRDrawer";
 import { BTN_OUTLINE_SM, ReadOnlyContext, relativeTime } from "./honeypotFormat";
+import { attribution, isDemoApp } from "../lib/demo";
 import { PR_VIEWS, asPRView, prViewHref } from "./prViews";
 import { TYPE_LABEL, prId, type PRRecord } from "./prTypes";
 
@@ -93,6 +94,9 @@ export default function PRsTab() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [readOnly, setReadOnly] = useState(false);
+  // demo mode: who opened a pull request is "you" or "a visitor", never a name (docs/demo.md)
+  const [demo, setDemo] = useState(false);
+  const [me, setMe] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
 
   const fetchPRs = useCallback(async () => {
@@ -117,7 +121,11 @@ export default function PRsTab() {
   useEffect(() => {
     fetch("/api/settings/bootstrap")
       .then((r) => (r.ok ? r.json() : null))
-      .then((d) => setReadOnly(d?.app?.read_only === true))
+      .then((d) => {
+        setReadOnly(d?.app?.read_only === true);
+        setDemo(isDemoApp(d?.app));
+        setMe(typeof d?.workspace?.user_id === "string" ? d.workspace.user_id : null);
+      })
       .catch(() => undefined);
   }, []);
 
@@ -170,6 +178,7 @@ export default function PRsTab() {
                     <th className="px-4 py-3">Checks</th>
                     <th className="px-4 py-3">Watcher</th>
                     <th className="px-4 py-3">Revisions</th>
+                    {demo && <th className="px-4 py-3">By</th>}
                     <th className="px-4 py-3">Updated</th>
                   </tr>
                 </thead>
@@ -189,6 +198,7 @@ export default function PRsTab() {
                         <td className="px-4 py-3"><ChecksCell pr={pr} /></td>
                         <td className="px-4 py-3"><WatcherBadge pr={pr} /></td>
                         <td className="px-4 py-3 text-gray-600">{pr.tracked ? `${pr.revision_count ?? pr.counters?.revisions ?? 0}` : "—"}</td>
+                        {demo && <td className="px-4 py-3 text-gray-600">{attribution(pr.origin?.user_id, me) ?? "—"}</td>}
                         <td className="px-4 py-3 text-gray-400 text-xs">{relativeTime(pr.updated_at ?? pr.created_at ?? null)}</td>
                       </tr>
                     );

@@ -69,7 +69,8 @@ services:
   dashboard:
     image: ${COMPASS_DASHBOARD_IMAGE:-${COMPASS_REGISTRY:-ghcr.io/beamreach-ai}/compass-dashboard:${COMPASS_VERSION:-0.4.0}}
     environment:
-      APP_MODE: production
+      # demo with APP_MODE=demo in .env: the API and the daemon read the same line through env_file
+      APP_MODE: ${APP_MODE:-production}
     restart: unless-stopped
 
   nginx:

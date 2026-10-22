@@ -90,6 +90,11 @@ def summarize(request: Request, incident_id: str, force: bool = False) -> Dict[s
     if not incident:
         raise HTTPException(status_code=404, detail="incident not found")
     cached = _cached_summary(hp._to_native(incident))
+    if force and cached:
+        # in demo mode a visitor reads the summary there is; asking again is the operator's (one model call each)
+        from compass_api.demo_guard import is_demo_admin
+
+        force = is_demo_admin(request)
     if cached and not force:
         return cached
     facts = summary_mod.build_incident_facts(

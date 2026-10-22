@@ -19,6 +19,7 @@ import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from compass_core import captains as _captains
 from compass_core import config as core_config
 from compass_core import dispatch, sessions
 from compass_core.tables import dynamo_table, tables
@@ -247,15 +248,18 @@ def init_tables(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def migrate(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """What a new version does on first start: create missing tables, run the migration steps not yet recorded."""
+    """What a new version does on first start: create missing tables, run the migration steps not
+    yet recorded. `rerun=<version>[,<version>]` runs recorded steps again (every step is safe to repeat)."""
     from compass_core import extensions, migrations
 
     workspace = resolve(payload)
+    raw = payload.get("rerun")
+    rerun = [str(v).strip() for v in (raw if isinstance(raw, list) else str(raw or "").split(",")) if str(v).strip()]
     root = extensions.directory()
     if root is None:
-        return migrations.run(workspace.config, workspace_id=workspace.workspace_id)
+        return migrations.run(workspace.config, workspace_id=workspace.workspace_id, rerun=rerun)
     with extensions.lock(root):  # the API and the daemon start together
-        return migrations.run(workspace.config, workspace_id=workspace.workspace_id)
+        return migrations.run(workspace.config, workspace_id=workspace.workspace_id, rerun=rerun)
 
 
 # ── connect ──────────────────────────────────────────────────────────────────
@@ -496,11 +500,49 @@ def update(payload: Dict[str, Any]) -> Dict[str, Any]:
     raise ValueError("verb must be check, apply or rollback: `compass update check`")
 
 
+def demo(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """seed [resources=10000] [seed=7] | reset | status: the synthetic world on the map, the demo back to
+    its golden world, what the demo is up to. Demo mode only (compass_core.demo, compass_core.demo_reset).
+    The reset's decoy work and its rescan are the captains' jobs, named here as every follow-up job is."""
+    from compass_core import demo as _demo
+    from compass_core import demo_reset as _reset
+
+    verb = str(payload.get("verb") or "").strip().lower()
+    if verb == "seed":
+        return _demo.seed(payload)
+    if verb not in ("reset", "status"):
+        raise ValueError("verb must be seed, reset or status: `compass demo seed [resources=10000] [seed=7]`, `compass demo reset`, `compass demo status`")
+    workspace = resolve(payload)
+    config = dict(workspace.config)
+    config.setdefault("workspace_id", workspace.workspace_id)
+    if verb == "status":
+        return _reset.status(config, workspace_id=workspace.workspace_id)
+    ids = {"workspace_id": workspace.workspace_id, "org_id": config.get("org_id") or workspace.org_id, "user_id": payload.get("user_id")}
+
+    def decoys() -> Dict[str, Any]:
+        _captains.load_commands("honeypot")  # the CLI loads only the invoked captain's commands
+        return dispatch.dispatch("honeypot", "demo_reset", dict(ids))
+
+    def rescan() -> Optional[str]:
+        # the installed queue: the daemon's store in the open edition, the product's broker there; from the
+        # CLI it is the inline queue, so the reset ends with the scan done and recorded
+        from compass_core.queue import job_queue
+
+        _captains.load_commands("mapper")
+        return (job_queue().enqueue(captain="mapper", command="run", payload={**ids, "mode": "full"}) or {}).get("job_id")
+
+    def notify(line: str) -> None:
+        _captains.load_commands("honeypot")
+        dispatch.dispatch("honeypot", "notify_line", {**ids, "text": line})
+
+    return _reset.reset(config, workspace_id=workspace.workspace_id, decoys=decoys, rescan=rescan, notify=notify)
+
+
 COMMANDS = {
     "init_config": init_config, "init_tables": init_tables, "serve": serve, "api": api, "login": login,
     "captains": captains, "enable": enable, "disable": disable, "configure": configure, "catalog": catalog,
     "install": install, "uninstall": uninstall, "validate": validate, "migrate": migrate, "update": update,
-    "connect": connect, "access": access,
+    "connect": connect, "access": access, "demo": demo,
 }
 
 dispatch.register("core", COMMANDS)

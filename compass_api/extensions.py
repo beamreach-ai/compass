@@ -40,6 +40,7 @@ _gated_prefixes: List[str] = []
 _admin_write_prefixes: List[str] = []
 _admin_read_prefixes: List[str] = []
 _identity_headers: List[str] = []
+_demo_admin_prefixes: List[str] = []  # demo mode: writes only the demo's operator makes (compass_api.demo_guard)
 _tabs: Dict[str, str] = {}  # tab -> feature flag
 _default_tabs: Dict[str, str] = {}  # app mode -> tab
 
@@ -83,6 +84,15 @@ def register_admin_write_prefixes(*prefixes: str) -> None:
 
 def register_admin_read_prefixes(*prefixes: str) -> None:
     _admin_read_prefixes.extend(prefix for prefix in prefixes if prefix not in _admin_read_prefixes)
+
+
+def register_demo_admin_prefixes(*prefixes: str) -> None:
+    """Paths whose writes, in demo mode, only ``demo.admins`` make (compass_api.demo_guard)."""
+    _demo_admin_prefixes.extend(prefix for prefix in prefixes if prefix not in _demo_admin_prefixes)
+
+
+def demo_admin_prefixes() -> tuple:
+    return tuple(_demo_admin_prefixes)
 
 
 def register_identity_headers(*names: str) -> None:
@@ -195,7 +205,7 @@ def reset_for_tests() -> None:
     _status_sections.clear()
     _aws_saved_hooks.clear()
     _job_restart_guards.clear()
-    for registry in (_public_paths, _gated_prefixes, _admin_write_prefixes, _admin_read_prefixes, _identity_headers):
+    for registry in (_public_paths, _gated_prefixes, _admin_write_prefixes, _admin_read_prefixes, _identity_headers, _demo_admin_prefixes):
         registry.clear()
     _tabs.clear()
     _default_tabs.clear()

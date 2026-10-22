@@ -26,7 +26,7 @@ never waits on work. That is the whole queue; there is no broker.
 
 | Package | What it is |
 |---|---|
-| `compass_core` | What every captain shares: the config file, DynamoDB table names and keys, the AWS session, the GitHub client, the job store and queue, events, the model, the `compass` command. The registries (`dispatch`, `queue`, `config`, `llm`, `notify`) have a default and a hook, so a larger deployment can plug in behind the same code. |
+| `compass_core` | What every captain shares: the config file, DynamoDB table names and keys, the AWS session, the GitHub client, the job store and queue, events, the model, the `compass` command. The registries (`dispatch`, `queue`, `config`, `llm`, `notify`, `demo.register_seeder`) have a default and a hook, so a larger deployment can plug in behind the same code. |
 | `infra_map` | The map: resource and ownership nodes, edges, and the `GraphStore` they live in (`graph_store.py`: the interface and `open_store`; `sql_store.py`: SQLite, the default, and Postgres; `dynamo_store.py`: the DynamoDB map of installs before 0.6). The mapper writes it, one scan at a time; everything else reads it. |
 | `captains/mapper` | Reads the AWS account (every region), Terraform state and the GitHub organisation, and writes the map: which resource is managed by which module in which repository. `export` renders it as JSON, DOT or one HTML page. |
 | `captains/librarian` | Answers questions against the map ("what owns this ARN", "what is unmanaged") for the API and the other captains. |
@@ -65,6 +65,12 @@ instead of deleting it. `map.store` in the workspace config names the store
 (`sqlite`; `dynamodb` for an install not yet migrated); `COMPASS_MAP_STORE`
 overrides it for one process. [docs/specs/map-store.md](specs/map-store.md) is
 the design, [docs/benchmark.md](benchmark.md) the numbers.
+
+**Demo mode** (`APP_MODE=demo`, [docs/demo.md](demo.md)) puts a synthetic
+account on the same map: `compass demo seed` writes the benchmark's world
+(`infra_map/synthetic.py`) as one scan under the scope `demo:seed:<n>`, and the
+mapper's scans list their own scopes, so a real rescan never closes it.
+`compass_core/demo.py` holds the commands and the `demo` config block.
 
 **Everything else** is DynamoDB, one table set per workspace (`init_tables`
 creates them): `items`, `aws_inventory`, `tf_inventory`, `tf_state`,

@@ -61,7 +61,9 @@ def apply_aws_credential(stack, planted: Dict[str, Any]) -> str:
     assert user and tag and rule, "the module declares a user, its tag and a rule"
     iam, events = stack.aws_client("iam"), stack.aws_client("events")
     iam.create_user(UserName=user.group(1), Path=user.group(2), Tags=[{"Key": tag.group(1), "Value": tag.group(2)}])
-    key = iam.create_access_key(UserName=user.group(1))["AccessKey"]["AccessKeyId"]
+    created = iam.create_access_key(UserName=user.group(1))["AccessKey"]
+    key = created["AccessKeyId"]
+    planted["secret"] = created["SecretAccessKey"]  # what the apply output shows; the demo's trip stores it with the token
     events.put_rule(Name=rule.group(1), State=rule.group(2), EventPattern=json.dumps({"detail-type": ["AWS API Call via CloudTrail"]}))
     events.put_targets(Rule=rule.group(1), Targets=[{"Id": "alerts", "Arn": f"arn:aws:sqs:{fixture.REGION}:{fixture.ACCOUNT}:{QUEUE}",
                                                       "RoleArn": f"arn:aws:iam::{fixture.ACCOUNT}:role/compass-alert-delivery"}])

@@ -109,6 +109,14 @@ class DynamoGraphStore:
         graph = self.inner.fetch_graph(org_id)
         return summarize_in_memory(graph["nodes"], graph["edges"], scan=None)
 
+    def scopes(self, org_id: str) -> Dict[Tuple[str, str], int]:
+        graph = self.inner.fetch_graph(org_id)
+        out: Dict[Tuple[str, str], int] = {}
+        for item in [*graph.get("nodes", []), *graph.get("edges", [])]:
+            key = (item.source or "", item.scope or "")
+            out[key] = out.get(key, 0) + 1
+        return out
+
     # ── writes ───────────────────────────────────────────────────────────────
     def begin_scan(self, org_id: str, *, scopes: Optional[Sequence[Tuple[str, str]]] = None, job_id: Optional[str] = None) -> "_DynamoScan":
         return _DynamoScan(self.inner, org_id, scopes=list(scopes) if scopes else None, job_id=job_id)

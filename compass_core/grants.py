@@ -382,6 +382,24 @@ def _present(statements: Sequence[Dict[str, Any]], role_statements: Sequence[Dic
     return bool(statements) and all(_normalised(s) in held for s in statements)
 
 
+_CONTEXT_TYPES = (("Bool", "boolean"), ("Numeric", "numeric"), ("Date", "date"), ("IpAddress", "ip"), ("NotIpAddress", "ip"))
+
+
+def context_entries(statement: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """The statement's own condition as the simulation's context: a request that meets it.
+    Without it IAM answers ``implicitDeny`` for every conditioned statement (``ecs:cluster``
+    on a task stop) and the grant never arms."""
+    entries: List[Dict[str, Any]] = []
+    for operator, keys in (statement.get("Condition") or {}).items():
+        if not isinstance(keys, dict):
+            continue
+        kind = next((t for prefix, t in _CONTEXT_TYPES if str(operator).startswith(prefix)), "string")
+        for key, values in keys.items():
+            values = values if isinstance(values, list) else [values]
+            entries.append({"ContextKeyName": key, "ContextKeyValues": [str(v) for v in values], "ContextKeyType": kind})
+    return entries
+
+
 def simulate(iam: Any, role_arn_value: str, statements: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
     """IAM's own answer for each statement; ``simulated: False`` when the API is not there (moto)."""
     denied: List[Dict[str, Any]] = []
@@ -392,6 +410,9 @@ def simulate(iam: Any, role_arn_value: str, statements: Sequence[Dict[str, Any]]
             kwargs: Dict[str, Any] = {"PolicySourceArn": role_arn_value, "ActionNames": actions}
             if resources != ["*"]:
                 kwargs["ResourceArns"] = resources
+            context = context_entries(statement)
+            if context:
+                kwargs["ContextEntries"] = context
             for evaluation in iam.simulate_principal_policy(**kwargs).get("EvaluationResults", []):
                 if evaluation.get("EvalDecision") != "allowed":
                     denied.append({"action": evaluation.get("EvalActionName"), "resource": evaluation.get("EvalResourceName"), "decision": evaluation.get("EvalDecision")})

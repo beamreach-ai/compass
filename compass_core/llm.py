@@ -40,10 +40,51 @@ def set_model_factory(factory: Optional[ModelFactory]) -> None:
 
 
 def model_for(config: Optional[Dict[str, Any]] = None, *, target: Optional[str] = None) -> Optional[TextModel]:
-    """The model for this config, or None when nothing is configured."""
+    """The model for this config, or None when nothing is configured. Every call it makes
+    claims one unit of the workspace's model budget first (``compass_core.model_budget``),
+    unless the model counts its own calls (``budgeted = True``)."""
     if _factory is None:
         return None
-    return _factory(config, target)
+    model = _factory(config, target)
+    if model is None or getattr(model, "budgeted", False):
+        return model
+    return _Budgeted(model, config)
+
+
+class _Budgeted:
+    """A model whose every call is claimed from the workspace's budget before it is made."""
+
+    budgeted = True
+
+    def __init__(self, model: TextModel, config: Optional[Dict[str, Any]]) -> None:
+        self._model = model
+        self._config = config
+
+    @property
+    def name(self) -> str:
+        return model_name(self._model)
+
+    def _workspace_config(self) -> Dict[str, Any]:
+        if isinstance(self._config, dict):
+            return self._config
+        # model_for() without a config (the decoys' summary): the default workspace's
+        from compass_core.config import workspace_config
+        from compass_core.workspace import default_workspace_id
+
+        workspace_id = default_workspace_id()
+        try:
+            return dict(workspace_config(workspace_id), workspace_id=workspace_id) if workspace_id else {}
+        except Exception:  # noqa: BLE001 - no config to count in; claim() decides what that means
+            return {}
+
+    def call(self, messages: List[Dict[str, Any]], *args: Any, **kwargs: Any) -> str:
+        from compass_core import model_budget
+
+        model_budget.claim(self._workspace_config())
+        return self._model.call(messages, *args, **kwargs)
+
+    def __getattr__(self, item: str) -> Any:
+        return getattr(self._model, item)
 
 
 def model_name(model: Optional[TextModel]) -> str:

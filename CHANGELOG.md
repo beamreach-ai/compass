@@ -5,7 +5,91 @@ workflow refuses a tag without one, and reads from it what the dashboard shows
 next to the Update button: the first paragraph is the summary, the bullets under
 `### After the update` are the notes an operator needs after applying it.
 
-## 0.7.0 — unreleased
+## 0.8.0 — 2026-10-21
+
+Demo mode: with `APP_MODE=demo` this image runs a public demo the way
+demo.beamreach.ai does, a synthetic account on the map beside a real one.
+[docs/demo.md](docs/demo.md) says how. The quickstart does not change. This
+release also carries 0.5.0 to 0.7.0, which were not released on their own:
+read their sections below, and their "After the update" notes apply to an
+install coming from 0.4.1.
+
+- `compass demo seed [resources=…] [seed=…]` writes the benchmark's synthetic
+  world (`infra_map/synthetic.py`, until now `tests/benchmark/world.py`) to the
+  map as one scan under the scope `demo:seed:<n>`, next to the real account's
+  scan, with `synthetic: true` on every node. The mapper's scans now list the
+  `(source, scope)` pairs they cover (every pair they produced and every pair
+  already on the map, except the seeded world's), so a rescan closes what it no
+  longer sees and leaves the world alone. Seeding the same numbers again changes
+  nothing; other numbers replace the world. Demo mode only.
+- The map store answers `scopes(org_id)`: the `(source, scope)` pairs with
+  current rows and their counts, on SQLite, Postgres and DynamoDB.
+- Demo mode is marked: a `DEMO` chip beside the account and in the phone's
+  top bar, `Compass · demo` as the title, a watermark on the map canvas and on
+  exported map pages, one dismissable banner saying what the demo is, "Run it
+  yourself" to the install page, "by you" / "by a visitor" on pull requests,
+  "Fixed in the demo" on the settings the demo pins, and "Synthetic resource
+  (demo world)" on a synthetic node's detail. The read-only notice stays its
+  own thing (`READ_ONLY`). `APP_MODE` reaches the dashboard from `.env`.
+- Trip it: `POST /api/honeypots/tokens/{id}/trip` (demo mode only) fires one of
+  the pre-armed decoys (`demo.trippable`) for real, as the job `honeypot trip`
+  attributed to the visitor, under a shared cooldown per decoy
+  (`demo.cooldown_seconds`) and a per-visitor limit; a visitor in the cooldown
+  is sent to the incident the trip opened. The core service `demo-rearm` rolls
+  the key deactivation back once the response verified and arms the decoy
+  again. `test-fire` is hidden in demo mode. `honeypot arm` and the arm route
+  take `secret_access_key` and keep it with the token, so Compass can use the
+  key itself.
+- The tour: seven steps in a panel bottom-right, each completed by a fact
+  about the world (`GET /api/demo/tour`, per visitor), opened on the first
+  visit and resumable from a pill; `?q=` fills the map's and the IaC tab's
+  search, `?token=` opens a decoy's detail, `?incident=` an incident.
+- `compass demo reset` brings the golden world back: incidents closed, key
+  deactivations rolled back, the pre-armed decoys armed again, the visitors'
+  pull requests closed and their decoys and grants retired without a pull
+  request, the seeded reviewed pull request recreated, old jobs pruned, the
+  trips and tours cleared, the world seeded again and a rescan started, with
+  a row of counts and one line to Slack. `compass demo status` prints the
+  last reset, the next one, the trips in force, the open visitor pull
+  requests and this week's tour completions.
+- Demo mode keeps the operator's settings to the operator: a signed-in
+  visitor is refused (403 `demo_admin_only`) what an admin token needs, every
+  settings write, rescans, PR actions, incident close and respond, a decoy's
+  arm, change and `material`, and a forced summary; the tour stays open. The
+  operator is `demo.admins` (the email the sign-in proxy vouches for) or an
+  admin API token; the Settings tab is hidden from everyone else. The identity
+  a proxy sets now wins over a browser's `X-User-Id`.
+- A model budget: every model call claims from `limits.model_calls_per_hour` and
+  `limits.model_calls_per_day` (60 and 300 by default in demo mode, none
+  otherwise) with a conditional write, and is refused past it before it
+  reaches the provider (`compass_core.model_budget`).
+- `demo.links.slack`: an invite link to the channel the alerts go to; when
+  set, the sidebar shows "See the alerts in Slack" and the tour's response
+  step links it.
+- `demo.world.edges` (default 20,000; `compass demo seed edges=…`): the world
+  has at least that many edges, more of the kinds the rules already produce,
+  deterministic from the seed. `compass_core.demo.register_seeder(name, fn)`
+  runs `fn(config, workspace_id, world)` after every seed, for what a larger
+  deployment derives from the world; the open edition registers none.
+- Fixed: an alert queue recorded by its ARN alone gets its URL from the ARN;
+  `arm` asked SQS for an empty URL and refused the decoy.
+- Fixed: the 0.7.0 access-model migration kept one external id and dropped
+  the target's region. An install whose read and act roles trusted different
+  external ids now keeps the act role's as `aws.external_ids.act` (the broker
+  uses a role's own id first), and the old blocks' `region` becomes
+  `aws.region`. An install already migrated sets both by hand.
+- Fixed: the map store's `fetch_graph(limit)` spent the budget on nodes first,
+  so a map just under the dashboard's 4,000 came back with every node and no
+  edge. The limit is a node budget and the edges between the kept nodes all
+  come along, on SQLite, Postgres and DynamoDB. In demo mode the dashboard asks
+  for 10,000 nodes.
+- Fixed: the grant verification sends a statement's own condition to IAM's
+  simulation as the request's context. Without it IAM answered `implicitDeny`
+  for every conditioned statement, so `ecs_restart_task` (its statements carry
+  `ArnEquals ecs:cluster`) stayed `applied` forever on a real account;
+  `iam_deactivate_key` was never affected.
+
+## 0.7.0 — 2026-10-21
 
 Compass only reads your account, through a role it creates once, and writes
 nothing without a pull request you merge. The operator's profile is used by
@@ -47,6 +131,12 @@ one command, `compass connect`; the running services never see it.
   as anything but the runtime identity `connect` recorded.
 - `local_iam` and static keys are gone as ways in; `init_alerts` is absorbed
   into `connect`. The `aws` block of the config names roles, not credentials.
+- The 0.6.0 map migration copies the DynamoDB map into the store the workspace
+  names (`map.store`, or `COMPASS_MAP_STORE`; Postgres for a deployment that set
+  it) and keeps that setting, instead of always writing a SQLite file and
+  pointing the workspace at it. `compass migrate rerun=<version>[,…]` runs a
+  recorded step again, and every step gets the workspace id whatever loader
+  gave it the config.
 
 ### After the update
 
@@ -58,7 +148,7 @@ one command, `compass connect`; the running services never see it.
 - Decoys planted before this release report to the old queue until
   `honeypot replant-alerts` has opened and you have merged its pull request.
 
-## 0.6.0 — unreleased
+## 0.6.0 — 2026-10-21
 
 The map moves from DynamoDB to a SQLite file and keeps its history: scans of a
 100,000-resource account take seconds instead of the better part of an hour,
@@ -75,7 +165,7 @@ and the map reads that took tens of seconds take milliseconds.
 - Every reader of the map goes through one interface, `GraphStore`
   (`infra_map.graph_store`), with `set_graph_store_factory` for a deployment
   that brings its own store. A Postgres store implements it too:
-  `pip install compass[postgres]` and `map: {store: postgres, dsn: …}`.
+  `pip install compass-open[postgres]` and `map: {store: postgres, dsn: …}`.
 - `compass mapper backup out=<path>` copies the map while the stack runs.
 - The map benchmark (`docs/benchmark.md`): a synthetic account of 10k, 100k or
   1M resources, run against each store. 10k runs on every pull request with
@@ -93,7 +183,7 @@ and the map reads that took tens of seconds take milliseconds.
 - To go back to the DynamoDB map, set `COMPASS_MAP_STORE=dynamodb` in `.env`
   and restart; the next scan brings the table up to date.
 
-## 0.5.2 — unreleased
+## 0.5.2 — 2026-10-21
 
 An end-to-end suite that runs on every pull request, and the bugs it found on
 its first runs.
@@ -153,7 +243,7 @@ its first runs.
   headline. `COMPASS_RELEASE_NOTES_URL` points at a mirror or a file; `off`
   stops just the notes. Notes that cannot be read do not hold up the update.
 
-## 0.5.1 — unreleased
+## 0.5.1 — 2026-10-21
 
 Dashboard polish: readable buttons, Settings in sections, a progress bar for
 map scans.
@@ -179,7 +269,7 @@ map scans.
   the page (the PR watcher adds one every five minutes) the Queue tab and the
   progress bar could miss the job that was running.
 
-## 0.5.0 — unreleased
+## 0.5.0 — 2026-10-21
 
 Updates: the dashboard says when a release is out and applies it with one
 click when the updater service runs; `compass update check | apply | rollback`

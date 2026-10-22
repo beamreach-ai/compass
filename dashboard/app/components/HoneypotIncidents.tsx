@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { LINK_BTN, exactUtc, relativeTime, tail, useReadOnly, writeProps } from "./honeypotFormat";
 
 /**
@@ -229,6 +230,17 @@ export default function HoneypotIncidents({
     const t = setInterval(load, 15000);
     return () => clearInterval(t);
   }, [load]);
+
+  // ?incident=<id> opens that one (a trip's "open it", the tour); once per id
+  const searchParams = useSearchParams();
+  const wanted = searchParams.get("incident");
+  const [opened, setOpened] = useState<string | null>(null);
+  useEffect(() => {
+    if (!wanted || wanted === opened || show !== "table") return;
+    setOpened(wanted);
+    void open(wanted);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wanted, opened, show]);
 
   const open = async (id: string) => {
     setError(null);

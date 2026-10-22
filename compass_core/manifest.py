@@ -28,6 +28,7 @@ MANIFEST = CaptainManifest(
         "compass_api.routes.captains:router",
         "compass_api.routes.updates:router",
         "compass_api.routes.access:router",
+        "compass_api.routes.demo:router",
     ),
     admin_write_prefixes=("/api/captains/", "/api/updates/", "/api/access"),
     # the grant tick: a merged pull request arms an action without anyone remembering to click;

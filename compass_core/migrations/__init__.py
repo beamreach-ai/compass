@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from compass_core.keys import workspace_pk
 from compass_core.tables import dynamo_table, tables
@@ -46,8 +46,14 @@ def _access_model(config: Dict[str, Any]) -> None:
         legacy = aws.get(key)
         if isinstance(legacy, dict) and legacy.get("account_id") and legacy.get("role_name") and kind not in roles:
             roles[kind] = f"arn:aws:iam::{legacy['account_id']}:role/{legacy['role_name']}"
-            if legacy.get("external_id") and not aws.get("external_id"):
-                aws["external_id"] = str(legacy["external_id"])
+            if legacy.get("external_id"):
+                if not aws.get("external_id"):
+                    aws["external_id"] = str(legacy["external_id"])
+                elif str(legacy["external_id"]) != aws["external_id"]:
+                    # the roles came from different templates: each keeps the id its trust names
+                    aws.setdefault("external_ids", {})[kind] = str(legacy["external_id"])
+            if legacy.get("region") and not aws.get("region"):
+                aws["region"] = str(legacy["region"])  # the target's region, not the control plane's
             aws.setdefault("account_id", str(legacy["account_id"]))
     if aws.get("generated_external_id") and not aws.get("external_id"):
         aws["external_id"] = str(aws["generated_external_id"])
@@ -123,8 +129,11 @@ def applied(config: Dict[str, Any], *, workspace_id: str, table: Any = None) -> 
         kwargs["ExclusiveStartKey"] = page["LastEvaluatedKey"]
 
 
-def run(config: Dict[str, Any], *, workspace_id: str, client: Any = None, table: Any = None, steps: Optional[List[Step]] = None) -> Dict[str, Any]:
-    """Create missing tables, then run every step not yet recorded, in order."""
+def run(config: Dict[str, Any], *, workspace_id: str, client: Any = None, table: Any = None, steps: Optional[List[Step]] = None,
+        rerun: Optional[Sequence[str]] = None) -> Dict[str, Any]:
+    """Create missing tables, then run every step not yet recorded, in order. ``rerun`` names
+    recorded steps to run again (an operator's call after a step ran against the wrong
+    store or saved nothing); every step is safe to repeat."""
     from compass_core.commands import create_tables
     from compass_core.updates import running_version
 
@@ -136,12 +145,13 @@ def run(config: Dict[str, Any], *, workspace_id: str, client: Any = None, table:
         raise LookupError("no items table in the workspace config to record migrations in (dynamodb_config.items)")
     if todo:
         table = table or dynamo_table(name)
-        done = set(applied(config, workspace_id=workspace_id, table=table))
+        done = set(applied(config, workspace_id=workspace_id, table=table)) - {str(v) for v in (rerun or [])}
         for version, step in todo:
             if version in done:
                 continue
             logger.info("running migration %s for workspace %s", version, workspace_id)
-            step(config)
+            # the steps read the id from the config; the file loader sets it, a host's loader may not
+            step({**config, "workspace_id": workspace_id})
             table.put_item(Item={"pk": workspace_pk(workspace_id), "sk": sort_key(version), "version": version,
                                  "core": running_version(), "at": int(time.time() * 1000)})
             ran.append(version)

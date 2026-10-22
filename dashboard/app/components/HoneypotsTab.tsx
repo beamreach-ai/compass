@@ -7,6 +7,9 @@ import HoneypotActions, { HoneypotAuditList, ResponderRolePreview } from "./Hone
 import HoneypotIncidents, { Short, type Incident, type TokenInfo } from "./HoneypotIncidents";
 import { SLACK_SETTINGS_HREF, useSlackStatus } from "./SlackIntegrationCard";
 import { BTN_GHOST, BTN_OUTLINE, BTN_OUTLINE_SM, BTN_QUIET_DANGER_SM, LINK_BTN, ReadOnlyContext, exactUtc, relativeTime, useReadOnly, writeProps } from "./honeypotFormat";
+import { DemoTripContext, incidentHref, useDemoTrip } from "./honeypotFormat";
+import { completeTourStep } from "../lib/tour";
+import type { DemoTrip, DemoTripState } from "./honeypotFormat";
 import { asHoneypotView, honeypotViewHref } from "./honeypotViews";
 import { isOpenEdition, PRODUCT_NAME } from "../lib/edition";
 
@@ -1257,6 +1260,43 @@ function AlertPanel({
   const [testFiring, setTestFiring] = useState(false);
   const [testResult, setTestResult] = useState<string | null>(null);
 
+  // demo mode: "Trip it" on a pre-armed decoy, with the trip in force (shared by every visitor)
+  const demoTrip = useDemoTrip();
+  const trippable = demoTrip.demo && demoTrip.trippable.includes(honeytoken.honeytoken_id);
+  const currentTrip = demoTrip.cooldowns[honeytoken.honeytoken_id];
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!trippable) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [trippable]);
+  const secondsLeft = currentTrip ? Math.max(0, Math.ceil((currentTrip.until - now) / 1000)) : 0;
+  const tripInForce = Boolean(currentTrip) && secondsLeft > 0;
+  // the tour's "Trip one": shown the trip in force with its incident counts, as the spec says
+  useEffect(() => {
+    if (trippable && tripInForce && currentTrip?.incident_id) completeTourStep("trip", { incident_id: currentTrip.incident_id });
+  }, [trippable, tripInForce, currentTrip?.incident_id]);
+  const [tripping, setTripping] = useState(false);
+  const [tripResult, setTripResult] = useState<React.ReactNode>(null);
+  const handleTrip = async () => {
+    setTripping(true);
+    setTripResult(null);
+    try {
+      const res = await fetch(`/api/honeypots/tokens/${honeytoken.honeytoken_id}/trip`, { method: "POST" });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) setTripResult(typeof d.detail === "string" ? d.detail : "The trip was refused");
+      else if (d.state === "cooldown")
+        setTripResult(<>Tripped {relativeTime(d.tripped_at)} by {d.by}; {d.incident_id ? <>the incident is open: <Link href={incidentHref(d.incident_id)} className={LINK_BTN}>open it</Link></> : "CloudTrail is still delivering the event; the incident opens below"}.</>);
+      else setTripResult("Tripped. CloudTrail takes one to five minutes to deliver the event; then the incident opens below and the response runs.");
+      demoTrip.refresh();
+      setTimeout(loadAlerts, 800);
+    } catch {
+      setTripResult("The trip failed");
+    } finally {
+      setTripping(false);
+    }
+  };
+
   const loadAlerts = useCallback(() => {
     fetch(`/api/honeypots/tokens/${honeytoken.honeytoken_id}/alerts`)
       .then((r) => r.json())
@@ -1368,15 +1408,35 @@ function AlertPanel({
               Verify and arm
             </button>
           )}
-          <button onClick={() => void handleTestFire()} {...writeProps(readOnly, testFiring)} className={BTN_SM}>
-            {testFiring ? "Firing…" : "Test fire"}
-          </button>
+          {!demoTrip.demo && (
+            <button onClick={() => void handleTestFire()} {...writeProps(readOnly, testFiring)} className={BTN_SM}>
+              {testFiring ? "Firing…" : "Test fire"}
+            </button>
+          )}
+          {trippable && (
+            <button
+              data-trip-it
+              onClick={() => void handleTrip()}
+              {...writeProps(readOnly, tripping || tripInForce || honeytoken.status !== "armed")}
+              title={tripInForce ? `Tripped by ${currentTrip?.by}; the decoy re-arms after the response` : honeytoken.status !== "armed" ? "Re-arming after the last trip" : "Use this decoy's key for real: the response you see is the real one"}
+              className={`${BTN_SM} ${tripInForce ? "" : "ring-2 ring-amber-300"}`}
+            >
+              {tripping ? "Tripping…" : tripInForce ? `Tripped · ${Math.floor(secondsLeft / 60)}:${String(secondsLeft % 60).padStart(2, "0")} left` : honeytoken.status !== "armed" ? "Re-arming…" : "Trip it"}
+            </button>
+          )}
           <button onClick={onClose} className="bg-transparent hover:bg-transparent px-2 py-0 text-gray-500 hover:text-gray-800 text-sm">Collapse ↑</button>
         </div>
       </div>
 
       {testResult && (
         <p className={`text-xs ${testResult.includes("fired") && !testResult.startsWith("Not") ? "text-green-600" : "text-red-500"}`}>{testResult}</p>
+      )}
+      {trippable && (tripResult || (currentTrip && tripInForce)) && (
+        <p data-trip-state className="text-xs text-amber-800">
+          {tripResult ?? (
+            <>Tripped {relativeTime(currentTrip!.tripped_at)} by {currentTrip!.by}; {currentTrip!.incident_id ? <>the incident is open: <Link href={incidentHref(currentTrip!.incident_id)} className={LINK_BTN}>open it</Link></> : "CloudTrail is delivering the event; the incident opens below"}.</>
+          )}
+        </p>
       )}
 
       {materialOpen && (
@@ -1846,7 +1906,9 @@ function AutopilotSwitch() {
 const VIEW_LINK = "text-sm font-medium text-blue-600 hover:underline";
 
 export default function HoneypotsTab() {
-  const view = asHoneypotView(useSearchParams().get("view"));
+  const searchParams = useSearchParams();
+  const view = asHoneypotView(searchParams.get("view"));
+  const wantedToken = searchParams.get("token");
   const [readOnly, setReadOnly] = useState(false);
   const [honeytokens, setHoneytokens] = useState<Honeytoken[]>([]);
   const [endpoints, setEndpoints] = useState<NotificationEndpoint[]>([]);
@@ -1916,9 +1978,44 @@ export default function HoneypotsTab() {
   useEffect(() => {
     fetch("/api/settings/bootstrap")
       .then((r) => (r.ok ? r.json() : null))
-      .then((d) => setReadOnly(d?.app?.read_only === true))
+      .then((d) => {
+        setReadOnly(d?.app?.read_only === true);
+        setDemo(d?.app?.mode === "demo");
+      })
       .catch(() => {});
   }, []);
+
+  // Demo mode: which decoys "Trip it" fires and the trip in force on each (docs/demo.md)
+  const [demo, setDemo] = useState(false);
+  const [demoTrip, setDemoTrip] = useState<DemoTripState>({ demo: false, trippable: [], cooldownSeconds: 0, cooldowns: {}, refresh: () => undefined });
+  const refreshDemoTrip = useCallback(() => {
+    fetch("/api/demo")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!d) return;
+        const now = Date.now();
+        const cooldowns: Record<string, DemoTrip> = {};
+        for (const row of (d.cooldowns ?? []) as Array<Record<string, any>>) {
+          const id = String(row.honeytoken_id ?? "");
+          if (id) cooldowns[id] = { ...row, honeytoken_id: id, in_force: row.in_force === true, by: String(row.by ?? "a visitor"), until: now + Number(row.seconds_left ?? 0) * 1000 } as DemoTrip;
+        }
+        setDemoTrip({ demo: true, trippable: Array.isArray(d.trippable) ? d.trippable.map(String) : [], cooldownSeconds: Number(d.cooldown_seconds ?? 0), cooldowns, refresh: refreshDemoTrip });
+      })
+      .catch(() => {});
+  }, []);
+  useEffect(() => {
+    if (!demo) return;
+    refreshDemoTrip();
+    const id = setInterval(refreshDemoTrip, 10_000);
+    return () => clearInterval(id);
+  }, [demo, refreshDemoTrip]);
+  // ?token=<id> opens that decoy's detail (the tour); a trippable decoy's detail opened is a tour step
+  useEffect(() => {
+    if (wantedToken && view === "honeytokens") setExpandedId(wantedToken);
+  }, [wantedToken, view]);
+  useEffect(() => {
+    if (demo && expandedId && demoTrip.trippable.includes(expandedId)) completeTourStep("decoys");
+  }, [demo, expandedId, demoTrip.trippable]);
 
   const handleDelete = async (honeytoken: Honeytoken) => {
     if (!window.confirm(`Decommission honeytoken "${honeytoken.name}"? This will also generate a PR to remove the honeytoken from your infrastructure.`)) return;
@@ -1941,6 +2038,7 @@ export default function HoneypotsTab() {
 
   return (
     <ReadOnlyContext.Provider value={readOnly}>
+    <DemoTripContext.Provider value={demoTrip}>
     <div className="space-y-6">
       {/* Header: the same on every view; the right side depends on the view. */}
       <div className="flex items-start justify-between flex-wrap gap-3">
@@ -2229,6 +2327,7 @@ export default function HoneypotsTab() {
         </>
       )}
     </div>
+    </DemoTripContext.Provider>
     </ReadOnlyContext.Provider>
   );
 }

@@ -91,7 +91,11 @@ MANIFEST = CaptainManifest(
     admin_write_prefixes=("/api/honeypots/repo-default", "/api/honeypots/settings", "/api/honeypots/actions"),
     tabs=(TabSpec(key="honeypots", label="Decoys", group="security", feature="honeypots", views=("overview", "honeytokens", "history", "settings")),),
     queue="honeypot-executions",
-    services=(ServiceSpec(name="alert-consumer", start="captains.honeypot.alert_consumer:run_service"),),
+    services=(
+        ServiceSpec(name="alert-consumer", start="captains.honeypot.alert_consumer:run_service"),
+        # demo mode only (it returns at once otherwise): after a tripped decoy's response verified, roll the key back and arm again
+        ServiceSpec(name="demo-rearm", start="captains.honeypot.demo_rearm:run_rearm_service", interval=30, interval_setting="demo_rearm"),
+    ),
     config_schema=CONFIG_SCHEMA,
     depends_on=("mapper",),
     permissions=PERMISSIONS,

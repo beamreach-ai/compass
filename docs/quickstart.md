@@ -76,7 +76,7 @@ IAM user whose key is never used legitimately) and an EventBridge rule that
 reports any use to the queue. Merge and apply it. Then:
 
 ```sh
-docker compose run --rm compass honeypot arm honeytoken_id=<id>     # verifies user, key and rule; marks it armed
+docker compose run --rm compass honeypot arm honeytoken_id=<id>     # verifies user, key and rule; marks it armed (secret_access_key=… keeps the secret with the token)
 docker compose run --rm compass honeypot fire honeytoken_id=<id> secret_access_key=<from the apply output>
 docker compose run --rm compass honeypot incidents                   # what fired, newest first
 ```

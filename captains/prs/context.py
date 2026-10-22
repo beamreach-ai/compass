@@ -282,7 +282,7 @@ def load_origin_context(record: Dict[str, Any], *, config: Dict[str, Any], works
     origin = record.get("origin") if isinstance(record.get("origin"), dict) else {}
     captain = str(origin.get("captain") or "")
     merged = _empty()
-    merged["origin"] = {k: origin.get(k) for k in ("captain", "command", "finding_id", "rope_id", "honeytoken_id", "job_id")}
+    merged["origin"] = {k: origin.get(k) for k in ("captain", "command", "finding_id", "rope_id", "honeytoken_id", "job_id", "user_id")}
     providers = []
     if captain in _PROVIDERS:
         providers.append(_PROVIDERS[captain])

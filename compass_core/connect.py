@@ -36,7 +36,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from compass_core import config as core_config
-from compass_core import permissions, sessions
+from compass_core import grants, permissions, sessions
 from compass_core.aws import _aws_config, alert_queues, control_config, resolve_target_regions
 from compass_core.errors import public as public_error
 from compass_core.workspace import resolve
@@ -400,6 +400,9 @@ def verify_with(config: Dict[str, Any], profile: Any, *, steps: Optional[List[Di
             kwargs: Dict[str, Any] = {"PolicySourceArn": read_arn, "ActionNames": actions}
             if resources != ["*"]:
                 kwargs["ResourceArns"] = resources
+            context = grants.context_entries(statement)
+            if context:
+                kwargs["ContextEntries"] = context  # a conditioned statement is implicitDeny without its context
             for evaluation in iam.simulate_principal_policy(**kwargs).get("EvaluationResults", []):
                 if evaluation.get("EvalDecision") != "allowed":
                     denied.append({"action": evaluation.get("EvalActionName"), "resource": evaluation.get("EvalResourceName"), "decision": evaluation.get("EvalDecision")})

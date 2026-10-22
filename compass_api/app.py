@@ -164,6 +164,10 @@ def create_app() -> FastAPI:
     app = FastAPI(title="Compass", lifespan=_lifespan)
     # innermost: the request runs as the captain that owns the path, with the signed-in user as the requester
     app.add_middleware(SessionContextMiddleware)
+    # demo mode: the operator's settings are the operator's (runs with the workspace context set)
+    from compass_api.demo_guard import DemoAdminMiddleware
+
+    app.add_middleware(DemoAdminMiddleware)
     # runs after the workspace middleware, so the gate sees the workspace config
     app.add_middleware(CaptainGateMiddleware)
     app.add_middleware(SimpleAuthMiddleware)

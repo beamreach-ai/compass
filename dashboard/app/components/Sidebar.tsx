@@ -5,6 +5,8 @@ import { useSearchParams } from "next/navigation";
 import React, { useEffect, useState } from "react";
 
 import { COMPANY_NAME, LOGO_URL, SUPPORT_EMAIL, SUPPORT_WHATSAPP, isOpenEdition } from "../lib/edition";
+import DemoBadge from "./DemoBadge";
+import type { DemoConfig } from "../lib/demo";
 import { ALL_WORKSPACE_TABS, SETTINGS_VIEWS, TAB_GROUPS, asWorkspaceTab, viewHref, viewLabel } from "../lib/tabs";
 import type { TabDetail, WorkspaceTab } from "../lib/tabs";
 
@@ -39,6 +41,7 @@ type SettingsBootstrapSummary = {
     tabs?: TabDetail[] | null;
     disabled_features?: string[] | null;
     auth_enabled?: boolean;
+    demo?: DemoConfig | null;
   } | null;
   workspace?: {
     workspace_id?: string | null;
@@ -96,6 +99,7 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void } = {}
   const [appMode, setAppMode] = useState<string | null>(null);
   const [settingsEnabled, setSettingsEnabled] = useState(true);
   const [productionUrl, setProductionUrl] = useState<string | null>(null);
+  const [demoLinks, setDemoLinks] = useState<{ install?: string | null; repository?: string | null; slack?: string | null } | null>(null);
   const [billingPlan, setBillingPlan] = useState<"free" | "cloud" | "enterprise" | null>(null);
   const [triageLimit, setTriageLimit] = useState<number | null>(null);
   const [fixLimit, setFixLimit] = useState<number | null>(null);
@@ -145,6 +149,7 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void } = {}
         setSettingsEnabled(bootstrap?.app?.settings_enabled !== false);
         setSimpleAuthEnabled(bootstrap?.app?.auth_enabled === true);
         setProductionUrl(pickFirstNonEmpty(bootstrap?.app?.production_url));
+        setDemoLinks(bootstrap?.app?.demo?.links ?? null);
         setBillingPlan(
           bootstrap?.billing?.plan === "free" || bootstrap?.billing?.plan === "cloud" || bootstrap?.billing?.plan === "enterprise"
             ? bootstrap.billing.plan
@@ -338,7 +343,10 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void } = {}
       {/* Bottom actions */}
       <div className="p-4 border-t space-y-2">
         <div className="text-xs text-gray-600">
-          <div className="uppercase text-[10px] font-semibold tracking-wide text-gray-500">Target account</div>
+          <div className="flex items-center justify-between gap-2">
+            <div className="uppercase text-[10px] font-semibold tracking-wide text-gray-500">Target account</div>
+            {isDemoMode && <DemoBadge />}
+          </div>
           <div className="text-sm font-semibold text-gray-900">
             {accountLoading ? "Loading…" : accountInfo?.name || "Unknown"}
           </div>
@@ -377,12 +385,32 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void } = {}
         >
           Logout
         </button>
-        {isDemoMode && productionUrl && (
+        {isDemoMode && (demoLinks?.install || productionUrl) && (
           <a
-            href={productionUrl}
+            href={demoLinks?.install || productionUrl || "#"}
             className="block w-full text-center rounded border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
           >
-            Self-host on AWS
+            Run it yourself
+          </a>
+        )}
+        {isDemoMode && demoLinks?.repository && (
+          <a
+            href={demoLinks.repository}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="block w-full text-center text-xs text-gray-500 hover:text-gray-700 hover:underline"
+          >
+            Source on GitHub
+          </a>
+        )}
+        {isDemoMode && demoLinks?.slack && (
+          <a
+            href={demoLinks.slack}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="block w-full text-center text-xs text-gray-500 hover:text-gray-700 hover:underline"
+          >
+            See the alerts in Slack
           </a>
         )}
         {SUPPORT_WHATSAPP && <div className="pt-2 border-t border-gray-100">

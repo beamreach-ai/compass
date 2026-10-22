@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 
 type IACTabProps = {
   onScanTriggered?: () => void;
@@ -375,7 +376,8 @@ export default function IACTab({ onScanTriggered }: IACTabProps) {
   const [importSuccess, setImportSuccess] = useState<{ jobId: string; count: number } | null>(null);
   const [fixDriftSuccess, setFixDriftSuccess] = useState<{ jobId: string; count: number } | null>(null);
   const [typeTableExpanded, setTypeTableExpanded] = useState(true);
-  const [unmanagedSearch, setUnmanagedSearch] = useState("");
+  const wantedSearch = useSearchParams()?.get("q") ?? "";
+  const [unmanagedSearch, setUnmanagedSearch] = useState(wantedSearch);
 
   const fetchCoverage = useCallback(async () => {
     try {

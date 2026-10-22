@@ -298,6 +298,22 @@ def invalidate_bootstrap_sections(workspace_id: Optional[str] = None) -> None:
             _bootstrap_sections_cache.pop(str(workspace_id), None)
 
 
+def _demo_public(config: Dict[str, Any]) -> Dict[str, Any]:
+    from compass_core import demo
+
+    settings = demo.settings(config)
+    return {"links": settings["links"], "pinned_settings": settings["pinned_settings"], "world": settings["world"],
+            "cooldown_seconds": settings["cooldown_seconds"]}
+
+
+def _demo_app(request: Request, config: Dict[str, Any], app: Dict[str, Any]) -> Dict[str, Any]:
+    """The demo block, and Settings only for the demo's operator (compass_api.demo_guard)."""
+    from compass_api.demo_guard import is_demo_admin
+
+    admin = is_demo_admin(request, config)
+    return {"demo": {**_demo_public(config), "admin": admin}, "settings_enabled": bool(app.get("settings_enabled")) and admin}
+
+
 @router.get("/api/settings/bootstrap")
 def get_settings_bootstrap(request: Request) -> Dict[str, Any]:
     from compass_api.routes.auth import _auth_enabled
@@ -312,7 +328,8 @@ def get_settings_bootstrap(request: Request) -> Dict[str, Any]:
             "org_id": ctx.org_id,
             "user_id": ctx.user_id,
         },
-        "app": {**app, "auth_enabled": _auth_enabled()},
+        # in demo mode the dashboard marks itself and links the install page (docs/demo.md)
+        "app": {**app, "auth_enabled": _auth_enabled(), **(_demo_app(request, config, app) if app["mode"] == "demo" else {})},
         "core_version": _captains.core_version(),
         # is a release out (cached; one fetch every few hours), for the banner and the Compass card
         "update": _updates.check(config=config).to_dict(),
