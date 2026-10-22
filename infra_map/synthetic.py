@@ -29,7 +29,9 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
+from captains.mapper import software as _software_module
 from captains.mapper.infra_map_ids import (
+    github_file_node_id,
     github_repo_node_id,
     tf_root_module_node_id,
     tf_root_scope,
@@ -154,8 +156,48 @@ def _attributes(spec: WorldSpec, attributes: Dict[str, object]) -> Dict[str, obj
     return {**attributes, "synthetic": True} if spec.synthetic else attributes
 
 
+# the images and runtimes a typical account runs, by weight; php2shell's worked example is among them
+BASE_IMAGES = ("php:8.3.30-fpm", "php:8.2.29-fpm-alpine3.20", "node:20.17.0-bookworm-slim", "python:3.12.6-slim", "nginx:1.27.1", "eclipse-temurin:21-jre", "ubuntu:24.04")
+BREF_LAYER = "arn:aws:lambda:{region}:534081306603:layer:php-83-fpm:51"
+
+
+def _software(ntype: str, region: str, uid: str, name: str, account: str, attributes: Dict[str, object]) -> None:
+    """``software`` (and the image, layer, URL and address attributes the collectors would record)
+    on a workload, from its own generator, so adding it moved nothing else in the world."""
+    rng = random.Random(f"{uid}:software")
+    entries: list = []
+    if ntype == "ecs_task_definition":
+        image = f"{account}.dkr.ecr.{region}.amazonaws.com/{name}:{rng.randint(10, 60)}"
+        attributes["containerDefinitions"][0]["image"] = image  # type: ignore[index]
+        base = rng.choice(BASE_IMAGES)
+        attributes["images"] = [{"container": "app", "image": image, "digest": "sha256:" + _hex(rng, 64)}]
+        attributes["baseImage"] = base
+        entries = [e for e in (_software_module.image_software(image, "ecs:DescribeTaskDefinition", "image", digest=attributes["images"][0]["digest"], extra={"container": "app"}),
+                               _software_module.image_software(base, "Dockerfile:1", "base", extra={"final": "true", "stage": "0"})) if e]
+    elif ntype == "lambda_function":
+        fn = {"Runtime": attributes.get("runtime"), "Layers": []}
+        if rng.random() < 0.15:
+            fn["Runtime"] = "provided.al2"
+            fn["Layers"] = [{"Arn": BREF_LAYER.format(region=region)}]
+            attributes["runtime"] = "provided.al2"
+        attributes["layers"] = [layer["Arn"] for layer in fn["Layers"]]
+        attributes["packageType"] = "Zip"
+        if rng.random() < 0.1:
+            attributes["functionUrl"] = f"https://{_hex(rng, 32)}.lambda-url.{region}.on.aws/"
+        entries = _software_module.lambda_software(fn)
+    elif ntype == "ec2_instance":
+        if rng.random() < 0.2:
+            attributes["publicIp"] = f"54.{rng.randint(0, 255)}.{rng.randint(0, 255)}.{rng.randint(1, 254)}"
+        entries = _software_module.instance_software({"ImageId": attributes.get("imageId")})
+    elif ntype == "ec2_security_group":
+        if rng.random() < 0.3:
+            attributes["publicIngress"] = [{"protocol": "tcp", "from_port": 443, "to_port": 443, "cidrs": ["0.0.0.0/0"]}]
+    _software_module.put_software(attributes, entries)
+
+
 def _node(spec: WorldSpec, rng: random.Random, ntype: str, region: str, service: str, resource: str, name: str,
           attributes: Dict[str, object], observed: datetime) -> ResourceNode:
+    _software(ntype, region, resource.rsplit("/", 1)[-1].rsplit(":", 1)[-1] if ntype != "ecs_task_definition" else resource, name, spec.account, attributes)
     return ResourceNode(
         org_id=spec.org_id,
         resource_id=_arn(service, region, spec.account, resource),
@@ -288,6 +330,7 @@ def generate(spec: WorldSpec, *, observed: Optional[datetime] = None) -> World:
         edges.append(_edge(spec, rng.choice(secrets).resource_id, db.resource_id, "secured_by", observed))
 
     _ownership(spec, rng, world, observed)
+    _software_module.annotate_exposure(world.nodes, world.edges)
     world.edges = _dedupe(world.edges)
     if spec.edges > len(world.edges):
         _densify(spec, rng, world, per_type, observed)
@@ -424,9 +467,19 @@ def _ownership(spec: WorldSpec, rng: random.Random, world: World, observed: date
 
     # the sources and scopes are the collectors' own: git_scan per repository and per root module,
     # tf_state per state file (captains/mapper/infra_map_ids.py)
-    for repo in repos:
+    task_defs = [n for n in aws_nodes if n.type == "ecs_task_definition"]
+    for i, repo in enumerate(repos):
         world.nodes.append(_artifact(spec, github_repo_node_id(repo), "github_repo", repo, {"default_branch": "main", "full_name": repo},
                                      source="git_scan", scope=f"repo:{repo}", observed=observed))
+        # the Dockerfile that builds each service's image, as the GitHub collector would read it
+        for td in task_defs[i::n_repos][:40]:
+            path = f"services/{td.name}/Dockerfile"
+            parsed = _software_module.parse_dockerfile(f"FROM {td.attributes['baseImage']}\n", path=path)
+            attributes: Dict[str, object] = {"path": path, "repo": repo, "base_images": parsed.base_images}
+            _software_module.put_software(attributes, parsed.software)
+            world.nodes.append(_artifact(spec, github_file_node_id(repo, path), "github_dockerfile", f"{repo.split('/')[-1]}/{path}", attributes,
+                                         source="git_scan", scope=f"repo:{repo}", observed=observed))
+            world.edges.append(_edge(spec, github_repo_node_id(repo), github_file_node_id(repo, path), "contains", observed, source="git_scan", scope=f"repo:{repo}"))
     state_files: List[str] = []
     for root_id, repo, path in roots:
         world.nodes.append(_artifact(spec, root_id, "tf_root_module", path,

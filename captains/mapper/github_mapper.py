@@ -27,6 +27,7 @@ except ImportError:  # pragma: no cover
     class GithubException(Exception):  # type: ignore
         """Fallback GithubException so type checking continues."""
 
+from captains.mapper import software as _software
 from compass_core.github import client as client_for_token
 from compass_core.github import list_installation_repositories, resolve_github_token
 from infra_map.facts import EdgeFact, FactBatch, NodeFact
@@ -310,6 +311,8 @@ class GitHubGraphCollector:
 
         files_processed = 0
         terraform_files: Dict[str, str] = {}
+        software_files: Dict[str, Tuple[str, str]] = {}   # path -> (classification, text), read together after the walk
+        file_nodes: Dict[str, ResourceNode] = {}
         for entry in tree:
             classification = self._classify_file(entry.path)
             if not classification:
@@ -342,10 +345,17 @@ class GitHubGraphCollector:
                 self._process_terraform_file(repo, file_node, text, repo_node)
             elif classification == "dockerfile":
                 self._annotate_dockerfile(file_node, text)
+            if classification in ("dockerfile", "manifest", "lockfile", "deploy"):
+                software_files[entry.path] = (classification, text)
+                file_nodes[entry.path] = file_node
 
             files_processed += 1
             if self.max_files_per_repo and files_processed >= self.max_files_per_repo:
                 break
+
+        # a lockfile's direct set comes from the manifest beside it, so the files are read together
+        for path, entries in _software.repository_software(software_files).items():
+            _software.put_software(file_nodes[path].attributes, entries)
 
         if terraform_files:
             self._process_terraform_topology(repo, terraform_files)
@@ -408,6 +418,9 @@ class GitHubGraphCollector:
             "workflow": "github_workflow_file",
             "terraform": "github_terraform_file",
             "dockerfile": "github_dockerfile",
+            "manifest": "github_manifest_file",
+            "lockfile": "github_lockfile",
+            "deploy": "github_deploy_file",
         }
         return ResourceNode(
             org_id=self.org_id,
@@ -434,9 +447,10 @@ class GitHubGraphCollector:
         if lowered.endswith(".tf"):
             return "terraform"
         filename = lowered.rsplit("/", 1)[-1]
-        if filename == "dockerfile" or filename.startswith("dockerfile."):
+        if filename == "dockerfile" or filename.startswith("dockerfile.") or filename.endswith(".dockerfile"):
             return "dockerfile"
-        return None
+        # manifests, lockfiles and deploy descriptors: what the patch captain matches advisories against
+        return _software.classify_software_file(path)
 
     def _process_workflow(self, repo, file_node: ResourceNode, text: str, repo_node: ResourceNode) -> None:
         parsed = _safe_yaml_load(text)
@@ -502,6 +516,7 @@ class GitHubGraphCollector:
         file_node.attributes["base_images"] = stages
 
     def _process_terraform_file(self, repo, file_node: ResourceNode, text: str, repo_node: ResourceNode) -> None:
+        _software.put_software(file_node.attributes, _software.terraform_software(self._parse_hcl(text), str(file_node.attributes.get("path") or "")))
         modules = self._extract_terraform_modules(text)
         for module in modules:
             module_name, attrs = module

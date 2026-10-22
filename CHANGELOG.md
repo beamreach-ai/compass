@@ -27,6 +27,19 @@ leaves when the state changes. [docs/inbox.md](docs/inbox.md).
   confirmation before anything that changes the account or a pull request.
 - `POST /api/honeypots/incidents/{id}/decline` drops one parked response and
   records who decided against it; the incident stays open.
+- The map knows what every workload is made of, as package URLs on the node
+  (`attributes.software`): the image of each container in a task definition,
+  resolved to its digest through ECR; a Lambda's runtime and layers (Bref's
+  by name) and its function URL; an instance's AMI, its public address and,
+  when SSM Inventory is on, its packages; a security group's rules open to
+  the world. In the repositories the mapper now reads Dockerfiles fully
+  (`FROM` per stage, `apt-get install`, `apk add`, `pip install`, `composer
+  require`), manifests and lockfiles (composer, npm, yarn, pnpm, pip,
+  pyproject, uv, poetry, go, cargo), `serverless.yml`, SAM templates and the
+  runtimes, layers and AMIs in Terraform. Every workload carries `exposed`,
+  with how (an internet-facing load balancer, a function URL, a public IP
+  behind an open security group). The patching captain matches these; the
+  mapper's read role gains `ssm:ListInventoryEntries`.
 - A captain contributes items through `inbox=` in its manifest
   (`compass_core.inbox`, [docs/writing_a_captain.md](docs/writing_a_captain.md) §6.1);
   a product registers a source with `compass_api.extensions.register_inbox_source`.

@@ -25,6 +25,7 @@ INVENTORY_READS = (
             "ecr:Describe*",
             "elasticloadbalancing:Describe*",
             "secretsmanager:List*",
+            "ssm:ListInventoryEntries",   # the packages on an instance, when SSM Inventory is on
         ),
     ),
     # the Terraform state: the one read that must stay scoped, state files hold secrets in plain text
