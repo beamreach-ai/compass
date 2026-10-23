@@ -84,7 +84,8 @@ docker compose run --rm compass honeypot incidents                   # what fire
 The secret is in the module's outputs (`terraform output -raw`); leave the key
 where an attacker would look. `fire` needs the daemon running and a CloudTrail
 trail logging management events in the account. Classes: `aws_credential`,
-`db_credential`, `ssh_key`, `s3_object`, `api_token`, `dns_record`.
+`db_credential`, `ssh_key`, `s3_object`, `api_token`, `dns_record`;
+[honeytokens.md](honeytokens.md) says what each one creates and what trips it.
 
 `action_set`'s `mode` is `off` (recommend only), `approve` (wait for a human)
 or `autopilot`: autopilot runs the action — deactivate the decoy key, restart
@@ -107,6 +108,8 @@ Terraform (in the image) generates the configuration, Compass rewires literals
 to references in your modules, verifies with a plan, and opens a pull request
 with the import blocks. `verified: false` with a warning means the plan could
 not run with your credentials, not that the import is wrong.
+[iac_coverage.md](iac_coverage.md) explains how the map decides what is
+unmanaged or drifted, and each step of the import.
 
 ## 5. Day to day
 
@@ -209,4 +212,4 @@ that builds the two images from a checkout.
 | The map | `/compass/data/map/<workspace>.sqlite` in the `map-data` volume |
 | Tables | `compass_{map,items,aws_inventory,tf_inventory,tf_state,progress}_<workspace>` in the `dynamodb-data` volume |
 | Branches | `beamreach/honeypot/<name>`, `beamreach/iac-import/<hash>` |
-| Resource tags | `beamreach:honeytoken-id`, `beamreach:managed` on everything Compass plants |
+| Decoy tags | one opaque tag, `cost-center = <8 hex>`, on each decoy resource; the link to the decoy stays in the items table |
