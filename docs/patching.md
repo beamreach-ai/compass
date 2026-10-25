@@ -95,6 +95,19 @@ reviewers and revises within the touched files. A merge moves the findings to
 bounds how many are open at a time; `patch.repos` and `prs.watcher.repos` say
 where they may open. `compass patch pr repo=acme/web` opens one now.
 
+### Lockfiles
+
+Compass's image has none of the toolchains that write lockfiles and does not
+grow them. When a fix moves a manifest with a lockfile beside it (composer,
+npm, yarn, pnpm, uv, poetry, go, cargo), the pull request adds
+`.github/workflows/compass-lockfile.yml`, which regenerates that lockfile on
+the branch with the ecosystem's own tool and pushes one commit as Compass's
+author, so the PR watcher knows it for its own. A push made with the default
+`GITHUB_TOKEN` does not start the repository's other workflows on that commit;
+set `secrets.COMPASS_LOCKFILE_TOKEN` to a token allowed to push and they run.
+Python pins in `requirements*.txt` are edited in place. `patch.lockfiles:
+"manifest-only"` leaves the lockfile to you and the body says so.
+
 What it does not do yet: bump a Lambda runtime or an AMI, move a transitive
 dependency, or cross a major version; those findings wait in the inbox with
 the reason said.

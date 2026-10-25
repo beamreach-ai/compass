@@ -27,6 +27,8 @@ CONFIG_SCHEMA = {
         },
         "repos": {"type": "array", "items": {"type": "string"}, "x-order": 2, "x-help": "Repositories the captain may open pull requests in; empty means every repository the mapper sees."},
         "max_open_prs": {"type": "integer", "minimum": 0, "default": 10, "x-order": 3, "x-help": "Open fix pull requests at a time; beyond it, findings wait in the inbox."},
+        "lockfiles": {"type": "string", "enum": ["ci", "manifest-only"], "default": "ci", "x-order": 5,
+                      "x-help": "ci: the pull request adds a workflow that regenerates the lockfile on the branch. manifest-only: the manifest moves and the body says the lockfile needs regenerating."},
         "canaries": {"type": "object", "x-order": 4, "x-group": "Canary", "additionalProperties": True,
                      "x-help": "Per production service name: {\"staging_service\": \"web-staging\", \"cluster\": \"staging\", \"probe_paths\": [\"/\", \"/health\"], \"minutes\": 5}. "
                                "The fix's image runs on the twin for the window and is probed, through the grant patch.canary_deploy."},

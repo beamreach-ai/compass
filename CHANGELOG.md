@@ -78,6 +78,10 @@ leaves when the state changes. [docs/inbox.md](docs/inbox.md).
   Notifications `patch.pr_opened`, `patch.needs_human`, `patch.deployed`
   through today's routing (`patch.*`). The PR watcher's record now keeps each
   check's name with its status.
+- Lockfiles follow the manifest: when a fix moves a manifest with a lockfile
+  beside it, the pull request adds `compass-lockfile.yml`, which regenerates
+  that lockfile on the branch with the ecosystem's own tool and commits it as
+  Compass; `patch.lockfiles: "manifest-only"` leaves it to you.
 - A captain contributes items through `inbox=` in its manifest
   (`compass_core.inbox`, [docs/writing_a_captain.md](docs/writing_a_captain.md) §6.1);
   a product registers a source with `compass_api.extensions.register_inbox_source`.

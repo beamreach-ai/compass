@@ -28,6 +28,7 @@ FILES = {
     ("acme/web", "Dockerfile"): "FROM php:8.3.30-fpm\nRUN apt-get update && apt-get install -y libzip-dev\n",
     ("acme/web", "composer.json"): '{\n  "require": {\n    "laravel/framework": "^11.2.0"\n  }\n}\n',
     ("acme/legacy", "Dockerfile"): "FROM ubuntu:24.04\nRUN apt-get install -y php8.3-fpm=8.3.6-0ubuntu0.24.04.12 nginx\n",
+    ("acme/web", "composer.lock"): '{"packages": [{"name": "laravel/framework", "version": "v11.2.0"}]}',
 }
 
 
@@ -182,8 +183,16 @@ def test_a_new_finding_lands_on_the_open_pull_request_and_kev_adds_its_label(wor
     advisories.put(kev)
     report = tick(advisories, findings, opener, nodes, edges, now_ms=2000)
     web = next(r for r in report["prs"]["updated"] if r["repo"] == "acme/web")
-    assert web["findings"] == 2 and web["files"] == ["Dockerfile", "composer.json"] and web["updated"] is True
+    assert web["findings"] == 2 and web["files"] == [".github/workflows/compass-lockfile.yml", "Dockerfile", "composer.json"] and web["updated"] is True
     assert '"laravel/framework": "^11.2.1"' in github.branches[("acme/web", web["branch"], "composer.json")]
+    # the lockfile beside composer.json is regenerated on the branch by the workflow the pull request adds; the watcher may touch it
+    lock_workflow = github.branches[("acme/web", web["branch"], ".github/workflows/compass-lockfile.yml")]
+    assert "composer update ${{ matrix.packages }}" in lock_workflow and 'packages: "laravel/framework@11.2.1"' in lock_workflow and 'dir: "."' in lock_workflow
+    pull = github.pulls[("acme/web", web["number"])]
+    assert "composer.lock is regenerated on this branch by .github/workflows/compass-lockfile.yml (composer)" in pull.body
+    assert registry.get("acme/web", web["number"])["intent"]["scope"]["files"] == [".github/workflows/compass-lockfile.yml", "Dockerfile", "composer.json", "composer.lock"]
+    row = next(r for r in findings.list() if r["node_id"] == "f-web-lock")
+    assert row["pr"]["lockfiles"] == ["composer.lock"] and row["pr"]["allowed_files"][-1] == "composer.lock"
     pull = github.pulls[("acme/web", web["number"])]
     assert pull.title.startswith("Security: CVE-2026-109618, CVE-2026-20001") and "exploited in the wild (CISA KEV)" in pull.body
     assert "compass:exploited" in github.labels[("acme/web", web["number"])]
@@ -209,6 +218,17 @@ def test_merge_moves_the_findings_and_the_fix_on_the_map_deploys_them_close_send
     assert quiet["prs"]["opened"] == [] and quiet["prs"]["updated"] == [], "no new pull request for fourteen days"
     later = tick(advisories, findings, opener, fixed_nodes, fixed_edges, now_ms=2500 + 15 * 86_400_000)
     assert [r["repo"] for r in later["prs"]["opened"]] == ["acme/legacy"]
+
+
+def test_manifest_only_mode_moves_the_manifest_and_says_the_lockfile_needs_regenerating(world):
+    advisories, findings, github, registry, opener = world
+    opener.config = {**CONFIG, "patch": {"lockfiles": "manifest-only"}}
+    nodes, edges = php_shop()
+    advisories.put(laravel())
+    report = tick(advisories, findings, opener, nodes, edges, now_ms=1000)
+    web = next(r for r in report["prs"]["opened"] if r["repo"] == "acme/web")
+    assert web["files"] == ["Dockerfile", "composer.json"]
+    assert "the lockfile needs regenerating (patch.lockfiles is manifest-only)" in github.pulls[("acme/web", web["number"])].body
 
 
 def test_max_open_prs_and_the_repository_allow_list_bound_what_opens(world):

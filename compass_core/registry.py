@@ -238,6 +238,33 @@ class PRRegistry:
         record.update(fields)
         return self._put(record)
 
+    def widen_scope(self, repo: str, number: int, *, files: List[str], done_criteria: Optional[List[str]] = None,
+                    resource_ids: Optional[List[str]] = None) -> Optional[Dict[str, Any]]:
+        """Let a pull request's intent cover more files than it opened with, as a second finding
+        lands on the patch captain's pull request. The goal never changes here: only the files, the
+        directories, the ``files_differ_from_base`` invariant and the done criteria grow."""
+        record = self.get(repo, number)
+        if not record:
+            return None
+        intent = dict(record.get("intent") or {})
+        scope = dict(intent.get("scope") or {})
+        merged_files = sorted(set(scope.get("files") or []) | {str(f) for f in files if f})
+        scope["files"] = merged_files
+        scope["dirs"] = sorted({f.rsplit("/", 1)[0] if "/" in f else "." for f in merged_files})
+        if resource_ids:
+            scope["resource_ids"] = sorted(set(scope.get("resource_ids") or []) | {str(r) for r in resource_ids if r})
+        intent["scope"] = scope
+        intent["invariants"] = [{**inv, "files": merged_files} if inv.get("kind") == "files_differ_from_base" else inv for inv in intent.get("invariants") or []]
+        if done_criteria:
+            intent["done_criteria"] = list(dict.fromkeys([*(intent.get("done_criteria") or []), *done_criteria]))
+        verification = dict(intent.get("verification") or {})
+        if "format_paths" in verification:
+            verification["format_paths"] = merged_files
+            verification["validate_dirs"] = scope["dirs"]
+            intent["verification"] = verification
+        record["intent"] = intent
+        return self._put(record)
+
     def append_revision(self, repo: str, number: int, entry: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         record = self.get(repo, number)
         if not record:

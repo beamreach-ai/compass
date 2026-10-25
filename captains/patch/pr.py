@@ -262,7 +262,41 @@ class PullRequestOpener:
                 added_workflow = _fixes.Edit(path=workflow_path, before=existing, after=content, strategy="build_workflow",
                                              description="a workflow that builds the changed Dockerfile on pull requests (the repository had none)")
                 by_file[workflow_path] = added_workflow
+        # a moved manifest: the lockfile beside it is regenerated on the branch by compass-lockfile.yml (open decision 1)
+        from captains.patch import lockfiles as _lockfiles
+
+        lock_mode = _lockfiles.mode(self.config)
+        manifest_edits: Dict[str, List[Dict[str, Any]]] = {}
+        for finding in applied:
+            if _fixes.strategy_for(finding) == "manifest" and not str(finding.get("path") or "").rsplit("/", 1)[-1].lower().startswith("requirements"):
+                manifest_edits.setdefault(_fixes.target_path(finding), []).append(finding)
+        lock_entries: List[_lockfiles.LockEntry] = []
+        if manifest_edits and lock_mode == "ci":
+            known = {str(f.get("path")) for f in applied if str(f.get("path") or "").rsplit("/", 1)[-1] in _lockfiles.TOOLS}
+
+            def exists(path: str) -> bool:
+                try:
+                    gh_repo.get_contents(path, ref=base_branch)
+                    return True
+                except Exception:  # noqa: BLE001 - 404
+                    return False
+
+            lock_entries = _lockfiles.plan(manifest_edits, exists, known_lockfiles=known)
+            if lock_entries:
+                try:
+                    existing_lock_workflow = gh_repo.get_contents(_lockfiles.WORKFLOW_PATH, ref=base_branch).decoded_content.decode("utf-8", errors="replace")
+                except Exception:  # noqa: BLE001
+                    existing_lock_workflow = ""
+                content = _lockfiles.workflow(lock_entries, author_email=_lockfiles.author_email(self.config))
+                if existing_lock_workflow != content:
+                    by_file[_lockfiles.WORKFLOW_PATH] = _fixes.Edit(path=_lockfiles.WORKFLOW_PATH, before=existing_lock_workflow, after=content, strategy="lockfile_workflow",
+                                                                   description=f"a workflow that regenerates {', '.join(e.lockfile for e in lock_entries)} on this branch")
+        for manifest in manifest_edits:
+            entry = next((e for e in lock_entries if e.manifest == manifest), None)
+            if manifest in by_file:
+                by_file[manifest].notes.append(_lockfiles.note(entry, lock_mode))
         files = sorted(by_file)
+        allowed_files = sorted(set(files) | {e.lockfile for e in lock_entries})
         advisories = [a for a in (self.advisories.get(str(f.get("advisory_id"))) for f in applied) if a] if self.advisories is not None else []
         text = body(repo, applied, by_file, explanation=explanation(self.model, applied, advisories))
         ids = sorted({str(f.get("advisory_id")) for f in applied})
@@ -279,9 +313,12 @@ class PullRequestOpener:
             logger.debug("labels on %s#%s not set: %s", repo, published.number, exc)
         self.registry().record(url=published.url, pr_type=PR_TYPE, origin={"captain": "patch", "finding_id": f"{repo}#{published.number}", "repo": repo,
                                                                             "finding_keys": [str(f.get("key")) for f in applied]},
-                               intent=intent_for_patch(repo, applied, files), branch=branch, base_branch=base_branch, title=title)
+                               intent=intent_for_patch(repo, applied, allowed_files), branch=branch, base_branch=base_branch, title=title)
+        # the registry keeps the first intent's goal; this pull request's scope grows with each finding that lands on it
+        fresh_intent = intent_for_patch(repo, applied, allowed_files)
+        self.registry().widen_scope(repo, published.number, files=allowed_files, done_criteria=fresh_intent["done_criteria"], resource_ids=fresh_intent["scope"]["resource_ids"])
         pr_record = {"url": published.url, "number": published.number, "branch": branch, "base_branch": base_branch, "repo": repo, "opened_at": int(time.time() * 1000),
-                     "files": files, "labels": labels, "updated": published.updated}
+                     "files": files, "allowed_files": allowed_files, "lockfiles": [e.lockfile for e in lock_entries], "labels": labels, "updated": published.updated}
         previous = {str(f.get("key")): dict((f.get("pr") or {}).get("verification") or {}) for f in applied}
         for finding in applied:
             verification = previous.get(str(finding["key"])) or {}
