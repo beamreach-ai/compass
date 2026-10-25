@@ -6,7 +6,7 @@ The canary's action and the reads it needs join the permissions when verificatio
 from __future__ import annotations
 
 from compass_core import __version__
-from compass_core.captains import CaptainManifest, Permissions, ServiceSpec
+from compass_core.captains import CaptainManifest, Permissions, ServiceSpec, TabSpec
 
 CONFIG_SCHEMA = {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -36,7 +36,12 @@ MANIFEST = CaptainManifest(
     tier="open",
     feature="patches",
     commands="captains.patch.commands",
-    services=(ServiceSpec(name="cve-feed", start="captains.patch.feed:run_service", interval=3600, interval_setting="cve_feed"),),
+    routers=("compass_api.routes.patches:router",),
+    route_prefixes=("/api/patches",),
+    tabs=(TabSpec(key="patches", label="Patches", group="security", feature="patches", views=("findings", "needs_you")),),
+    services=(ServiceSpec(name="cve-feed", start="captains.patch.feed:run_service", interval=3600, interval_setting="cve_feed"),
+              ServiceSpec(name="patch-tick", start="captains.patch.scheduler:run_service", interval=900, interval_setting="patch_tick")),
+    inbox="captains.patch.inbox:items",
     config_schema=CONFIG_SCHEMA,
     permissions=Permissions(
         github=("contents:read",),

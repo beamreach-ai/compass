@@ -53,6 +53,15 @@ leaves when the state changes. [docs/inbox.md](docs/inbox.md).
   one failing never stops the others. `compass patch feed_run`, `feed_status`,
   `advisories` and `inventory` read it; `feed_inject` is a test-only door
   behind `COMPASS_PATCH_INJECT=1`.
+- The Patches tab and the match behind it: every fifteen minutes the
+  advisories are held against the map's software in each ecosystem's own
+  version order, and a finding is written per advisory, node and package with
+  the fixed version, the repository and file, the workloads that run what the
+  file builds and whether they face the internet. The policy decides per
+  finding: a pull request without a click when exploited, likely to be, severe
+  or exposed, and nothing stands in the way of a plain bump; an inbox item per
+  repository otherwise, approved with one click. `GET /api/patches`,
+  `compass patch findings|tick|approve|ignore`. [docs/patching.md](docs/patching.md).
 - A captain contributes items through `inbox=` in its manifest
   (`compass_core.inbox`, [docs/writing_a_captain.md](docs/writing_a_captain.md) §6.1);
   a product registers a source with `compass_api.extensions.register_inbox_source`.

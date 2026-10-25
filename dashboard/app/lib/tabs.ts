@@ -6,7 +6,7 @@
 // ALL_WORKSPACE_TABS is only the fallback before the bootstrap has answered.
 export type WorkspaceTab = string;
 export type DashboardTab = string;
-export const ALL_WORKSPACE_TABS: WorkspaceTab[] = ["finops", "audits", "compliance", "queue", "maps", "iac", "prs", "policies", "settings", "honeypots"];
+export const ALL_WORKSPACE_TABS: WorkspaceTab[] = ["finops", "audits", "compliance", "queue", "maps", "iac", "prs", "policies", "settings", "honeypots", "patches"];
 
 // Settings is one page in sections; the sidebar lists them under Settings, the way a
 // captain's views are listed under its tab, and each link scrolls to its section

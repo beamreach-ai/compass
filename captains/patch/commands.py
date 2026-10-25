@@ -54,6 +54,56 @@ def inventory(payload: Dict[str, Any]) -> Dict[str, Any]:
     return {"summary": inv.summary(), "items": [i.to_dict() for i in inv.items[:limit]], "truncated": len(inv.items) > limit}
 
 
-COMMANDS = {"feed_run": feed_run, "feed_status": feed_status, "feed_inject": feed_inject, "advisories": advisories, "inventory": inventory}
+def tick(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """The match now: advisories × inventory → findings, the policy applied, the rows brought up to date."""
+    from captains.patch import scheduler
+
+    config, workspace_id = _config(payload)
+    return scheduler.tick(config, workspace_id=workspace_id)
+
+
+def findings(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """The findings: `state=open|approved|pr_open|merged|deployed|ignored|closed`, `exposed=true`, `exploited=true`, `repo=`."""
+    from captains.patch import scheduler
+    from captains.patch.findings import OPEN_STATES, summary
+
+    config, workspace_id = _config(payload)
+    _, store = scheduler.stores(config, workspace_id)
+    rows = store.list()
+    state = payload.get("state")
+    chosen = [r for r in rows if (r.get("state") == state if state else r.get("state") in OPEN_STATES)
+              and (not payload.get("exposed") or r.get("exposed")) and (not payload.get("exploited") or r.get("kev"))
+              and (not payload.get("repo") or r.get("repo") == payload.get("repo"))]
+    return {"summary": summary(rows), "findings": chosen[: int(payload.get("limit") or 200)], "count": len(chosen)}
+
+
+def approve(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Approve findings (`keys=[...]` or `repo=`): the next tick opens their pull request."""
+    from captains.patch import scheduler
+
+    config, workspace_id = _config(payload)
+    _, store = scheduler.stores(config, workspace_id)
+    keys = payload.get("keys") or [r["key"] for r in store.list(states=["open"]) if r.get("repo") == payload.get("repo")]
+    done = [store.approve(str(k), by=str(payload.get("by") or "cli")) for k in keys]
+    return {"approved": sum(1 for r in done if r and r.get("state") == "approved")}
+
+
+def ignore(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Ignore a finding (`key=`) until a date (`until=YYYY-MM-DD`) with a reason (`reason=`)."""
+    from captains.patch import scheduler
+
+    config, workspace_id = _config(payload)
+    _, store = scheduler.stores(config, workspace_id)
+    key = str(payload.get("key") or "")
+    if not key:
+        raise ValueError("key is required: the finding's key from `compass patch findings`")
+    row = store.ignore(key, by=str(payload.get("by") or "cli"), until=payload.get("until"), reason=payload.get("reason"))
+    if row is None:
+        raise LookupError(f"finding {key} not found")
+    return {"key": key, "state": row.get("state"), "ignored": row.get("ignored")}
+
+
+COMMANDS = {"feed_run": feed_run, "feed_status": feed_status, "feed_inject": feed_inject, "advisories": advisories, "inventory": inventory,
+            "tick": tick, "findings": findings, "approve": approve, "ignore": ignore}
 
 dispatch.register("patch", COMMANDS)

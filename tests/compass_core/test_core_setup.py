@@ -54,13 +54,14 @@ def test_serve_once_runs_one_prs_tick_and_the_alert_consumer(monkeypatch):
     monkeypatch.setattr("captains.honeypot.alert_consumer.AlertConsumer", FakeConsumer)
     feed_runs = []
     monkeypatch.setattr("captains.patch.feed.run", lambda config, **kw: feed_runs.append(kw["workspace_id"]) or {"advisories": 0, "sources": {}})
+    monkeypatch.setattr("captains.patch.scheduler.tick", lambda config, **kw: feed_runs.append("tick") or {"summary": {"open": 0, "exposed": 0}, "changes": {"opened": 0, "closed": 0}})
     previous = queue._factory
     try:
         result = serve.serve({"workspace_id": "ws-1", "once": True, "prs_tick": 300})
     finally:
         queue.set_job_queue(previous)
-    assert ticks == [["ws-1"]] and result["ticks"] == 5 and feed_runs == ["ws-1"], \
-        "once: one tick each of the PR watcher, the grant verification, the access audit, the CVE feed and the demo re-arm (which returns at once outside demo mode)"
+    assert ticks == [["ws-1"]] and result["ticks"] == 6 and sorted(feed_runs) == ["tick", "ws-1"], \
+        "once: one tick each of the PR watcher, the grant verification, the access audit, the CVE feed, the patch match and the demo re-arm (which returns at once outside demo mode)"
     assert "honeypot:alert-consumer" in result["services"] and "prs:prs-tick" in result["services"]
     assert {"core:grant-verify", "core:access-audit"} <= set(result["services"])
     assert "mapper:map-rescan" not in result["services"], "no re-scan without an interval"

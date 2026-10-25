@@ -296,3 +296,11 @@ def patch_cursor_sort_key(source: str) -> str:
 
 def patch_cursor_prefix() -> str:
     return "PATCH#CURSOR#"
+
+
+def patch_finding_sort_key(key: str) -> str:
+    return f"PATCH#FINDING#{key}"
+
+
+def patch_finding_prefix() -> str:
+    return "PATCH#FINDING#"

@@ -20,6 +20,7 @@ const LEGACY_TABS: TabDetail[] = [
   { key: "audits", label: "DevSecOps", group: "security" },
   { key: "compliance", label: "Compliance", group: "security" },
   { key: "honeypots", label: "Honeypots", group: "security", views: ["overview", "honeytokens", "needs_you", "history", "settings"] },
+  { key: "patches", label: "Patches", group: "security", views: ["findings", "needs_you"] },
   { key: "prs", label: "Pull requests", group: "platform", views: ["open", "needs_you", "history"] },
   { key: "maps", label: "Maps", group: "platform" },
   { key: "queue", label: "Queue", group: "platform", views: ["jobs", "needs_you"] },

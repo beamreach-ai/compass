@@ -57,6 +57,8 @@ class Inventory:
     items: List[InventoryItem] = field(default_factory=list)
     nodes_read: int = 0
     nodes_with_software: int = 0
+    nodes: List[ResourceNode] = field(default_factory=list)   # the graph the items came from, for the topology and the coverage
+    edges: List[Any] = field(default_factory=list)
 
     def osv_purls(self) -> List[str]:
         """Versioned package purls in the ecosystems OSV answers for, plus pinned distro packages,
@@ -151,9 +153,10 @@ def _upstream_version(tag: Optional[str]) -> Optional[str]:
     return head if head and head[0].isdigit() else None
 
 
-def collect(nodes: Iterable[ResourceNode]) -> Inventory:
-    inventory = Inventory()
+def collect(nodes: Iterable[ResourceNode], edges: Iterable[Any] = ()) -> Inventory:
+    inventory = Inventory(edges=list(edges))
     for node in nodes:
+        inventory.nodes.append(node)
         inventory.nodes_read += 1
         attributes = node.attributes or {}
         rows = attributes.get("software") or []
@@ -183,4 +186,4 @@ def load(config: Dict[str, Any], *, workspace_id: str, org_id: Optional[str] = N
         graph = store.fetch_graph(org)
     finally:
         store.close()
-    return collect(graph.get("nodes") or [])
+    return collect(graph.get("nodes") or [], graph.get("edges") or [])

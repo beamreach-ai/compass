@@ -15,6 +15,7 @@ const IACTabView = dynamic(() => import("../components/IACTab"), { ssr: false, l
 const PRsTabView = dynamic(() => import("../components/PRsTab"), { ssr: false, loading: loading("PRs") });
 const HoneypotsTabView = dynamic(() => import("../components/HoneypotsTab"), { ssr: false, loading: loading("honeypots") });
 const QueueTabView = dynamic(() => import("../components/QueueTab"), { ssr: false, loading: loading("queue") });
+const PatchesTabView = dynamic(() => import("../components/PatchesTab"), { ssr: false, loading: loading("patches") });
 const PRWatcherSettingsView = dynamic(() => import("../components/PRWatcherSettings"), { ssr: false });
 
 // Maps and IAC follow the mapper job and refresh the queue and the bootstrap when they start one.
@@ -52,6 +53,7 @@ export const openTabs: CaptainTab[] = [
   { key: "prs", label: "Pull requests", feature: "prs", group: "platform", views: ["open", "needs_you", "history"], Component: PRsTabView as React.ComponentType },
   { key: "honeypots", label: "Decoys", feature: "honeypots", group: "security", views: ["overview", "honeytokens", "needs_you", "history", "settings"], Component: HoneypotsTabView as React.ComponentType },
   { key: "queue", label: "Queue", feature: "queue", group: "platform", views: ["jobs", "needs_you"], Component: QueueTabView as React.ComponentType },
+  { key: "patches", label: "Patches", feature: "patches", group: "security", views: ["findings", "needs_you"], Component: PatchesTabView as React.ComponentType },
 ];
 
 // A captain's own settings UI, by the manifest's `settings_component` key.
