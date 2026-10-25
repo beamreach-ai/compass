@@ -42,6 +42,7 @@ librarian = "captains.librarian.manifest:MANIFEST"
 honeypot = "captains.honeypot.manifest:MANIFEST"
 iac = "captains.iac.manifest:MANIFEST"
 prs = "captains.prs.manifest:MANIFEST"
+patch = "captains.patch.manifest:MANIFEST"
 
 [project.optional-dependencies]
 # a model for the incident summary, drift-fix HCL and PR triage (compass_core.llm)
@@ -64,6 +65,7 @@ include = [
     "captains.honeypot*",
     "captains.iac*",
     "captains.prs*",
+    "captains.patch*",
 ]
 
 [tool.setuptools.package-data]

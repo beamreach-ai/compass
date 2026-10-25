@@ -41,7 +41,7 @@ def test_admin_toggle_deploy_veto_and_dependencies(fresh_registry):
     assert st["iac"].reason == "disabled_by_deploy"
     st = captains.states({"captains": {"mapper": {"enabled": False}}})
     assert st["honeypot"].reason == "dependency_off" and st["honeypot"].blocked_by == ("mapper",) and st["honeypot"].code == "dependency_off"
-    assert set(captains.required_by("mapper", {})) == {"librarian", "honeypot", "iac"}
+    assert set(captains.required_by("mapper", {})) == {"librarian", "honeypot", "iac", "patch"}
 
 
 def test_incompatible_manifest_is_listed_but_not_active(fresh_registry):
@@ -91,9 +91,9 @@ def test_set_enabled_follows_dependencies(fresh_registry):
     config: dict = {}
     with pytest.raises(captain_admin.CaptainAdminError) as info:
         captain_admin.set_enabled(config, "mapper", False)
-    assert info.value.code == "required_by" and set(info.value.names) == {"librarian", "honeypot", "iac"}
+    assert info.value.code == "required_by" and set(info.value.names) == {"librarian", "honeypot", "iac", "patch"}
     changed = captain_admin.set_enabled(config, "mapper", False, cascade=True, actor="ilia")
-    assert set(changed) == {"mapper", "librarian", "honeypot", "iac"}
+    assert set(changed) == {"mapper", "librarian", "honeypot", "iac", "patch"}
     assert config["captains"]["mapper"] == {"enabled": False, "disabled_at": config["captains"]["mapper"]["disabled_at"], "disabled_by": "ilia"}
     with pytest.raises(captain_admin.CaptainAdminError) as info:
         captain_admin.set_enabled(config, "iac", True)
@@ -215,9 +215,9 @@ def test_captains_api_dependency_rules(open_client):
     client = open_client
     refused = client.post("/api/captains/mapper/disable")
     assert refused.status_code == 409 and refused.json()["code"] == "required_by"
-    assert set(refused.json()["captains"]) == {"librarian", "honeypot", "iac"}
+    assert set(refused.json()["captains"]) == {"librarian", "honeypot", "iac", "patch"}
     ok = client.post("/api/captains/mapper/disable", json={"cascade": True})
-    assert ok.status_code == 200 and set(ok.json()["changed"]) == {"mapper", "librarian", "honeypot", "iac"}
+    assert ok.status_code == 200 and set(ok.json()["changed"]) == {"mapper", "librarian", "honeypot", "iac", "patch"}
     plant = client.post("/api/honeypots/tokens", json={"honeytoken_class": "db_credential"})
     assert plant.status_code == 403 and plant.json()["code"] == "captain_disabled"
     assert client.post("/api/captains/honeypot/enable").status_code == 409

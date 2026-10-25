@@ -40,6 +40,19 @@ leaves when the state changes. [docs/inbox.md](docs/inbox.md).
   with how (an internet-facing load balancer, a function URL, a public IP
   behind an open security group). The patching captain matches these; the
   mapper's read role gains `ssm:ListInventoryEntries`.
+- A new captain, `patch` (Patches): the `cve-feed` service follows the CVE
+  feeds every hour without a key or an account. OSV is asked by the purls on
+  the map on every run, so a fresh install is current in minutes and new
+  software is covered as soon as the mapper sees it; cvelistV5's delta log
+  brings the CVEs of the products the account runs (PHP, Node, Python, nginx,
+  Apache, Ruby, Go, Redis, Postgres, MySQL, MariaDB and friends); CISA's KEV
+  and FIRST's EPSS score them; the Ubuntu, Debian, Alpine and Amazon Linux
+  trackers say which package version in which release is fixed; Packagist and
+  npm add the PHP and JS advisories at the source. Advisories merge on the CVE
+  id and live in the items table (`CVE#`); each source keeps its own cursor,
+  one failing never stops the others. `compass patch feed_run`, `feed_status`,
+  `advisories` and `inventory` read it; `feed_inject` is a test-only door
+  behind `COMPASS_PATCH_INJECT=1`.
 - A captain contributes items through `inbox=` in its manifest
   (`compass_core.inbox`, [docs/writing_a_captain.md](docs/writing_a_captain.md) §6.1);
   a product registers a source with `compass_api.extensions.register_inbox_source`.

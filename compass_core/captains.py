@@ -58,6 +58,7 @@ _SHIPPED: Tuple[str, ...] = (
     "captains.honeypot.manifest:MANIFEST",
     "captains.iac.manifest:MANIFEST",
     "captains.prs.manifest:MANIFEST",
+    "captains.patch.manifest:MANIFEST",
 )
 
 
