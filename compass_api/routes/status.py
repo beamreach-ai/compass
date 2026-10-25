@@ -159,6 +159,27 @@ def _honeypots_section(request: Request) -> Dict[str, Any]:
     return {"total": len(tokens), "by_status": by_status, "active_alerts": active_alerts}
 
 
+def _patches_section(request: Request, config: Dict[str, Any], workspace_id: Optional[str]) -> Dict[str, Any]:
+    """What `compass status` prints on its Patches line: the findings' counts and when the feeds last ran."""
+    from compass_api.routes._workspace import get_workspace_dynamodb_config
+    from compass_core.keys import workspace_pk
+    from compass_core.tables import dynamo_table, tables
+
+    name = tables(get_workspace_dynamodb_config(request)).items
+    if not name:
+        return {}
+    from captains.patch.findings import FindingStore, summary
+    from captains.patch.store import AdvisoryStore
+
+    table = dynamo_table(name)
+    pk = workspace_pk(workspace_id)
+    counts = summary(FindingStore(table, pk).list())
+    advisories = AdvisoryStore(table, pk)
+    last = advisories.cursor("feed:last_run") or {}
+    return {**{k: counts.get(k, 0) for k in ("open", "exposed", "exploited", "pr_now", "waiting_approval", "pr_open", "merged", "deployed", "ignored")},
+            "advisories": advisories.count(), "feed_last_run": last.get("value")}
+
+
 def _inbox_section(request: Request, config: Dict[str, Any], workspace_id: Optional[str]) -> Dict[str, Any]:
     """What `compass status` prints on its "Needs you" line: the counts and the three newest items."""
     from compass_api.routes.inbox import context_for
@@ -201,6 +222,7 @@ def get_status(request: Request) -> Dict[str, Any]:
         "prs": _section(errors, "prs", lambda: _prs_section(jobs, _section(errors, "pr_registry", lambda: _pr_records(config, workspace_id), default=[])), default={}),
         "honeypots": _section(errors, "honeypots", lambda: _honeypots_section(request), default={}),
         "inbox": _section(errors, "inbox", lambda: _inbox_section(request, config, workspace_id), default={}),
+        "patches": _section(errors, "patches", lambda: _patches_section(request, config, workspace_id), default={}),
         # billing, findings: the product's sections (compass_api.extensions); absent in the open edition
         **{name: _section(errors, name, lambda fn=fn: fn(request, config, workspace_id), default={}) for name, fn in extensions.status_sections().items()},
         "errors": errors,

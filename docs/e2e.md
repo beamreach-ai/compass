@@ -60,7 +60,7 @@ parallel, each with its own stack:
 |---|---|
 | A | install, sign-in, shell, settings, demo mode, the inbox (`test_00`–`test_03`, `test_13`, `test_14`) |
 | B | captains, the map (`test_04`, `test_05`) |
-| C | decoys, code-as-cloud, pull requests (`test_06`–`test_08`) |
+| C | decoys, code-as-cloud, pull requests, access, patches (`test_06`–`test_08`, `test_12`, `test_15`) |
 | D | jobs, updates, release (`test_09`–`test_11`) |
 
 What a pull request runs:
@@ -349,3 +349,11 @@ read-only test (AUT-5) keeps `READ_ONLY=1` as its own thing.
 | INB-2 | The sidebar counts the tab and the total; the Queue tab's Needs you view lists the item and expanding it shows the job's error | UI |
 | INB-3 | Acknowledge from the feed hides the item (the count drops, `include_snoozed` still shows it), un-snoozing brings it back; Retry from the feed queues the job and the newest failure replaces the item | UI, API |
 | INB-4 | The total opens the whole feed, newest first with the verb filter; the phone's menu button carries the total | UI |
+
+### 4.16 Patches (`test_15_patch.py`)
+
+| ID | Test | Via |
+|---|---|---|
+| PAT-1 | php2shell injected into the feed's store (`patch feed_inject`, behind `COMPASS_PATCH_INJECT=1`); the tick writes the finding on the fixture repository's `services/web/Dockerfile` (php 8.3.30 → 8.3.36, severe enough on its own, not exposed); the fix pull request opens on the fake GitHub with the golden diff, the build workflow the repository lacked, the body and the watcher's record; the Patches tab shows it | API, UI |
+| PAT-2 | A Laravel advisory below every trigger waits in the inbox as `patch.approve`; approving it from the item's action lands the composer.json bump on the repository's open pull request | API |
+| PAT-3 | Merging the pull request in the fake and syncing moves the findings to `merged`; a rescan sees 8.3.36 and the next tick marks them `deployed`; `/api/status` says so | API |

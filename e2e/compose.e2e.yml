@@ -18,6 +18,8 @@ x-e2e-env: &e2e-env
   COMPASS_UPDATE_URL: http://fakes:9000/feed/releases.json
   COMPASS_RELEASE_NOTES_URL: http://fakes:9000/feed/notes.xml
   COMPASS_CATALOG_URL: http://fakes:9000/catalog.json
+  # the patch captain's test-only door: an advisory put in the store by hand (e2e/test_15_patch.py)
+  COMPASS_PATCH_INJECT: "1"
 
 services:
   moto:

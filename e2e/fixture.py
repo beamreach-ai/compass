@@ -151,8 +151,17 @@ resource "aws_lambda_function" "api" {{
 }}
 '''
 
+WEB_DOCKERFILE = "services/web/Dockerfile"
+WEB_DOCKERFILE_TEXT = "FROM php:8.3.30-fpm\nRUN apt-get update && apt-get install -y --no-install-recommends libzip-dev && rm -rf /var/lib/apt/lists/*\nCOPY . /var/www\n"
+WEB_COMPOSER_JSON = "services/web/composer.json"
+WEB_COMPOSER_LOCK = "services/web/composer.lock"
+
 REPO_FILES = {
     f"{TERRAFORM_ROOT}/main.tf": MAIN_TF,
+    # a PHP service the patch captain has something to fix in (4.16): a docker-library base image and a composer project
+    WEB_DOCKERFILE: WEB_DOCKERFILE_TEXT,
+    WEB_COMPOSER_JSON: '{\n    "require": {\n        "php": "^8.3",\n        "laravel/framework": "^11.2.0"\n    }\n}\n',
+    WEB_COMPOSER_LOCK: '{"packages": [{"name": "laravel/framework", "version": "v11.2.0"}, {"name": "symfony/http-foundation", "version": "v7.1.3"}], "packages-dev": []}\n',
     "README.md": "# acme/infra\n\nThe end-to-end suite's infrastructure repository.\n",
     ".github/workflows/plan.yml": "name: plan\non: [pull_request]\njobs:\n  plan:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n",
 }

@@ -53,7 +53,15 @@ Order, and what to check after each step:
    `verified: false` with a warning means the plan could not run with the
    given credentials.
 
-8. Updates (only when asked): `update check` shows the running version, the
+8. Patches: after the first map, `patch feed_run` (the feeds, a few minutes
+   the first time) then `patch tick` — `summary.open` findings and, for the
+   exploited, exposed or severe ones, `prs.opened` pull request URLs on the
+   fake or real GitHub. `patch findings` lists them with the fixed versions;
+   the **Patches** tab shows the same. `patch feed_inject` is refused unless
+   `COMPASS_PATCH_INJECT=1` is set; it is for the test suite, not for an
+   install.
+
+9. Updates (only when asked): `update check` shows the running version, the
    compose file's `COMPASS_VERSION`, and the latest release, with the notes of
    every release in between under `update.release_notes`. Without the
    updater, apply with the two commands it prints. Do not start the updater

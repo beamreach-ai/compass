@@ -40,7 +40,7 @@ SHARDS: Dict[str, Dict[str, object]] = {
     "A": {"name": "install, sign-in, shell, settings, inbox",
           "files": ["test_00_install.py", "test_01_auth.py", "test_02_shell.py", "test_03_settings.py", "test_13_demo.py", "test_14_inbox.py"]},
     "B": {"name": "captains, the map", "files": ["test_04_captains.py", "test_05_map.py"]},
-    "C": {"name": "decoys, code-as-cloud, pull requests, access", "files": ["test_06_decoys.py", "test_07_iac.py", "test_08_prs.py", "test_12_access.py"]},
+    "C": {"name": "decoys, code-as-cloud, pull requests, access, patches", "files": ["test_06_decoys.py", "test_07_iac.py", "test_08_prs.py", "test_12_access.py", "test_15_patch.py"]},
     "D": {"name": "jobs, updates, release", "files": ["test_09_jobs.py", "test_10_updates.py", "test_11_release.py"]},
 }
 SMOKE = ["test_00_install.py", "test_02_shell.py"]
@@ -56,7 +56,8 @@ INSIDE_ANYWAY = ["tests/e2e/*", "README.md", "docs/quickstart.md", "CHANGELOG.md
 CAPTAINS = {
     "captains/honeypot/*": ["test_06_decoys.py", "test_12_access.py"],
     "captains/iac/*": ["test_07_iac.py", "test_08_prs.py"],
-    "captains/prs/*": ["test_07_iac.py", "test_08_prs.py"],
+    "captains/prs/*": ["test_07_iac.py", "test_08_prs.py", "test_15_patch.py"],
+    "captains/patch/*": ["test_15_patch.py"],
     "captains/librarian/*": [],
     "examples/captain-hello/*": ["test_04_captains.py"],
 }

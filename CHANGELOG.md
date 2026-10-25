@@ -82,6 +82,13 @@ leaves when the state changes. [docs/inbox.md](docs/inbox.md).
   beside it, the pull request adds `compass-lockfile.yml`, which regenerates
   that lockfile on the branch with the ecosystem's own tool and commits it as
   Compass; `patch.lockfiles: "manifest-only"` leaves it to you.
+- The CLI and the MCP server: `compass patch findings|pr|ignore|feed`
+  (`compass_patch_findings`, `compass_patch_pr`, `compass_patch_ignore`,
+  `compass_patch_feed`) and `compass inbox|inbox act|inbox snooze`
+  (`compass_inbox`, `compass_inbox_act`, `compass_inbox_snooze`); `compass
+  status` prints a Patches line and the "Needs you" line; `/api/status` gains
+  a `patches` section. Two plugin skills, `compass-patch` and `compass-inbox`.
+  e2e: PAT-1 to PAT-3 in shard C.
 - A captain contributes items through `inbox=` in its manifest
   (`compass_core.inbox`, [docs/writing_a_captain.md](docs/writing_a_captain.md) §6.1);
   a product registers a source with `compass_api.extensions.register_inbox_source`.

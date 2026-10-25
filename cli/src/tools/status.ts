@@ -4,7 +4,7 @@ import { CLI_VERSION, SUPPORTED_API_VERSIONS } from "../version.js";
 export const statusTool = defineTool({
   name: "compass_status",
   description:
-    "One-screen brief of this Compass install: target and GitHub connection, infra scan state, findings by severity and domain, active jobs, open PRs, honeypots, usage and plan. Call this first in any session.",
+    "One-screen brief of this Compass install: target and GitHub connection, infra scan state, findings by severity and domain, active jobs, open PRs, honeypots, patches, what needs a person (the inbox line), usage and plan. Call this first in any session.",
   input: {},
   scope: "read",
   annotations: { readOnlyHint: true },
@@ -49,6 +49,9 @@ export const statusTool = defineTool({
     lines.push(`PRs opened by Compass: ${p.opened ?? 0}${p.pending ? ` (${p.pending} pending)` : ""}`);
     const h = s.honeypots || {};
     lines.push(`Honeypots: ${h.total ?? 0} (${Object.entries(h.by_status || {}).map(([k, v]) => `${v} ${k}`).join(", ") || "none"}), ${h.active_alerts ?? 0} active alerts`);
+    const pt = s.patches || {};
+    if (pt.open != null) lines.push(`Patches: ${pt.open} findings open, ${pt.exposed ?? 0} on exposed workloads, ${pt.pr_open ?? 0} pull requests waiting for merge, ${pt.deployed ?? 0} deployed${pt.feed_last_run ? "" : " (feeds not run yet)"}`);
+    if (s.inbox?.line) lines.push(`${s.inbox.line} · compass inbox`);
     const b = s.billing || {};
     if (b.plan) lines.push(`Plan: ${b.plan}`);
     if (s.errors && Object.keys(s.errors).length) lines.push(`Sections unavailable: ${Object.keys(s.errors).join(", ")}`);
