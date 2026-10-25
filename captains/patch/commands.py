@@ -7,6 +7,7 @@ from typing import Any, Dict
 
 from captains.patch import feed as _feed
 from captains.patch import inventory as _inventory
+from captains.patch import pr as _pr  # noqa: F401 - registers the PR watcher's status hook
 from compass_core import dispatch
 from compass_core.workspace import captain_config, resolve
 
@@ -103,7 +104,24 @@ def ignore(payload: Dict[str, Any]) -> Dict[str, Any]:
     return {"key": key, "state": row.get("state"), "ignored": row.get("ignored")}
 
 
+def pr(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Open or refresh the fix pull request of one repository now (`repo=`), or of every repository with pending findings."""
+    from captains.patch import scheduler
+
+    config, workspace_id = _config(payload)
+    advisories_store, store = scheduler.stores(config, workspace_id)
+    opener = _pr.PullRequestOpener(config, workspace_id=workspace_id, findings=store, advisories=advisories_store, model=scheduler._model(config))
+    repo = payload.get("repo")
+    if repo:
+        group = _pr.pending(store.list(), config).get(str(repo)) or []
+        if not group:
+            raise LookupError(f"no pending finding in {repo}: nothing a pull request would change")
+        result = opener.open(str(repo), group)
+        return result or {"repo": repo, "skipped": "nothing to change on the base branch"}
+    return opener.open_all()
+
+
 COMMANDS = {"feed_run": feed_run, "feed_status": feed_status, "feed_inject": feed_inject, "advisories": advisories, "inventory": inventory,
-            "tick": tick, "findings": findings, "approve": approve, "ignore": ignore}
+            "tick": tick, "findings": findings, "approve": approve, "ignore": ignore, "pr": pr}
 
 dispatch.register("patch", COMMANDS)

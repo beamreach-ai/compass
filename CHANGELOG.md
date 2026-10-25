@@ -62,6 +62,13 @@ leaves when the state changes. [docs/inbox.md](docs/inbox.md).
   or exposed, and nothing stands in the way of a plain bump; an inbox item per
   repository otherwise, approved with one click. `GET /api/patches`,
   `compass patch findings|tick|approve|ignore`. [docs/patching.md](docs/patching.md).
+- The fix pull requests: one per repository with every fix it needs, each a
+  version string moved to the one the advisory names (a docker-library tag, an
+  apt or apk pin, a layer version, a direct dependency's constraint), the body
+  with the findings, the changes, the verification and the rollback, labels,
+  the PR watcher keeping it alive, and the findings following the pull request
+  from `pr_open` to `merged` to `deployed`. `compass patch pr`,
+  `POST /api/patches/pr`.
 - A captain contributes items through `inbox=` in its manifest
   (`compass_core.inbox`, [docs/writing_a_captain.md](docs/writing_a_captain.md) §6.1);
   a product registers a source with `compass_api.extensions.register_inbox_source`.

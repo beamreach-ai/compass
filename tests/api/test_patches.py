@@ -40,7 +40,7 @@ def env(monkeypatch):
         nodes, edges = php_shop()
         from captains.patch import inventory as _inventory
 
-        report = scheduler.tick(CONFIG, workspace_id="ws-a", inventory=_inventory.collect(nodes, edges), advisories=advisories, findings=findings, now_ms=1000)
+        report = scheduler.tick(CONFIG, workspace_id="ws-a", inventory=_inventory.collect(nodes, edges), advisories=advisories, findings=findings, now_ms=1000, open_prs=False)
         enqueued = []
         monkeypatch.setattr(routes._queue_client, "enqueue", lambda **k: enqueued.append(k) or {"job_id": "j-1", "status": "queued"})
         app = FastAPI()

@@ -171,5 +171,18 @@ def run_feed(request: Request) -> Dict[str, Any]:
 
 @router.post("/api/patches/tick", status_code=202)
 def run_tick(request: Request) -> Dict[str, Any]:
-    """The match now."""
+    """The match now, and the pull requests it decides."""
     return _enqueue(request, "tick", "api")
+
+
+class RepoPayload(BaseModel):
+    repo: str
+
+
+@router.post("/api/patches/pr", status_code=202)
+def open_pr(request: Request, payload: RepoPayload) -> Dict[str, Any]:
+    """The fix pull request of one repository, now, as a job."""
+    workspace_id = get_actor_ids(request).get("workspace_id")
+    job = _queue_client.enqueue(captain="patch", command="pr", payload={"workspace_id": workspace_id, "repo": payload.repo, "trigger": "api"},
+                                session_id=f"patch-pr-{payload.repo}", enforce_single_active_session=True)
+    return {"job_id": job.get("job_id"), "status": job.get("status"), "command": "pr", "repo": payload.repo}

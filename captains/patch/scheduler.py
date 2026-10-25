@@ -32,8 +32,9 @@ def stores(config: Dict[str, Any], workspace_id: str) -> tuple:
 
 
 def tick(config: Dict[str, Any], *, workspace_id: str, inventory: Any = None, advisories: Optional[AdvisoryStore] = None,
-         findings: Optional[FindingStore] = None, now_ms: Optional[int] = None) -> Dict[str, Any]:
-    """One match: returns what changed and the summary the tab shows."""
+         findings: Optional[FindingStore] = None, now_ms: Optional[int] = None, open_prs: bool = True, opener: Any = None) -> Dict[str, Any]:
+    """One match, then the pull requests for what the policy or a person decided: returns what
+    changed and the summary the tab shows."""
     started = time.time()
     if advisories is None or findings is None:
         advisories, findings = stores(config, workspace_id)
@@ -41,12 +42,31 @@ def tick(config: Dict[str, Any], *, workspace_id: str, inventory: Any = None, ad
     topology = _match.Topology.from_graph(inventory.nodes, inventory.edges)
     found = _match.match(inventory, advisories.list(), topology)
     changes = findings.sync(found, config, now_ms=now_ms)
+    prs: Dict[str, Any] = {}
+    if open_prs:
+        from captains.patch.pr import PullRequestOpener
+
+        try:
+            opener = opener or PullRequestOpener(config, workspace_id=workspace_id, findings=findings, advisories=advisories, model=_model(config))
+            prs = opener.open_all(now_ms=now_ms)
+        except Exception as exc:  # noqa: BLE001 - the findings stand even when GitHub does not answer
+            logger.warning("patch pull requests not opened: %s", exc)
+            prs = {"error": f"{type(exc).__name__}: {exc}"[:300]}
     rows = findings.list()
     report = {"at": now_ms or int(time.time() * 1000), "seconds": round(time.time() - started, 2), "inventory": inventory.summary(),
-              "coverage": _match.coverage(inventory.nodes), "advisories": advisories.count(), "matched": len(found), "changes": changes, "summary": summary(rows)}
+              "coverage": _match.coverage(inventory.nodes), "advisories": advisories.count(), "matched": len(found), "changes": changes, "prs": prs, "summary": summary(rows)}
     findings.table.put_item(Item={"pk": findings.pk, "sk": patch_cursor_sort_key(LAST_TICK), "source": LAST_TICK, "value": report["at"],
                                   "report": _to_dynamo(report)})
     return report
+
+
+def _model(config: Dict[str, Any]) -> Any:
+    try:
+        from compass_core.llm import model_for
+
+        return model_for(config)
+    except Exception:  # noqa: BLE001 - no model is the open default
+        return None
 
 
 def last_tick(config: Dict[str, Any], *, workspace_id: str, findings: Optional[FindingStore] = None) -> Optional[Dict[str, Any]]:
