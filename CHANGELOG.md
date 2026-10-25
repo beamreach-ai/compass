@@ -5,7 +5,7 @@ workflow refuses a tag without one, and reads from it what the dashboard shows
 next to the Update button: the first paragraph is the summary, the bullets under
 `### After the update` are the notes an operator needs after applying it.
 
-## 0.9.0 — unreleased
+## 0.9.0 — 2026-10-25
 
 The inbox: everything that needs a person, as one list. `GET /api/inbox` derives
 it from state on every call (a parked decoy response, a grant to accept, a
