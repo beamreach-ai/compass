@@ -92,6 +92,8 @@ class Topology:
 
     repo_images: Dict[str, Set[str]] = field(default_factory=dict)         # repo full name -> ECR repository URIs
     image_workloads: Dict[str, List[Workload]] = field(default_factory=dict)   # ECR repository URI -> workloads running it
+    services: Dict[str, List[Dict[str, Any]]] = field(default_factory=dict)    # task definition id -> the services running it (node_id, name)
+    repo_workflows: Dict[str, List[Dict[str, Any]]] = field(default_factory=dict)   # repo -> its workflows (name, events, jobs, publishes)
 
     def workloads_for_repo(self, repo: Optional[str]) -> List[Workload]:
         if not repo:
@@ -107,7 +109,13 @@ class Topology:
         by_id = {n.resource_id: n for n in nodes}
         topology = cls()
         ecr_uri = {n.resource_id: str((n.attributes or {}).get("repositoryUri") or "") for n in by_id.values() if n.type == "ecr_repository"}
+        publishing: Set[str] = set()
         for edge in edges:
+            if edge.relationship_type == "uses_in":
+                a, b = by_id.get(edge.from_resource_id), by_id.get(edge.to_resource_id)
+                if a is not None and b is not None and {a.type, b.type} == {"ecs_task_definition", "ecs_service"}:
+                    td, svc = (a, b) if a.type == "ecs_task_definition" else (b, a)
+                    topology.services.setdefault(td.resource_id, []).append({"node_id": svc.resource_id, "name": svc.name, "exposed": bool((svc.attributes or {}).get("exposed"))})
             if edge.relationship_type != "publishes_image_to":
                 continue
             uri = ecr_uri.get(edge.to_resource_id)
@@ -115,6 +123,12 @@ class Topology:
             repo = (source.attributes or {}).get("repo") if source else None
             if uri and repo:
                 topology.repo_images.setdefault(str(repo), set()).add(uri)
+                publishing.add(edge.from_resource_id)
+        for node in by_id.values():
+            if node.type == "github_workflow" and (node.attributes or {}).get("repo"):
+                attrs = node.attributes or {}
+                topology.repo_workflows.setdefault(str(attrs["repo"]), []).append({"name": node.name, "events": list(attrs.get("events") or []), "jobs": list(attrs.get("jobs") or []),
+                                                                                 "publishes": node.resource_id in publishing})
         for node in by_id.values():
             if node.type != "ecs_task_definition":
                 continue

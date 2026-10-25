@@ -99,6 +99,54 @@ What it does not do yet: bump a Lambda runtime or an AMI, move a transitive
 dependency, or cross a major version; those findings wait in the inbox with
 the reason said.
 
+## What it verifies
+
+Three steps, each recorded on the finding and told to the pull request, each
+able to keep it from being called ready:
+
+1. **CI**: the repository's checks on the pull request's head, as the PR
+   watcher reads them. Red marks the pull request `needs_you` with the failing
+   check's name.
+2. **The image build**, where the fix touched a Dockerfile: the check of the
+   workflow that builds it. Compass has no Docker socket by design, so the
+   build runs where the repository builds. When no workflow of the repository
+   builds an image on pull requests, the pull request adds
+   `.github/workflows/compass-build.yml`, which builds each changed Dockerfile
+   with BuildKit and does not push; keep it or replace it with your own.
+3. **The canary**, when the workspace named a staging twin for the service and
+   the grant `patch.canary_deploy` is armed: a task definition revision with
+   the pull request's image (`pr-<sha>` in the production image's ECR
+   repository, pushed by your build workflow), the staging service updated to
+   it, steady state awaited, the target group's health path and your probe
+   paths fetched for the window and compared with what the service answered
+   before, 5xx and p95 latency compared with the five minutes before through
+   CloudWatch, then the staging service rolled back to its previous revision.
+   The result is a comment on the pull request. A failed canary marks the pull
+   request `needs_you` with `canary_failed`. Without a twin, a grant or a
+   `pr-<sha>` image the canary is skipped and the pull request says so; it is
+   still ready on CI and the build.
+
+### Naming a canary
+
+```json
+"patch": {
+  "canaries": {
+    "web": {"staging_service": "web-staging", "cluster": "staging", "probe_paths": ["/", "/health"], "minutes": 5,
+            "task_role_arns": ["arn:aws:iam::123456789012:role/web-task"]}
+  }
+}
+```
+
+The key is the production service's name on the map; `staging_service` is the
+twin's name in `cluster` (or its ARN). The first tick after this is saved
+proposes the grant `patch.canary_deploy` with statements scoped to exactly
+those staging services and clusters (`ecs:UpdateService` and
+`ecs:DescribeServices` on the twins, `ecs:RegisterTaskDefinition`,
+`iam:PassRole` on the named task roles, the load balancer and CloudWatch
+reads); accept it on the Access page or from the inbox, merge its pull request,
+and the canary runs from the next green pull request. The action never touches
+the service that serves traffic. See [access.md](access.md).
+
 ## States
 
 ```

@@ -115,7 +115,9 @@ def plan_sync(record: Dict[str, Any], snap: Dict[str, Any], *, settings: Dict[st
         "updated_at": snap.get("updated_at"),
         "mergeable_state": snap.get("mergeable_state"),
         "review_decision": snap.get("review_decision"),
-        "checks": {k: checks.get(k) for k in ("state", "total", "failed", "pending")},
+        # the counts, and the names with their status: the patch captain tells the image build apart by name
+        "checks": {**{k: checks.get(k) for k in ("state", "total", "failed", "pending")},
+                   "items": [{"name": i.get("name"), "status": i.get("status")} for i in (checks.get("items") or []) if isinstance(i, dict) and i.get("name")][:50]},
         "labels": list(snap.get("labels") or []),
         "auto_merge": bool(snap.get("auto_merge")),
         "draft": bool(snap.get("draft")),

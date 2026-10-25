@@ -76,7 +76,7 @@ def php_shop(*, web_tag="8.3.30-fpm", legacy_pin="=8.3.6-0ubuntu0.24.04.12", exp
     nodes = [
         _node("td-web", "ecs_task_definition", "web:41", td_entries, images=images, exposed=exposed),
         _node("ecr-web", "ecr_repository", "acme-web", repositoryUri=f"{ECR}/acme-web"),
-        _node("wf-web", "github_workflow", "build", repo="acme/web"),
+        _node("wf-web", "github_workflow", "build", repo="acme/web", events=["pull_request", "push"], jobs=["build"]),
         _node("f-web", "github_dockerfile", "web/Dockerfile", web, repo="acme/web", path="Dockerfile"),
         _node("f-web-lock", "github_lockfile", "web/composer.lock", lock, repo="acme/web", path="composer.lock"),
         _node("f-legacy", "github_dockerfile", "legacy/Dockerfile", legacy, repo="acme/legacy", path="Dockerfile"),
@@ -195,7 +195,7 @@ def test_findings_open_refresh_close_deploy_and_remember_a_persons_decisions(sto
     nodes, edges = php_shop()
     config = {"patch": {}}
     first = store.sync(run_match(nodes, edges, [php2shell()]), config, now_ms=1000)
-    assert first == {"opened": 6, "refreshed": 0, "reopened": 0, "closed": 0, "deployed": 0, "total": 6}
+    assert first == {"opened": 6, "refreshed": 0, "reopened": 0, "closed": 0, "deployed": 0, "total": 6, "deployed_rows": []}
     rows = {r["node_id"]: r for r in store.list()}
     web, legacy, fn2 = rows["f-web"], rows["f-legacy"], rows["fn-2"]
     assert web["state"] == "open" and web["verdict"] == "pr" and web["first_seen"] == 1000 and "faces the internet" in " ".join(web["verdict_reasons"])

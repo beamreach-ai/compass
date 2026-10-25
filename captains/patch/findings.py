@@ -111,6 +111,7 @@ class FindingStore:
         existing = {str(r["key"]): r for r in self.list()}
         seen: set = set()
         opened = refreshed = closed = deployed = reopened = 0
+        deployed_rows: List[Dict[str, Any]] = []
         for finding in findings:
             seen.add(finding.key)
             verdict, reasons = decide(finding, config)
@@ -151,9 +152,11 @@ class FindingStore:
             self.put({**row, "state": new_state, f"{new_state}_at": now, "updated_at": now})
             if new_state == "deployed":
                 deployed += 1
+                deployed_rows.append(row)
             else:
                 closed += 1
-        return {"opened": opened, "refreshed": refreshed, "reopened": reopened, "closed": closed, "deployed": deployed, "total": len(seen)}
+        return {"opened": opened, "refreshed": refreshed, "reopened": reopened, "closed": closed, "deployed": deployed, "total": len(seen),
+                "deployed_rows": [{k: r.get(k) for k in ("key", "advisory_id", "node_name", "repo", "pr")} for r in deployed_rows]}
 
 
 def summary(rows: Iterable[Dict[str, Any]]) -> Dict[str, Any]:

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
+from captains.patch import actions as _actions  # noqa: F401 - registers patch.canary_deploy
 from captains.patch import feed as _feed
 from captains.patch import inventory as _inventory
 from captains.patch import pr as _pr  # noqa: F401 - registers the PR watcher's status hook

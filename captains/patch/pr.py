@@ -155,7 +155,7 @@ class PullRequestOpener:
 
     def __init__(self, config: Mapping[str, Any], *, workspace_id: str, findings: FindingStore, advisories: Optional[AdvisoryStore] = None,
                  github_client: Any = None, token_for_repo: Any = None, registry: Any = None, model: Any = None, http: Any = None,
-                 now: Optional[datetime] = None):
+                 now: Optional[datetime] = None, topology: Any = None):
         self.config = config
         self.workspace_id = workspace_id
         self.findings = findings
@@ -166,6 +166,7 @@ class PullRequestOpener:
         self.model = model
         self.http = http
         self.now = now or datetime.now(timezone.utc)
+        self.topology = topology
 
     def _repo(self, repo: str) -> Any:
         if self._github_client is not None:
@@ -244,6 +245,23 @@ class PullRequestOpener:
         if not edits:
             return None
         by_file = _fixes.group_by_file(edits)
+        # the image must build before the fix is called ready: a minimal workflow when the repository has none that does
+        from captains.patch import verify as _verify
+
+        dockerfiles = [p for p in by_file if _verify.is_dockerfile(p)]
+        workflows = (self.topology.repo_workflows.get(repo, []) if self.topology is not None else [])
+        added_workflow = None
+        if dockerfiles and not _verify.repo_builds_on_pull_requests(workflows):
+            workflow_path = f".github/workflows/{_verify.BUILD_WORKFLOW}.yml"
+            try:
+                existing = gh_repo.get_contents(workflow_path, ref=base_branch).decoded_content.decode("utf-8", errors="replace")
+            except Exception:  # noqa: BLE001 - 404: the repository has none
+                existing = ""
+            content = _verify.build_workflow(dockerfiles)
+            if existing != content:
+                added_workflow = _fixes.Edit(path=workflow_path, before=existing, after=content, strategy="build_workflow",
+                                             description="a workflow that builds the changed Dockerfile on pull requests (the repository had none)")
+                by_file[workflow_path] = added_workflow
         files = sorted(by_file)
         advisories = [a for a in (self.advisories.get(str(f.get("advisory_id"))) for f in applied) if a] if self.advisories is not None else []
         text = body(repo, applied, by_file, explanation=explanation(self.model, applied, advisories))
@@ -251,7 +269,7 @@ class PullRequestOpener:
         title = f"Security: {', '.join(ids[:2])}{f' and {len(ids) - 2} more' if len(ids) > 2 else ''} — {', '.join(sorted({str(f.get('package')) for f in applied})[:3])}"
         ensure_branch(gh_repo, branch, base_branch)
         commit_files(gh_repo, branch, {path: edit.after for path, edit in by_file.items()},
-                     add_message="compass: add {path} for the security patch", update_message="compass: {path} to the fixed versions")
+                     add_message="compass: security patch, add {path}", update_message="compass: security patch, {path}")
         published = open_or_update_pr(gh_repo, branch=branch, base_branch=base_branch, title=title, body=text)
         labels = list(LABELS) + ([EXPLOITED_LABEL] if any(f.get("kev") for f in applied) else [])
         try:
@@ -264,8 +282,16 @@ class PullRequestOpener:
                                intent=intent_for_patch(repo, applied, files), branch=branch, base_branch=base_branch, title=title)
         pr_record = {"url": published.url, "number": published.number, "branch": branch, "base_branch": base_branch, "repo": repo, "opened_at": int(time.time() * 1000),
                      "files": files, "labels": labels, "updated": published.updated}
+        previous = {str(f.get("key")): dict((f.get("pr") or {}).get("verification") or {}) for f in applied}
         for finding in applied:
-            self.findings.set_pr(str(finding["key"]), state="pr_open", pr=pr_record)
+            verification = previous.get(str(finding["key"])) or {}
+            self.findings.set_pr(str(finding["key"]), state="pr_open", pr={**pr_record, **({"verification": verification} if verification else {})})
+        if not published.updated:
+            from captains.patch import notify as _notify
+
+            _notify.emit(dict(self.config), self.workspace_id, "patch.pr_opened", {"repo": repo, "number": published.number, "url": published.url, "advisories": ", ".join(ids),
+                                                                                  "kev": any(f.get("kev") for f in applied), "exposed": any(f.get("exposed") for f in applied),
+                                                                                  "findings": len(applied)})
         try:
             from compass_core import inbox
 

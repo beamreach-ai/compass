@@ -5,8 +5,9 @@ The canary's action and the reads it needs join the permissions when verificatio
 
 from __future__ import annotations
 
+from captains.mapper.permissions import INVENTORY_READS
 from compass_core import __version__
-from compass_core.captains import CaptainManifest, Permissions, ServiceSpec, TabSpec
+from compass_core.captains import AwsPermissions, CaptainManifest, Permissions, ServiceSpec, TabSpec
 
 CONFIG_SCHEMA = {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -26,6 +27,9 @@ CONFIG_SCHEMA = {
         },
         "repos": {"type": "array", "items": {"type": "string"}, "x-order": 2, "x-help": "Repositories the captain may open pull requests in; empty means every repository the mapper sees."},
         "max_open_prs": {"type": "integer", "minimum": 0, "default": 10, "x-order": 3, "x-help": "Open fix pull requests at a time; beyond it, findings wait in the inbox."},
+        "canaries": {"type": "object", "x-order": 4, "x-group": "Canary", "additionalProperties": True,
+                     "x-help": "Per production service name: {\"staging_service\": \"web-staging\", \"cluster\": \"staging\", \"probe_paths\": [\"/\", \"/health\"], \"minutes\": 5}. "
+                               "The fix's image runs on the twin for the window and is probed, through the grant patch.canary_deploy."},
     },
 }
 
@@ -44,7 +48,8 @@ MANIFEST = CaptainManifest(
     inbox="captains.patch.inbox:items",
     config_schema=CONFIG_SCHEMA,
     permissions=Permissions(
-        github=("contents:read",),
+        aws=AwsPermissions(read=INVENTORY_READS, actions=("patch.canary_deploy",)),
+        github=("contents:write", "pull_requests:write"),
         egress=("api.osv.dev", "osv-vulnerabilities.storage.googleapis.com", "raw.githubusercontent.com", "www.cisa.gov", "api.first.org",
                 "ubuntu.com", "security-tracker.debian.org", "secdb.alpinelinux.org", "explore.alas.aws.amazon.com", "packagist.org", "registry.npmjs.org"),
     ),

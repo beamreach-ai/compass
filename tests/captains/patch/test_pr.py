@@ -149,6 +149,12 @@ def test_php2shell_opens_one_pull_request_per_repository_with_the_golden_diff(wo
     assert web["branch"] == "beamreach/patch/20261022-" + __import__("hashlib").sha1(b"acme/web").hexdigest()[:6] and web["files"] == ["Dockerfile"] and web["findings"] == 1
     assert github.branches[("acme/web", web["branch"], "Dockerfile")] == "FROM php:8.3.36-fpm\nRUN apt-get update && apt-get install -y libzip-dev\n"
     assert github.branches[("acme/legacy", opened["acme/legacy"]["branch"], "Dockerfile")] == "FROM ubuntu:24.04\nRUN apt-get install -y php8.3-fpm=8.3.6-0ubuntu0.24.04.13 nginx\n"
+    # acme/web's workflow builds on pull requests; acme/legacy has none, so its pull request adds the minimal one
+    assert opened["acme/legacy"]["files"] == [".github/workflows/compass-build.yml", "Dockerfile"]
+    workflow = github.branches[("acme/legacy", opened["acme/legacy"]["branch"], ".github/workflows/compass-build.yml")]
+    assert workflow.startswith("# Added by Compass") and 'file: "Dockerfile", context: "."' in workflow
+    assert "`.github/workflows/compass-build.yml`: a workflow that builds the changed Dockerfile" in github.pulls[("acme/legacy", opened["acme/legacy"]["number"])].body
+    assert registry.get("acme/legacy", opened["acme/legacy"]["number"])["intent"]["scope"]["files"] == [".github/workflows/compass-build.yml", "Dockerfile"]
     pull = github.pulls[("acme/web", web["number"])]
     assert pull.title == "Security: CVE-2026-109618 — php"
     assert "php2shell lets a crafted multipart request" in pull.body and "| [CVE-2026-109618](https://nvd.nist.gov/vuln/detail/CVE-2026-109618) CVSS 9.2 | php | 8.3.30 → 8.3.36 | web:41 (internet-facing) |" in pull.body
@@ -164,7 +170,7 @@ def test_php2shell_opens_one_pull_request_per_repository_with_the_golden_diff(wo
     commits = len(github.commits)
     again = tick(advisories, findings, opener, nodes, edges, now_ms=2000)
     assert again["prs"]["opened"] == [] and {r["repo"] for r in again["prs"]["updated"]} == {"acme/web", "acme/legacy"} and len(github.pulls) == 2
-    assert len(github.commits) == commits + 2, "the files are rewritten from the base; the content is the same"
+    assert len(github.commits) == commits + 3, "the files are rewritten from the base; the content is the same"
 
 
 def test_a_new_finding_lands_on_the_open_pull_request_and_kev_adds_its_label(world):

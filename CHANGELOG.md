@@ -69,6 +69,15 @@ leaves when the state changes. [docs/inbox.md](docs/inbox.md).
   the PR watcher keeping it alive, and the findings following the pull request
   from `pr_open` to `merged` to `deployed`. `compass patch pr`,
   `POST /api/patches/pr`.
+- Verification of the fix pull requests: CI from the PR watcher's checks, the
+  image build through the repository's own workflow (a minimal
+  `compass-build.yml` added by the pull request when the repository has none),
+  and a canary as the granted action `patch.canary_deploy`: the pull request's
+  image run on a named staging twin for a few minutes, probed, compared, rolled
+  back, the result a comment on the pull request and a `needs_you` on failure.
+  Notifications `patch.pr_opened`, `patch.needs_human`, `patch.deployed`
+  through today's routing (`patch.*`). The PR watcher's record now keeps each
+  check's name with its status.
 - A captain contributes items through `inbox=` in its manifest
   (`compass_core.inbox`, [docs/writing_a_captain.md](docs/writing_a_captain.md) §6.1);
   a product registers a source with `compass_api.extensions.register_inbox_source`.

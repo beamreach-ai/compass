@@ -17,8 +17,26 @@ type Finding = {
   key: string; id: string; advisory_id: string; node_id: string; node_type: string; node_name: string; package: string; version?: string | null;
   fixed_version?: string | null; fixed?: string[]; release?: string | null; repo?: string | null; path?: string | null; evidence?: string; relation?: string;
   workloads: Workload[]; exposed: boolean; blockers: string[]; note?: string | null; cvss?: number | null; severity?: string | null; kev: boolean;
-  epss?: number | null; summary?: string; state: string; verdict: string; verdict_reasons?: string[]; first_seen?: number; pr?: { url?: string; number?: number } | null;
+  epss?: number | null; summary?: string; state: string; verdict: string; verdict_reasons?: string[]; first_seen?: number;
+  pr?: { url?: string; number?: number; verification?: Verification | null } | null;
 };
+type Step = { status: string; detail?: string };
+type Verification = { ci?: Step; build?: Step; canary?: Step & { staging_service?: string }; ready?: boolean };
+const STEP_MARK: Record<string, string> = { passed: "✓", "n/a": "–", skipped: "–", pending: "…", failed: "✗", missing: "✗", configured: "…", unknown: "?" };
+const STEP_TONE: Record<string, string> = { passed: "text-green-700", failed: "text-red-700", missing: "text-red-700", pending: "text-amber-700", configured: "text-amber-700" };
+
+function VerificationLine({ v }: { v?: Verification | null }) {
+  if (!v) return null;
+  const steps: Array<[string, Step | undefined]> = [["CI", v.ci], ["build", v.build], ["canary", v.canary]];
+  return (
+    <div className="mt-1 flex flex-wrap gap-x-2 text-[11px]" data-verification={v.ready ? "ready" : "pending"}>
+      {steps.map(([label, s]) => (
+        <span key={label} className={STEP_TONE[s?.status || ""] || "text-gray-500"} title={s?.detail || ""}>{label} {STEP_MARK[s?.status || "unknown"] || s?.status}</span>
+      ))}
+      {v.ready && <span className="font-medium text-green-700">ready</span>}
+    </div>
+  );
+}
 type SourceStatus = { cursor?: unknown; last_success?: string | null; updated_at?: number | null };
 type Payload = {
   summary: Record<string, number> & { by_repo?: Record<string, number> };
@@ -78,6 +96,7 @@ function Row({ f, readOnly, onChanged }: { f: Finding; readOnly: boolean; onChan
           <div className={`font-medium ${STATE[f.state] || ""}`}>{STATE_LABEL[f.state] || f.state}</div>
           <div className="text-gray-500">{f.verdict === "pr" ? "pull request without a click" : "waits for a person"}</div>
           {f.pr?.url && <a href={f.pr.url} target="_blank" rel="noopener noreferrer" className="text-blue-700 hover:underline" onClick={(e) => e.stopPropagation()}>#{f.pr.number}</a>}
+          {(f.state === "pr_open" || f.state === "merged") && <VerificationLine v={f.pr?.verification} />}
         </td>
         <td className="px-3 py-2 text-right text-xs text-gray-400" title={f.first_seen ? new Date(f.first_seen).toISOString() : ""}>{f.first_seen ? relativeTime(f.first_seen) : ""}</td>
       </tr>
