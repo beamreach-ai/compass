@@ -70,16 +70,16 @@ def test_cap_3_dependencies_are_asked_about_and_switched_together(stack, page):
     dialogs = []
     page.on("dialog", lambda dialog: (dialogs.append(dialog.message), dialog.accept()))
     _settings(page)
-    _row(page, "Infra map").get_by_role("switch").click()  # Decoys, Code-as-cloud and the Librarian need it
+    _row(page, "Infra map").get_by_role("switch").click()  # Decoys, Code-as-cloud, the Librarian and Patches need it
     page.wait_for_function("() => document.querySelector('[aria-label=\"Infra map off\"]') !== null")
     assert dialogs and "depend" in dialogs[-1]
     captains = _captains(stack)
-    assert not any(captains[n]["active"] for n in ("mapper", "honeypot", "iac", "librarian"))
+    assert not any(captains[n]["active"] for n in ("mapper", "honeypot", "iac", "librarian", "patch"))
 
     _row(page, "Decoys").get_by_role("switch").click()  # needs the map: asks to turn it on too
     page.wait_for_function("() => document.querySelector('[aria-label=\"Decoys on\"]') !== null")
     assert "turned on" in dialogs[-1]
-    for name in ("iac", "librarian"):
+    for name in ("iac", "librarian", "patch"):
         stack.api.post(f"/api/captains/{name}/enable", json={"with_dependencies": True}).raise_for_status()
     assert all(c["active"] for n, c in _captains(stack).items() if n in SHIPPED)
 

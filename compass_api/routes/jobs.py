@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -39,6 +40,17 @@ class JobSummary(BaseModel):
     events: List[JobEvent] = Field(default_factory=list)
 
 
+def _native(value: Any) -> Any:
+    """The table's Decimals as the numbers they were: pydantic would write them as strings."""
+    if isinstance(value, Decimal):
+        return int(value) if value == value.to_integral_value() else float(value)
+    if isinstance(value, dict):
+        return {k: _native(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_native(v) for v in value]
+    return value
+
+
 def _summary(job: Dict[str, Any]) -> JobSummary:
     """A job record as the API shows it; an inline run (no jobs table) lacks the
     timestamps a stored record has."""
@@ -46,7 +58,7 @@ def _summary(job: Dict[str, Any]) -> JobSummary:
 
     now = int(time.time() * 1000)
     record = {"queue": "inline", "created_at": now, "updated_at": now, "events": [], **{k: v for k, v in job.items() if v is not None or k in ("error",)}}
-    return JobSummary(**record)
+    return JobSummary(**_native(record))
 
 
 class StartJobPayload(BaseModel):
@@ -85,7 +97,7 @@ def list_jobs(request: Request, limit: int = Query(default=50, ge=1, le=500)) ->
     ensure_feature_enabled("queue", detail="Queue is disabled in this environment.")
     actor_ids = get_actor_ids(request)
     jobs = queue_client.list_jobs(limit=limit, workspace_id=actor_ids["workspace_id"])
-    return [JobSummary(**job) for job in jobs]
+    return [JobSummary(**_native(job)) for job in jobs]
 
 
 @router.get("/api/jobs/{job_id}", response_model=JobSummary)
@@ -95,7 +107,7 @@ def get_job(job_id: str, request: Request) -> JobSummary:
     job = queue_client.get_job(job_id, workspace_id=actor_ids["workspace_id"])
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    return JobSummary(**job)
+    return JobSummary(**_native(job))
 
 
 @router.post("/api/jobs/{job_id}/restart", response_model=JobSummary)

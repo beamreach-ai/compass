@@ -174,7 +174,7 @@ function Row({ item, onOutcome, readOnly }: { item: InboxItem; onOutcome: (o: Ou
   };
 
   return (
-    <li data-inbox-item={item.id} data-inbox-kind={item.kind} className={`rounded-lg border border-l-4 bg-white ${STRIPE[item.severity] || STRIPE.info}`}>
+    <li data-inbox-item={item.id} data-inbox-kind={item.kind} data-inbox-verb={item.verb} className={`rounded-lg border border-l-4 bg-white ${STRIPE[item.severity] || STRIPE.info}`}>
       <div className="flex items-start gap-3 px-4 py-3">
         <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open} aria-label={open ? "Hide detail" : "Show detail"} className="mt-0.5 shrink-0 rounded p-0.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700">
           <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" className={`transition-transform ${open ? "rotate-90" : ""}`}><path d="M7 5l6 5-6 5V5z" /></svg>

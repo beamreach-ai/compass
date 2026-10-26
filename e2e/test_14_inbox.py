@@ -99,7 +99,8 @@ def test_inb_4_the_whole_feed_opens_from_the_total_and_the_phone_shows_it_on_the
     kinds = feed.locator("[data-inbox-item]").evaluate_all("rows => rows.map(r => r.dataset.inboxKind)")
     assert kinds[0] == "job.failed" and "setup.incomplete" in kinds[1:], kinds  # the job just failed; the install-time item is behind it
     page.get_by_role("button", name="Fix", exact=False).click()
-    assert all(k == "job.failed" for k in feed.locator("[data-inbox-item]").evaluate_all("rows => rows.map(r => r.dataset.inboxKind)"))
+    rows = feed.locator("[data-inbox-item]").evaluate_all("rows => rows.map(r => [r.dataset.inboxKind, r.dataset.inboxVerb])")
+    assert rows and all(verb == "fix" for _, verb in rows) and "job.failed" in [kind for kind, _ in rows], rows
     phone_page.open("/workspace?tab=maps")
     badge = phone_page.locator("button[aria-label='Open menu'] [data-inbox-total]")
     badge.wait_for()
