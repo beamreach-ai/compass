@@ -20,6 +20,8 @@ x-e2e-env: &e2e-env
   COMPASS_CATALOG_URL: http://fakes:9000/catalog.json
   # the patch captain's test-only door: an advisory put in the store by hand (e2e/test_15_patch.py)
   COMPASS_PATCH_INJECT: "1"
+  # and the live feeds never reach the stack: the cve-feed service is off, advisories come through that door
+  COMPASS_CVE_FEED: "0"
 
 services:
   moto:

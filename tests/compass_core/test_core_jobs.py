@@ -89,3 +89,26 @@ def test_the_newest_jobs_are_listed_whatever_their_ids(monkeypatch):
                                  "captain": "prs", "command": "sync", "status": "completed", "created_at": 1000 + n, "updated_at": 1000 + n})
         newest = store.list_jobs(limit=5, workspace_id="ws")
         assert [j["created_at"] for j in newest] == [1039, 1038, 1037, 1036, 1035]
+
+
+def test_a_payload_with_a_float_lands_on_the_table(monkeypatch):
+    """An injected advisory carries a CVSS score; DynamoDB takes no float, and the API answered 500."""
+    from decimal import Decimal
+
+    import boto3
+    from moto import mock_aws
+
+    from compass_core import commands
+    from compass_core.jobs import store_for
+
+    monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "testing")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "testing")
+    config = {"dynamodb_config": {"workspace_id": "ws", "jobs": "compass_jobs_ws"}}
+    with mock_aws():
+        commands.create_tables(config, client=boto3.client("dynamodb", region_name="us-east-1"))
+        store = store_for(config)
+        job = store.create_job(captain="patch", command="feed_inject", payload={"workspace_id": "ws", "advisory": {"id": "CVE-2026-1", "cvss": 9.2, "affected": [{"ranges": [0.5]}]}},
+                               queue="compass", workspace_id="ws")
+        stored = store.get_job(job["job_id"], workspace_id="ws")
+        assert stored["payload"]["advisory"]["cvss"] == Decimal("9.2") and stored["payload"]["advisory"]["affected"][0]["ranges"] == [Decimal("0.5")]

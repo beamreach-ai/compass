@@ -71,7 +71,7 @@ def test_demo_1_the_world_is_seeded_beside_the_account_and_a_rescan_leaves_it_al
     after = _graph(stack)
     synthetic = _synthetic(after)
     assert len(synthetic) == sum(1 for n in after["nodes"] if n["resource_id"] not in real), "every new node is synthetic"
-    assert len(synthetic) > 500 and all(n.get("account_id") == fixture.ACCOUNT for n in synthetic if n.get("resource_type") not in ("github_repo", "tf_root_module", "tf_state_file", "tf_state_instance"))
+    assert len(synthetic) > 500 and all(n.get("account_id") == fixture.ACCOUNT for n in synthetic if n.get("resource_type") not in ("github_repo", "github_dockerfile", "tf_root_module", "tf_state_file", "tf_state_instance"))
     assert real <= {n["resource_id"] for n in after["nodes"]}, "the scanned account is still there"
     coverage = stack.api.get("/api/iac/coverage").json() if stack.api.get("/api/iac/coverage").status_code == 200 else None
     if coverage is not None:

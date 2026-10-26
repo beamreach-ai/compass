@@ -136,10 +136,10 @@ def _native(value: Any) -> Any:
 
 
 def _ms(value: Any) -> int:
-    """An epoch ms from an epoch (s or ms), an ISO-8601 string, or nothing (0)."""
+    """An epoch ms from an epoch (s or ms, a Decimal when it comes off a table), an ISO-8601 string, or nothing (0)."""
     if value in (None, "", 0):
         return 0
-    if isinstance(value, (int, float)) or (isinstance(value, str) and value.strip().lstrip("-").isdigit()):
+    if isinstance(value, (int, float, Decimal)) or (isinstance(value, str) and value.strip().lstrip("-").isdigit()):
         number = float(value)
         return int(number if number > 1e11 else number * 1000)
     if isinstance(value, str):

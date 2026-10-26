@@ -28,10 +28,10 @@ def test_inb_1_a_failed_job_and_a_missing_model_are_items_with_their_actions(sta
     assert [a["key"] for a in item["actions"]] == ["retry", "acknowledge", "open"]
     assert item["actions"][0]["path"] == f"/api/jobs/{failed['job_id']}/restart"
     assert feed["counts"]["by_tab"]["queue"] >= 1 and feed["counts"]["urgent"] >= 1
-    # the stack runs without a model: an info item on the Settings tab, newest first means it is last
+    # the stack runs without a model: an info item on the Settings tab since the install, so newest first puts it after the job
     model = by_id.get("setup.incomplete:model")
     assert model and model["severity"] == "info" and model["tab"] == "settings"
-    assert feed["items"][-1]["id"] == "setup.incomplete:model"
+    assert feed["items"].index(model) > feed["items"].index(item)
     assert [i["since"] for i in feed["items"]] == sorted((i["since"] for i in feed["items"]), reverse=True)
     assert [i["id"] for i in _inbox(stack, tab="queue")["items"]] == [i["id"] for i in feed["items"] if i["tab"] == "queue"]
     status = stack.api.get("/api/status").json()["inbox"]
@@ -97,7 +97,7 @@ def test_inb_4_the_whole_feed_opens_from_the_total_and_the_phone_shows_it_on_the
     feed = page.locator("[data-inbox-feed='all']")
     feed.locator("[data-inbox-item]").first.wait_for()
     kinds = feed.locator("[data-inbox-item]").evaluate_all("rows => rows.map(r => r.dataset.inboxKind)")
-    assert kinds[0] == "job.failed" and kinds[-1] == "setup.incomplete", kinds
+    assert kinds[0] == "job.failed" and "setup.incomplete" in kinds[1:], kinds  # the job just failed; the install-time item is behind it
     page.get_by_role("button", name="Fix", exact=False).click()
     assert all(k == "job.failed" for k in feed.locator("[data-inbox-item]").evaluate_all("rows => rows.map(r => r.dataset.inboxKind)"))
     phone_page.open("/workspace?tab=maps")

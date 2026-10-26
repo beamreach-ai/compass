@@ -354,6 +354,6 @@ read-only test (AUT-5) keeps `READ_ONLY=1` as its own thing.
 
 | ID | Test | Via |
 |---|---|---|
-| PAT-1 | php2shell injected into the feed's store (`patch feed_inject`, behind `COMPASS_PATCH_INJECT=1`); the tick writes the finding on the fixture repository's `services/web/Dockerfile` (php 8.3.30 → 8.3.36, severe enough on its own, not exposed); the fix pull request opens on the fake GitHub with the golden diff, the build workflow the repository lacked, the body and the watcher's record; the Patches tab shows it | API, UI |
+| PAT-1 | php2shell injected into the feed's store (`patch feed_inject`, behind `COMPASS_PATCH_INJECT=1`; the stack's `cve-feed` service is off, `COMPASS_CVE_FEED=0`, so no live feed reaches it); the tick writes the finding on the fixture repository's `services/web/Dockerfile` (php 8.3.30 → 8.3.36, severe enough on its own, not exposed); the fix pull request opens on the fake GitHub with the golden diff, the build workflow the repository lacked, the body and the watcher's record; the Patches tab shows it | API, UI |
 | PAT-2 | A Laravel advisory below every trigger waits in the inbox as `patch.approve`; approving it from the item's action lands the composer.json bump on the repository's open pull request | API |
 | PAT-3 | Merging the pull request in the fake and syncing moves the findings to `merged`; a rescan sees 8.3.36 and the next tick marks them `deployed`; `/api/status` says so | API |

@@ -7,7 +7,7 @@ import time
 
 import pytest
 
-SHIPPED = {"mapper", "librarian", "honeypot", "iac", "prs"}
+SHIPPED = {"mapper", "librarian", "honeypot", "iac", "prs", "patch"}
 HELLO = {"name": "hello", "label": "Hello", "summary": "Says hello: the end-to-end suite's example captain.", "tier": "open",
          "tags": ["example"], "version": "0.1.0", "requires_core": ">=0.2,<1", "pip": "compass-captain-hello==0.1.0"}
 BROKEN = {**HELLO, "name": "broken", "label": "Broken", "summary": "A pin that does not exist.", "pip": "compass-captain-broken==9.9.9"}
@@ -45,8 +45,8 @@ def test_cap_1_the_installed_list_shows_the_shipped_captains_on(stack, page):
     assert SHIPPED <= set(captains) and all(captains[n]["active"] for n in SHIPPED)
     _settings(page)
     switches = page.locator("#settings-captains ~ section [role=switch]")
-    assert switches.count() == 5
-    assert all(switches.nth(i).get_attribute("aria-checked") == "true" for i in range(5))
+    assert switches.count() == len(SHIPPED)
+    assert all(switches.nth(i).get_attribute("aria-checked") == "true" for i in range(len(SHIPPED)))
 
 
 def test_cap_2_a_captain_turned_off_loses_its_tab_and_its_work_until_it_is_on_again(stack, page):

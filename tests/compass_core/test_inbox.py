@@ -3,6 +3,8 @@ the state changes (docs/specs/one-inbox.md §3.3, §5)."""
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 import boto3
 import pytest
 from moto import mock_aws
@@ -138,12 +140,12 @@ def test_pull_requests_with_a_pending_revision_or_needing_a_human(table):
 
 
 def test_the_newest_failed_job_per_command_is_urgent_until_a_newer_one_completes_or_it_is_acknowledged(table):
-    jobs = [{"job_id": "j3", "captain": "mapper", "command": "run", "status": "failed", "error": "AccessDenied on ec2:DescribeInstances", "updated_at": T0 + 300,
+    jobs = [{"job_id": "j3", "captain": "mapper", "command": "run", "status": "failed", "error": "AccessDenied on ec2:DescribeInstances", "updated_at": Decimal(T0 + 300),  # as the jobs table returns it
              "events": [{"message": f"e{i}"} for i in range(8)]},
             {"job_id": "j2", "captain": "mapper", "command": "run", "status": "failed", "error": "older", "updated_at": T0 + 200},
             {"job_id": "j1", "captain": "prs", "command": "sync", "status": "dead", "updated_at": T0 + 100}]
     items = by_kind(ctx(table, jobs=jobs), "job.failed")
-    assert [i["id"] for i in items] == ["job.failed:j3", "job.failed:j1"]
+    assert [i["id"] for i in items] == ["job.failed:j3", "job.failed:j1"] and items[0]["since"] == T0 + 300
     assert items[0]["severity"] == "urgent" and items[0]["title"] == "mapper.run failed" and items[0]["summary"].startswith("AccessDenied")
     assert len(items[0]["detail"]["events"]) == 5
     assert items[1]["title"] == "prs.sync died"
