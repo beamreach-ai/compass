@@ -260,7 +260,7 @@ def test_the_first_run_is_current_in_one_pass_from_the_inventory_and_the_catalog
     php = store.get(PHP2SHELL)
     assert php.cvss == 9.2 and php.severity == "critical" and php.kev == {"added": "2026-10-22", "due": "2026-11-12", "ransomware": False}
     assert php.epss == {"score": 0.4312, "percentile": 0.973, "date": "2026-10-22"}
-    assert php.summary.startswith("php2shell") and "calif.io" in " ".join(php.references)
+    assert php.summary.startswith("php2shell") and "https://calif.io/php2shell/" in php.references
     by_source = {}
     for entry in php.affected:
         by_source.setdefault(entry.source, []).append(entry)
