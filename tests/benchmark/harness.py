@@ -9,6 +9,7 @@ GraphStore adapters live next to it once the interface exists.
 
 from __future__ import annotations
 
+import gc
 import json
 import os
 import resource
@@ -41,6 +42,9 @@ class Adapter(Protocol):
 
 
 def _timed(fn: Callable[[], Any]) -> tuple[float, Any]:
+    # the clock starts after a full collection: this process holds two worlds as dataclasses and
+    # a pass over them takes 100 to 400 ms, which fell inside a single 40 ms read on CI
+    gc.collect()
     start = time.perf_counter()
     out = fn()
     return time.perf_counter() - start, out

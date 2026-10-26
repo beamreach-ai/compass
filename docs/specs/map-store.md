@@ -842,7 +842,9 @@ which is what a daily scan looks like.
 ### 10.2 Metrics
 
 For each store and scale, in a fresh process, with `tracemalloc` off and
-`resource.getrusage` for peak RSS:
+`resource.getrusage` for peak RSS; every measurement starts after a full
+garbage collection, so a pass over the worlds the process holds never lands
+inside a read:
 
 | Metric | What is measured |
 |---|---|
