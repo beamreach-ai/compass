@@ -1,10 +1,28 @@
 {
   "schema": 1,
   "channels": {
-    "stable": "0.8.0",
-    "prerelease": "0.8.0"
+    "stable": "0.9.0",
+    "prerelease": "0.9.0"
   },
   "releases": [
+    {
+      "version": "0.9.0",
+      "published_at": "2026-10-26T18:52:33Z",
+      "notes_url": "https://github.com/beamreach-ai/compass/releases/tag/v0.9.0",
+      "summary": "The inbox: everything that needs a person, as one list. `GET /api/inbox` derives it from state on every call (a parked decoy response, a grant to accept, a decoy waiting for its merge or its arm, a pull request with a revision to approve or that the watcher gave up on, a failed job, an access finding, an available update, an incomplete setup), newest first, each item carrying the routes that act on it. Nothing is stored and nothing is marked read: an item leaves when the state changes. [docs/inbox.md](docs/inbox.md).",
+      "images": {
+        "compass": "sha256:18904f735f35031e78f6d671f7318aa0c7398445182374058949eda278f82229",
+        "compass-dashboard": "sha256:35bed7559bf7f4b75f71ea63fe460dcd18e3d0f10752864e27df389129fbff43",
+        "compass-updater": "sha256:b1457078b8a60712b2a81a045d6e70c9d92a6eaa5d372f35f31fb78b0b504ec1"
+      },
+      "min_from": "0.8.0",
+      "requires_restart": [
+        "api",
+        "compass",
+        "dashboard"
+      ],
+      "notes": []
+    },
     {
       "version": "0.8.0",
       "published_at": "2026-10-22T11:20:45Z",
