@@ -8,7 +8,7 @@ build-backend = "setuptools.build_meta"
 # repository will publish, and what lets this repository depend on it later.
 [project]
 name = "compass-open"
-version = "0.8.0"
+version = "0.9.0"
 description = "Beamreach Compass, the open edition: the infra map, decoys, code-as-cloud, the PR watcher, and the API behind the dashboard"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -42,6 +42,7 @@ librarian = "captains.librarian.manifest:MANIFEST"
 honeypot = "captains.honeypot.manifest:MANIFEST"
 iac = "captains.iac.manifest:MANIFEST"
 prs = "captains.prs.manifest:MANIFEST"
+patch = "captains.patch.manifest:MANIFEST"
 
 [project.optional-dependencies]
 # a model for the incident summary, drift-fix HCL and PR triage (compass_core.llm)
@@ -64,6 +65,7 @@ include = [
     "captains.honeypot*",
     "captains.iac*",
     "captains.prs*",
+    "captains.patch*",
 ]
 
 [tool.setuptools.package-data]

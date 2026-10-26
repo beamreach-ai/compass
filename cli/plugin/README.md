@@ -1,6 +1,6 @@
 # Compass plugin for Claude Code
 
-This folder is a Claude Code plugin: the `compass` MCP server plus twelve skills (playbooks). It ships inside the
+This folder is a Claude Code plugin: the `compass` MCP server plus fourteen skills (playbooks). It ships inside the
 `@beamreach/compass` npm package and is installed by `compass agent install`.
 
 ## Publishing it

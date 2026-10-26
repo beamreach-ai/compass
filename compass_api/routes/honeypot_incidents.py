@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from captains.honeypot import incidents as inc
 from captains.honeypot import report as report_mod
 from captains.honeypot import summary as summary_mod
-from captains.honeypot.respond import approve_pending_action, respond_to_incident, responder_session_factory
+from captains.honeypot.respond import approve_pending_action, decline_pending_action, respond_to_incident, responder_session_factory
 from compass_api.routes import honeypots as hp
 from compass_api.routes._app_config import write_guard
 from compass_api.routes._workspace import get_actor_ids, get_workspace_config
@@ -160,6 +160,25 @@ def approve_action(request: Request, incident_id: str, body: ApprovePayload) -> 
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except (ValueError, RuntimeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/api/honeypots/incidents/{incident_id}/decline")
+def decline_action(request: Request, incident_id: str, body: ApprovePayload) -> Dict[str, Any]:
+    """Decide against one parked action: it leaves the incident's pending list and the inbox."""
+    table = hp._resolve_table(request)
+    pk = hp._ws_pk(request)
+    actor = get_actor_ids(request)
+    declined_by = str(actor.get("user_id") or actor.get("email") or "user")
+    try:
+        result = decline_pending_action(table=table, pk=pk, incident_id=incident_id, action_id=body.action_id, declined_by=declined_by)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    from compass_core import inbox
+
+    inbox.invalidate()
+    return result
 
 
 @router.post("/api/honeypots/incidents/{incident_id}/respond")

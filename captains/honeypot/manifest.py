@@ -89,7 +89,7 @@ MANIFEST = CaptainManifest(
     ),
     route_prefixes=("/api/honeypots",),
     admin_write_prefixes=("/api/honeypots/repo-default", "/api/honeypots/settings", "/api/honeypots/actions"),
-    tabs=(TabSpec(key="honeypots", label="Decoys", group="security", feature="honeypots", views=("overview", "honeytokens", "history", "settings")),),
+    tabs=(TabSpec(key="honeypots", label="Decoys", group="security", feature="honeypots", views=("overview", "honeytokens", "needs_you", "history", "settings")),),
     queue="honeypot-executions",
     services=(
         ServiceSpec(name="alert-consumer", start="captains.honeypot.alert_consumer:run_service"),
@@ -99,6 +99,7 @@ MANIFEST = CaptainManifest(
     config_schema=CONFIG_SCHEMA,
     depends_on=("mapper",),
     permissions=PERMISSIONS,
+    inbox="captains.honeypot.inbox:items",
     requires_core=">=0.1,<1",
     version=__version__,
 )

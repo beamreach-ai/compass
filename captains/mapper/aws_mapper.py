@@ -1,5 +1,5 @@
 import logging
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError, EndpointConnectionError
@@ -13,6 +13,7 @@ from infra_map.materializer import InfraMapMaterializer
 from infra_map.models import RelationshipEdge, ResourceNode
 from infra_map.synthetic import is_synthetic_scope
 
+from . import software as _software
 from .coverage_drift import annotate_coverage, annotate_drift
 from .github_mapper import GitHubGraphCollector
 from .ownership_resolver import (
@@ -198,6 +199,7 @@ class AWSInfraMapper:
         emit_job_event("Computing IAC coverage and drift", event_type="progress", status="running")
         annotate_coverage(nodes, edges)
         annotate_drift(nodes, edges)
+        _software.annotate_exposure(nodes, edges)
         emit_job_event(
             "Writing infra map graph",
             event_type="progress",
@@ -432,6 +434,8 @@ class AWSGraphCollector:
         self.nodes: Dict[str, ResourceNode] = {}
         self.edges: Dict[Tuple[str, str, str], RelationshipEdge] = {}
         self._task_definition_cache: Dict[str, dict] = {}
+        self._ecr_clients: Dict[str, Any] = {}
+        self._digest_cache: Dict[Tuple[str, str, str], Optional[str]] = {}
         # Roles that ECS tasks run as; their policies are what a stolen
         # credential inside the task can use, so only these get their policy
         # documents collected (see _collect_role_policies).
@@ -713,6 +717,9 @@ class AWSGraphCollector:
                         tags=tags,
                         attributes={"vpcId": sg.get("VpcId")},
                     )
+                    open_rules = _software.public_ingress(sg)
+                    if open_rules:
+                        node.attributes["publicIngress"] = open_rules
                     self._add_node(node)
         except (BotoCoreError, ClientError) as exc:
             logger.warning("⚠️ Could not list security groups in %s: %s", region, exc)
@@ -762,6 +769,7 @@ class AWSGraphCollector:
         except (BotoCoreError, ClientError) as exc:
             logger.warning("⚠️ Could not list network interfaces in %s: %s", region, exc)
 
+        instance_ids: List[str] = []
         try:
             instance_paginator = ec2.get_paginator("describe_instances")
             for page in instance_paginator.paginate():
@@ -781,9 +789,15 @@ class AWSGraphCollector:
                                 "instanceType": instance.get("InstanceType"),
                                 "state": instance.get("State", {}).get("Name"),
                                 "availabilityZone": instance.get("Placement", {}).get("AvailabilityZone"),
+                                "imageId": instance.get("ImageId"),
+                                "publicIp": instance.get("PublicIpAddress"),
+                                "publicDns": instance.get("PublicDnsName") or None,
+                                "platform": instance.get("PlatformDetails"),
                             },
                         )
+                        _software.put_software(node.attributes, _software.instance_software(instance))
                         self._add_node(node)
+                        instance_ids.append(instance["InstanceId"])
                         for group in instance.get("SecurityGroups", []):
                             self._add_edge(
                                 RelationshipEdge(
@@ -797,6 +811,52 @@ class AWSGraphCollector:
                             )
         except (BotoCoreError, ClientError) as exc:
             logger.warning("⚠️ Could not list EC2 instances in %s: %s", region, exc)
+        if instance_ids:
+            self._collect_ssm_inventory(session, region, instance_ids)
+
+    SSM_INVENTORY_LIMIT = 200   # instances per region whose packages are read; beyond it the AMI alone says what runs
+
+    def _collect_ssm_inventory(self, session: boto3.Session, region: str, instance_ids: Sequence[str]) -> None:
+        """The packages SSM Inventory lists on each instance (``AWS:Application``), when it is on.
+        The first refusal in a region (no SSM, no permission) ends the pass for that region."""
+        try:
+            ssm = session.client("ssm")
+        except (BotoCoreError, ClientError) as exc:
+            logger.debug("no SSM client for %s: %s", region, exc)
+            return
+        for instance_id in list(instance_ids)[: self.SSM_INVENTORY_LIMIT]:
+            try:
+                info = self._inventory_entries(ssm, instance_id, "AWS:InstanceInformation")
+                rows = self._inventory_entries(ssm, instance_id, "AWS:Application")
+            except (BotoCoreError, ClientError, NotImplementedError) as exc:
+                logger.debug("SSM inventory in %s stopped at %s: %s", region, instance_id, exc)
+                return
+            if not rows:
+                continue
+            platform = str((info[0] if info else {}).get("PlatformName") or "")
+            node = self.nodes.get(instance_id)
+            if node is None:
+                continue
+            entries = _software.ssm_inventory_software(rows, platform=platform or node.attributes.get("platform"))
+            existing = list(node.attributes.get("software") or [])
+            _software.put_software(node.attributes, entries)
+            if existing and node.attributes.get("software"):
+                node.attributes["software"] = existing + node.attributes["software"]
+                node.attributes["software_count"] = len(node.attributes["software"])
+            if platform:
+                node.attributes["platformName"] = platform
+
+    @staticmethod
+    def _inventory_entries(ssm, instance_id: str, type_name: str) -> List[dict]:
+        entries: List[dict] = []
+        kwargs: Dict[str, Any] = {"InstanceId": instance_id, "TypeName": type_name}
+        while True:
+            page = ssm.list_inventory_entries(**kwargs)
+            entries.extend(page.get("Entries") or [])
+            token = page.get("NextToken")
+            if not token:
+                return entries
+            kwargs["NextToken"] = token
 
     def _collect_lambda(self, session: boto3.Session, region: str) -> None:
         try:
@@ -823,8 +883,14 @@ class AWSGraphCollector:
                             "memorySize": fn.get("MemorySize"),
                             "timeout": fn.get("Timeout"),
                             "role": fn.get("Role"),
+                            "packageType": fn.get("PackageType") or "Zip",
+                            "layers": [layer.get("Arn") for layer in fn.get("Layers") or [] if isinstance(layer, dict) and layer.get("Arn")],
                         },
                     )
+                    _software.put_software(node.attributes, _software.lambda_software(fn))
+                    function_url = self._function_url(client, fn["FunctionName"])
+                    if function_url:
+                        node.attributes["functionUrl"] = function_url
                     self._add_node(node)
                     self.lambda_functions[arn] = fn
                     self.lambda_by_name[fn["FunctionName"]] = arn
@@ -842,6 +908,15 @@ class AWSGraphCollector:
                         )
         except (BotoCoreError, ClientError) as exc:
             logger.warning("⚠️ Could not list Lambda functions in %s: %s", region, exc)
+
+    def _function_url(self, client, function_name: str) -> Optional[str]:
+        """The function's URL when it has one: the shortest path from the internet to a Lambda."""
+        try:
+            configs = client.list_function_url_configs(FunctionName=function_name).get("FunctionUrlConfigs") or []
+        except (BotoCoreError, ClientError, NotImplementedError) as exc:
+            logger.debug("function URL of %s not read: %s", function_name, exc)
+            return None
+        return str(configs[0].get("FunctionUrl")) if configs and configs[0].get("FunctionUrl") else None
 
     def _collect_lambda_event_sources(self, session: boto3.Session, region: str) -> None:
         try:
@@ -1320,6 +1395,10 @@ class AWSGraphCollector:
                 "executionRoleArn": task_def.get("executionRoleArn"),
             },
         )
+        images, entries = _software.task_definition_software(task_def, self._ecr_digest)
+        if images:
+            node.attributes["images"] = images
+        _software.put_software(node.attributes, entries)
         self._add_node(node)
         self._task_definition_cache[arn] = task_def
         for role_arn, relationship in (
@@ -1341,6 +1420,26 @@ class AWSGraphCollector:
                 )
             )
         return task_def
+
+    def _ecr_digest(self, account: str, region: str, repository: str, tag: str) -> Optional[str]:
+        """The digest an ECR tag points at today, for a repository in the target account; None
+        when the registry is another account's or will not answer. One call per (region, repository, tag)."""
+        if account != self.account_id:
+            return None
+        key = (region, repository, tag)
+        if key in self._digest_cache:
+            return self._digest_cache[key]
+        digest: Optional[str] = None
+        try:
+            client = self._ecr_clients.get(region)
+            if client is None:
+                client = self._ecr_clients[region] = self._regional_session(region).client("ecr")
+            details = client.describe_images(repositoryName=repository, imageIds=[{"imageTag": tag}]).get("imageDetails") or []
+            digest = details[0].get("imageDigest") if details else None
+        except (BotoCoreError, ClientError) as exc:
+            logger.debug("ECR digest for %s:%s in %s not resolved: %s", repository, tag, region, exc)
+        self._digest_cache[key] = digest
+        return digest
 
     def _ensure_role_node(self, role_arn: str) -> None:
         if role_arn in self.nodes:

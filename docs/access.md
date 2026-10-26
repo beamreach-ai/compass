@@ -127,3 +127,13 @@ Each finding has one action: the pull request that regenerates the module.
 `connect` arguments: `regions=` (comma-separated), `control_account=`,
 `base_identity=<arn>` or `none`, `read_role=`, `act_role=`, `runtime_user=`,
 `state_bucket=` (the Terraform state the mapper may read).
+
+## The canary's grant
+
+The patch captain's one action, `patch.canary_deploy`, runs a fix's image on a
+staging twin and rolls it back ([patching.md](patching.md)). It goes through
+this flow like a decoy response: proposed by the captain when `patch.canaries`
+names a twin, accepted by a person, applied by the access pull request,
+verified against IAM, armed. Its statements name the exact staging services
+and clusters and the task roles they run as; nothing in them reaches the
+service that serves traffic.

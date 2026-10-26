@@ -12,6 +12,7 @@ nothing leaves.
 | **Map** | Every resource in every region, joined to the Terraform state and module that manages it and the repository that holds it. Exported as JSON, DOT or one HTML page. |
 | **Decoys** | Honeytokens — an IAM key, a database password, an SSH key, an S3 object, an API token, a DNS record — placed where they look real, as a pull request to your infra repo. The moment one is used, you know: the incident, its blast radius, and a response (deactivate the key, restart the task that leaked it) within a risk policy you set. |
 | **Code-as-cloud** | Resources nobody wrote Terraform for become a pull request: generated configuration, literals rewired to references in your modules, verified with a plan, import blocks included. Drift gets the same treatment. |
+| **Patches** | Follows the CVE feeds every hour, knows which workload and which repository each one reaches and whether it faces the internet, and opens the fix pull request: a version string moved to the one the advisory names, verified by your CI, an image build and a canary on a staging twin. Exploited, exposed or severe gets its pull request without a click; the rest waits in the inbox. You merge. |
 | **PR watcher** | Syncs the pull requests Compass opened, reads the reviews, answers, and — with `ANTHROPIC_API_KEY` set — pushes the revision a reviewer asked for, within the files the pull request already touches and a risk level you set. Anything riskier is labelled for a human. |
 
 ## Install

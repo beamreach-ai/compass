@@ -57,6 +57,7 @@ MANIFEST = CaptainManifest(
     config_schema=CONFIG_SCHEMA,
     settings_component="prs",
     permissions=Permissions(github=("contents:write", "pull_requests:write", "issues:write"), egress=("api.github.com",)),
+    inbox="captains.prs.inbox:items",
     requires_core=">=0.1,<1",
     version=__version__,
 )

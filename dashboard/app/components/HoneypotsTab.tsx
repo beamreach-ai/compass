@@ -11,6 +11,7 @@ import { DemoTripContext, incidentHref, useDemoTrip } from "./honeypotFormat";
 import { completeTourStep } from "../lib/tour";
 import type { DemoTrip, DemoTripState } from "./honeypotFormat";
 import { asHoneypotView, honeypotViewHref } from "./honeypotViews";
+import InboxFeed from "./InboxFeed";
 import { isOpenEdition, PRODUCT_NAME } from "../lib/edition";
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -2307,6 +2308,9 @@ export default function HoneypotsTab() {
           )}
         </>
       )}
+
+      {/* ── Needs you: parked responses, decoys waiting for a merge or an arm (docs/inbox.md) ── */}
+      {view === "needs_you" && <InboxFeed tab="honeypots" readOnly={readOnly} empty="Nothing needs you here. Parked responses and decoys waiting for a merge would be listed." />}
 
       {/* ── History: every incident, then the audit of actions taken ── */}
       {view === "history" && (

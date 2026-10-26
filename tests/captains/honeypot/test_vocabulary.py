@@ -22,6 +22,8 @@ GUARDED = [
     "dashboard/app/components",
 ]
 _SKIP_DIRS = {"node_modules", "__pycache__", ".next", ".git"}
+# the patch captain's tab: its canary is the A/B canary deployment the word is reserved for (docs/patching.md)
+_ALLOWED_FILES = {"dashboard/app/components/PatchesTab.tsx"}
 _SKIP_SUFFIXES = {".pyc", ".png", ".jpg", ".svg", ".ico", ".woff", ".woff2"}
 _THIS_FILE = pathlib.Path(__file__).resolve()
 _WORD = re.compile("canary", re.IGNORECASE)
@@ -35,7 +37,7 @@ def _files(rel: str):
     if not path.is_dir():
         return
     for p in path.rglob("*"):
-        if p.is_file() and not (set(p.parts) & _SKIP_DIRS) and p.suffix not in _SKIP_SUFFIXES:
+        if p.is_file() and not (set(p.parts) & _SKIP_DIRS) and p.suffix not in _SKIP_SUFFIXES and str(p.relative_to(REPO)) not in _ALLOWED_FILES:
             yield p
 
 

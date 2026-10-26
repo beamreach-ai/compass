@@ -7,7 +7,7 @@ import re
 
 from e2e import fixture
 
-OPEN_TABS = {"maps": "Maps", "honeypots": "Decoys", "iac": "IAC", "prs": "Pull requests", "queue": "Queue", "settings": "Settings"}
+OPEN_TABS = {"maps": "Maps", "honeypots": "Decoys", "patches": "Patches", "iac": "IAC", "prs": "Pull requests", "queue": "Queue", "settings": "Settings"}
 CLOSED_TABS = ("FinOps", "DevSecOps", "Compliance", "Policies")
 # noise a browser logs that is not the page's fault
 IGNORED_CONSOLE = re.compile(r"favicon|Download the React DevTools|net::ERR_ABORTED")

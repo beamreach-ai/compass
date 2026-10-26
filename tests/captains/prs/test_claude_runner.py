@@ -409,9 +409,15 @@ def test_available_follows_the_environment(monkeypatch, tmp_path):
 
 
 def test_real_tool_runner_drives_the_workspace_tools(monkeypatch, checkout):
-    """The SDK's own BetaToolRunner and @beta_tool, with the HTTP call replaced by scripted replies."""
+    """The SDK's own BetaToolRunner and @beta_tool, with the HTTP transport replaced by scripted replies,
+    so every SDK version builds its own message objects and nothing reaches the network."""
     anthropic = pytest.importorskip("anthropic")
-    from anthropic.types.beta import BetaMessage
+    import json
+
+    try:
+        import httpx2 as httpx  # the SDK from 2.3 ships on httpx 2 and refuses a client from httpx 1
+    except ImportError:
+        import httpx
 
     replies = iter([
         {"type": "tool_use", "id": "toolu_1", "name": "write_file", "input": {"path": "modules/iam.tf", "content": "x"}},
@@ -420,22 +426,25 @@ def test_real_tool_runner_drives_the_workspace_tools(monkeypatch, checkout):
     ])
     seen = []
 
-    def parse(**params):
+    def answer(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/v1/messages"), request.url
+        params = json.loads(request.content)
         seen.append(params)
         block = next(replies)
         stop = "tool_use" if block["type"] == "tool_use" else "end_turn"
-        return BetaMessage.model_validate({"id": "msg", "type": "message", "role": "assistant", "model": params["model"], "content": [block], "stop_reason": stop,
-                                           "stop_sequence": None, "usage": {"input_tokens": 10, "output_tokens": 5}})
+        message = {"id": "msg", "type": "message", "role": "assistant", "model": params["model"], "content": [block], "stop_reason": stop,
+                   "stop_sequence": None, "usage": {"input_tokens": 10, "output_tokens": 5}}
+        return httpx.Response(200, json=message, headers={"request-id": "req_test"})
 
-    client = anthropic.Anthropic(api_key="sk-test")
-    monkeypatch.setattr(client.beta.messages, "parse", parse)
+    client = anthropic.Anthropic(api_key="sk-test", http_client=httpx.Client(transport=httpx.MockTransport(answer)), max_retries=0)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
     state = ClaudeRevisionRunner(client=client).execute(_state(checkout), target="demo", config={}, model=None, logger=LOG)
 
     assert state.execution_state["status"] == "completed" and state.execution_state["changed_files"] == [PR_FILE]
     assert (checkout / PR_FILE).read_text() == REVISED and not (checkout / "modules" / "iam.tf").exists()
-    refused = seen[1]["messages"][2]["content"][0]
-    assert refused["type"] == "tool_result" and refused["is_error"] and "not in patch_spec.allowed_files" in str(refused["content"])
+    # the second request carries the refused tool call's result, wherever this SDK version places it in the messages
+    refused = next(c for m in seen[1]["messages"] for c in (m["content"] if isinstance(m.get("content"), list) else []) if c.get("type") == "tool_result")
+    assert refused["is_error"] and "not in patch_spec.allowed_files" in str(refused["content"])
     names = [t["name"] for t in seen[0]["tools"]]
     assert names == ["read_file", "write_file", "list_files", "run"]
     assert seen[0]["tools"][1]["input_schema"]["required"] == ["path", "content"]

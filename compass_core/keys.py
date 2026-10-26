@@ -263,3 +263,44 @@ def demo_reset_sort_key(timestamp_ms: int) -> str:
 
 def demo_reset_prefix() -> str:
     return "DEMO#RESET#"
+
+
+# ── Inbox snoozes (compass_core.inbox) ─────────────────────────────────────
+
+def inbox_snooze_sort_key(item_id: str) -> str:
+    return f"INBOX#SNOOZE#{item_id}"
+
+
+def inbox_snooze_prefix() -> str:
+    return "INBOX#SNOOZE#"
+
+
+# ── Advisories and the feeds' cursors (captains.patch) ─────────────────────
+
+def advisory_sort_key(advisory_id: str) -> str:
+    return f"CVE#{advisory_id}"
+
+
+def advisory_alias_sort_key(alias: str) -> str:
+    """A GHSA or a feed's own id → the row of the CVE it is an alias of."""
+    return f"CVE#ALIAS#{alias}"
+
+
+def advisory_prefix() -> str:
+    return "CVE#"
+
+
+def patch_cursor_sort_key(source: str) -> str:
+    return f"PATCH#CURSOR#{source}"
+
+
+def patch_cursor_prefix() -> str:
+    return "PATCH#CURSOR#"
+
+
+def patch_finding_sort_key(key: str) -> str:
+    return f"PATCH#FINDING#{key}"
+
+
+def patch_finding_prefix() -> str:
+    return "PATCH#FINDING#"

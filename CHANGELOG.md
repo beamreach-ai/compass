@@ -5,6 +5,94 @@ workflow refuses a tag without one, and reads from it what the dashboard shows
 next to the Update button: the first paragraph is the summary, the bullets under
 `### After the update` are the notes an operator needs after applying it.
 
+## 0.9.0 — 2026-10-25
+
+The inbox: everything that needs a person, as one list. `GET /api/inbox` derives
+it from state on every call (a parked decoy response, a grant to accept, a
+decoy waiting for its merge or its arm, a pull request with a revision to
+approve or that the watcher gave up on, a failed job, an access finding, an
+available update, an incomplete setup), newest first, each item carrying the
+routes that act on it. Nothing is stored and nothing is marked read: an item
+leaves when the state changes. [docs/inbox.md](docs/inbox.md).
+
+- `GET /api/inbox` with `tab=`, `kind=`, `verb=`, `include_snoozed=`; counts per
+  tab and per verb. `POST`/`DELETE /api/inbox/{id}/snooze` for the three kinds
+  with a natural end (a failed job until it fails again, an update until the
+  next release, "no model" on purpose). `/api/status` gains an `inbox` section
+  with the counts and the line `compass status` prints.
+- In the dashboard: a count beside every tab that has something, the total
+  beside the brand that opens the whole feed, a "Needs you" view on the Decoys,
+  Pull requests and Queue tabs, Settings opening with its items, and inline
+  actions (Run, Accept, Retry, Arm, Approve the revision, Acknowledge) with the
+  confirmation before anything that changes the account or a pull request.
+- `POST /api/honeypots/incidents/{id}/decline` drops one parked response and
+  records who decided against it; the incident stays open.
+- The map knows what every workload is made of, as package URLs on the node
+  (`attributes.software`): the image of each container in a task definition,
+  resolved to its digest through ECR; a Lambda's runtime and layers (Bref's
+  by name) and its function URL; an instance's AMI, its public address and,
+  when SSM Inventory is on, its packages; a security group's rules open to
+  the world. In the repositories the mapper now reads Dockerfiles fully
+  (`FROM` per stage, `apt-get install`, `apk add`, `pip install`, `composer
+  require`), manifests and lockfiles (composer, npm, yarn, pnpm, pip,
+  pyproject, uv, poetry, go, cargo), `serverless.yml`, SAM templates and the
+  runtimes, layers and AMIs in Terraform. Every workload carries `exposed`,
+  with how (an internet-facing load balancer, a function URL, a public IP
+  behind an open security group). The patching captain matches these; the
+  mapper's read role gains `ssm:ListInventoryEntries`.
+- A new captain, `patch` (Patches): the `cve-feed` service follows the CVE
+  feeds every hour without a key or an account. OSV is asked by the purls on
+  the map on every run, so a fresh install is current in minutes and new
+  software is covered as soon as the mapper sees it; cvelistV5's delta log
+  brings the CVEs of the products the account runs (PHP, Node, Python, nginx,
+  Apache, Ruby, Go, Redis, Postgres, MySQL, MariaDB and friends); CISA's KEV
+  and FIRST's EPSS score them; the Ubuntu, Debian, Alpine and Amazon Linux
+  trackers say which package version in which release is fixed; Packagist and
+  npm add the PHP and JS advisories at the source. Advisories merge on the CVE
+  id and live in the items table (`CVE#`); each source keeps its own cursor,
+  one failing never stops the others. `compass patch feed_run`, `feed_status`,
+  `advisories` and `inventory` read it; `feed_inject` is a test-only door
+  behind `COMPASS_PATCH_INJECT=1`.
+- The Patches tab and the match behind it: every fifteen minutes the
+  advisories are held against the map's software in each ecosystem's own
+  version order, and a finding is written per advisory, node and package with
+  the fixed version, the repository and file, the workloads that run what the
+  file builds and whether they face the internet. The policy decides per
+  finding: a pull request without a click when exploited, likely to be, severe
+  or exposed, and nothing stands in the way of a plain bump; an inbox item per
+  repository otherwise, approved with one click. `GET /api/patches`,
+  `compass patch findings|tick|approve|ignore`. [docs/patching.md](docs/patching.md).
+- The fix pull requests: one per repository with every fix it needs, each a
+  version string moved to the one the advisory names (a docker-library tag, an
+  apt or apk pin, a layer version, a direct dependency's constraint), the body
+  with the findings, the changes, the verification and the rollback, labels,
+  the PR watcher keeping it alive, and the findings following the pull request
+  from `pr_open` to `merged` to `deployed`. `compass patch pr`,
+  `POST /api/patches/pr`.
+- Verification of the fix pull requests: CI from the PR watcher's checks, the
+  image build through the repository's own workflow (a minimal
+  `compass-build.yml` added by the pull request when the repository has none),
+  and a canary as the granted action `patch.canary_deploy`: the pull request's
+  image run on a named staging twin for a few minutes, probed, compared, rolled
+  back, the result a comment on the pull request and a `needs_you` on failure.
+  Notifications `patch.pr_opened`, `patch.needs_human`, `patch.deployed`
+  through today's routing (`patch.*`). The PR watcher's record now keeps each
+  check's name with its status.
+- Lockfiles follow the manifest: when a fix moves a manifest with a lockfile
+  beside it, the pull request adds `compass-lockfile.yml`, which regenerates
+  that lockfile on the branch with the ecosystem's own tool and commits it as
+  Compass; `patch.lockfiles: "manifest-only"` leaves it to you.
+- The CLI and the MCP server: `compass patch findings|pr|ignore|feed`
+  (`compass_patch_findings`, `compass_patch_pr`, `compass_patch_ignore`,
+  `compass_patch_feed`) and `compass inbox|inbox act|inbox snooze`
+  (`compass_inbox`, `compass_inbox_act`, `compass_inbox_snooze`); `compass
+  status` prints a Patches line and the "Needs you" line; `/api/status` gains
+  a `patches` section. Two plugin skills, `compass-patch` and `compass-inbox`.
+  e2e: PAT-1 to PAT-3 in shard C.
+- A captain contributes items through `inbox=` in its manifest
+  (`compass_core.inbox`, [docs/writing_a_captain.md](docs/writing_a_captain.md) §6.1);
+  a product registers a source with `compass_api.extensions.register_inbox_source`.
+
 ## 0.8.0 — 2026-10-21
 
 Demo mode: with `APP_MODE=demo` this image runs a public demo the way

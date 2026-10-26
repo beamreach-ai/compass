@@ -109,7 +109,7 @@ def test_the_world_is_seeded_beside_a_real_scan_and_a_rescan_leaves_it_alone(wor
     # are rewritten under the new scope), the new one is there, the real account still is
     other = demo.demo({"verb": "seed", "workspace_id": workspace_id, "resources": 120, "seed": 8})
     assert other["scope"] == "demo:seed:8" and other["scan"]["removed"] + other["scan"]["changed"] == first["nodes"] + first["edges"]
-    assert other["scan"]["changed"] <= 8, "only the handful of ownership rows both worlds name"
+    assert other["scan"]["changed"] <= 12, "only the repositories, and the Dockerfiles of the few services both worlds happen to name"
     assert other["closed_scopes"] == [{"source": s, "scope": "demo:seed:7"} for s in ("aws_scan", "git_scan", "tf_state")]
     remaining = {(r["source"], r["scope"]): r["rows"] for r in other["map"]}
     assert not any(scope == "demo:seed:7" for _, scope in remaining)
@@ -144,3 +144,25 @@ def test_the_world_without_a_scope_carries_the_collectors_scopes():
     assert sources == {("aws_scan", "aws"), ("git_scan", "repo"), ("git_scan", "tf_root_module"), ("tf_state", "state_file")}
     assert all("synthetic" not in n.attributes for n in world.nodes)
     assert synthetic.world_scope(7) == "demo:seed:7" and synthetic.is_synthetic_scope("demo:seed:7") and not synthetic.is_synthetic_scope("aws:full")
+
+
+def test_the_world_carries_software_and_exposure_the_way_the_collectors_would():
+    from infra_map.synthetic import WorldSpec, generate
+
+    world = generate(WorldSpec(resources=1000, seed=7))
+    by_type = {}
+    for node in world.nodes:
+        by_type.setdefault(node.type, []).append(node)
+    task_defs = by_type["ecs_task_definition"]
+    assert all(n.attributes["software"][0]["purl"].startswith("pkg:docker/") and n.attributes["images"][0]["digest"].startswith("sha256:") for n in task_defs)
+    assert any(s["purl"] == "pkg:docker/php@8.3.30-fpm?final=true&stage=0" for n in task_defs for s in n.attributes["software"]), "php2shell's worked example is in the world"
+    assert all("exposed" in n.attributes for n in task_defs + by_type["ecs_service"] + by_type["lambda_function"] + by_type["ec2_instance"])
+    assert any(n.attributes["exposed"] for n in task_defs) and not all(n.attributes["exposed"] for n in task_defs)
+    lambdas = by_type["lambda_function"]
+    assert any("bref-layer" in s["purl"] for n in lambdas for s in n.attributes["software"]) and any(n.attributes["exposed"] for n in lambdas)
+    assert all(n.attributes["software"][0]["purl"].startswith("pkg:generic/ami@ami-") for n in by_type["ec2_instance"])
+    assert any(n.attributes["exposed"] for n in by_type["ec2_instance"])
+    dockerfiles = by_type["github_dockerfile"]
+    assert dockerfiles and all(n.attributes["software"][0]["relation"] == "base" for n in dockerfiles)
+    again = generate(WorldSpec(resources=1000, seed=7))
+    assert [n.attributes.get("software") for n in again.nodes] == [n.attributes.get("software") for n in world.nodes], "deterministic from the seed"

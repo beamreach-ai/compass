@@ -7,7 +7,7 @@ import time
 
 import pytest
 
-SHIPPED = {"mapper", "librarian", "honeypot", "iac", "prs"}
+SHIPPED = {"mapper", "librarian", "honeypot", "iac", "prs", "patch"}
 HELLO = {"name": "hello", "label": "Hello", "summary": "Says hello: the end-to-end suite's example captain.", "tier": "open",
          "tags": ["example"], "version": "0.1.0", "requires_core": ">=0.2,<1", "pip": "compass-captain-hello==0.1.0"}
 BROKEN = {**HELLO, "name": "broken", "label": "Broken", "summary": "A pin that does not exist.", "pip": "compass-captain-broken==9.9.9"}
@@ -45,8 +45,8 @@ def test_cap_1_the_installed_list_shows_the_shipped_captains_on(stack, page):
     assert SHIPPED <= set(captains) and all(captains[n]["active"] for n in SHIPPED)
     _settings(page)
     switches = page.locator("#settings-captains ~ section [role=switch]")
-    assert switches.count() == 5
-    assert all(switches.nth(i).get_attribute("aria-checked") == "true" for i in range(5))
+    assert switches.count() == len(SHIPPED)
+    assert all(switches.nth(i).get_attribute("aria-checked") == "true" for i in range(len(SHIPPED)))
 
 
 def test_cap_2_a_captain_turned_off_loses_its_tab_and_its_work_until_it_is_on_again(stack, page):
@@ -70,16 +70,16 @@ def test_cap_3_dependencies_are_asked_about_and_switched_together(stack, page):
     dialogs = []
     page.on("dialog", lambda dialog: (dialogs.append(dialog.message), dialog.accept()))
     _settings(page)
-    _row(page, "Infra map").get_by_role("switch").click()  # Decoys, Code-as-cloud and the Librarian need it
+    _row(page, "Infra map").get_by_role("switch").click()  # Decoys, Code-as-cloud, the Librarian and Patches need it
     page.wait_for_function("() => document.querySelector('[aria-label=\"Infra map off\"]') !== null")
     assert dialogs and "depend" in dialogs[-1]
     captains = _captains(stack)
-    assert not any(captains[n]["active"] for n in ("mapper", "honeypot", "iac", "librarian"))
+    assert not any(captains[n]["active"] for n in ("mapper", "honeypot", "iac", "librarian", "patch"))
 
     _row(page, "Decoys").get_by_role("switch").click()  # needs the map: asks to turn it on too
     page.wait_for_function("() => document.querySelector('[aria-label=\"Decoys on\"]') !== null")
     assert "turned on" in dialogs[-1]
-    for name in ("iac", "librarian"):
+    for name in ("iac", "librarian", "patch"):
         stack.api.post(f"/api/captains/{name}/enable", json={"with_dependencies": True}).raise_for_status()
     assert all(c["active"] for n, c in _captains(stack).items() if n in SHIPPED)
 

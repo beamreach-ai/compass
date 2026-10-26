@@ -32,6 +32,8 @@ numbers matter: a DynamoDB-local JVM next to Postgres skews both.
 
 `pytest -m benchmark` runs the 10k point on SQLite with the budgets enforced;
 the default `pytest -q` skips it (`-m "not benchmark"` in `pyproject.toml`).
+Every measurement starts after a full garbage collection: the process holds two
+worlds as dataclasses, and a collection over them costs more than most reads.
 
 ## The world
 

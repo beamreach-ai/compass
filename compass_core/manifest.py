@@ -27,6 +27,7 @@ MANIFEST = CaptainManifest(
         "compass_api.routes.slack_connect:router",
         "compass_api.routes.captains:router",
         "compass_api.routes.updates:router",
+        "compass_api.routes.inbox:router",
         "compass_api.routes.access:router",
         "compass_api.routes.demo:router",
     ),
@@ -51,7 +52,7 @@ MANIFEST = CaptainManifest(
         ),
     ),
     tabs=(
-        TabSpec(key="queue", label="Queue", group="platform", feature="queue"),
+        TabSpec(key="queue", label="Queue", group="platform", feature="queue", views=("jobs", "needs_you")),
         TabSpec(key="settings", label="Settings", group="platform", feature="settings"),
     ),
     requires_core=">=0.1",

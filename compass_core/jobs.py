@@ -4,6 +4,7 @@ import logging
 import os
 import time
 import uuid
+from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
 from boto3.dynamodb.conditions import Attr, Key
@@ -65,6 +66,17 @@ def _job_event(
     if data:
         event["data"] = data
     return event
+
+
+def _decimals(value: Any) -> Any:
+    """The value with every float a Decimal, which is the only number DynamoDB takes."""
+    if isinstance(value, float):
+        return Decimal(str(value))
+    if isinstance(value, dict):
+        return {k: _decimals(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_decimals(v) for v in value]
+    return value
 
 
 class CaptainJobStore:
@@ -130,7 +142,7 @@ class CaptainJobStore:
         payload = self._ensure_storage_keys(item)
         if self._table:
             try:
-                self._table.put_item(Item=payload)
+                self._table.put_item(Item=_decimals(payload))  # a payload or result with a float (a CVSS score) is a Decimal on the table
                 return payload
             except (BotoCoreError, ClientError) as exc:
                 logger.warning(
