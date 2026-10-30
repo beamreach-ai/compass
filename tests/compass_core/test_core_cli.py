@@ -63,7 +63,7 @@ def test_the_core_commands_are_shorthand_and_update_takes_a_bare_verb():
     from compass_core import commands
 
     assert set(commands.COMMANDS) == cli.CORE_SHORTHAND
-    assert {"migrate", "update", "connect", "access", "demo"} <= cli.CORE_SHORTHAND
+    assert {"migrate", "update", "connect", "access", "demo", "whoami"} <= cli.CORE_SHORTHAND
     assert cli.VERB_COMMANDS == {"update": ("check", "apply", "rollback"), "connect": ("template", "verify", "rotate"),
                                  "access": ("list", "accept", "decline", "remove", "verify", "audit", "pr"), "demo": ("seed", "reset", "status")}
 
@@ -88,3 +88,12 @@ def test_a_workspace_that_is_not_the_config_file_s_is_not_quietly_the_config_fil
 
     with pytest.raises(LookupError, match="no configuration for workspace 'loacl'"):
         config.workspace_config("loacl")
+
+
+def test_whoami_is_the_operator_of_the_install(monkeypatch, capsys):
+    monkeypatch.setenv("APP_USERNAME", "ilia")
+    monkeypatch.setenv("DEFAULT_WORKSPACE", "local")
+    assert cli.main(["whoami"]) == 0
+    me = json.loads(capsys.readouterr().out)
+    assert me == {"id": "ilia", "kind": "user", "workspace_id": "local", "org_id": None, "email": None, "name": None,
+                  "roles": ["admin"], "teams": [], "source": "cli"}

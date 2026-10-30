@@ -12,11 +12,13 @@ import { patchFeedTool, patchFindingsTool, patchIgnoreTool, patchPrTool } from "
 import { prsTool, prsWatcherTool } from "./prs.js";
 import { doctorTool, statusTool } from "./status.js";
 import { tokensTool } from "./tokens.js";
+import { whoamiTool } from "./whoami.js";
 
 /** The tools of the open edition. Plugins add theirs (src/core/plugins.ts). */
 export const TOOLS: ToolDef<any>[] = [
   statusTool,
   doctorTool,
+  whoamiTool,
   inboxTool,
   inboxActTool,
   inboxSnoozeTool,

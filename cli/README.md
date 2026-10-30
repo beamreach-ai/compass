@@ -22,6 +22,7 @@ this CLI talks to its API.
 
 ```
 compass status                       # one-screen brief
+compass whoami                       # who this connection is: id, roles, teams, source
 compass map get --search bucket      # the infra map
 compass iac coverage                 # what Terraform manages
 compass iac import <ids> --yes       # import into Terraform via a pull request

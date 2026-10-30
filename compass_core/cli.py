@@ -25,7 +25,7 @@ from compass_core import anthropic_model, captains, dispatch, llm
 
 CORE_SHORTHAND = {
     "init_config", "init_tables", "serve", "api", "login", "captains", "enable", "disable", "configure", "catalog",
-    "install", "uninstall", "validate", "migrate", "update", "connect", "access", "demo",
+    "install", "uninstall", "validate", "migrate", "update", "connect", "access", "demo", "whoami",
 }
 # `compass update check` reads better than `compass update verb=check`: the bare word after
 # these commands becomes their `verb`.

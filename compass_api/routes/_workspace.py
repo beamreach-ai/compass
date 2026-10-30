@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import os
-from typing import Any, Dict, Optional
+from dataclasses import replace
+from typing import Any, Dict
 
 from fastapi import HTTPException, Request
 
 from compass_api import workspace as api_workspace
-from compass_api.middleware.workspace import _identity_from_headers, get_request_workspace
+from compass_api.auth.principal import resolve_principal
+from compass_api.middleware.workspace import _identity_from_headers, get_request_principal, get_request_workspace
 
 
 def get_workspace_context(request: Request) -> Any:
@@ -14,20 +16,19 @@ def get_workspace_context(request: Request) -> Any:
     if ctx:
         return ctx
 
-    user_id = _identity_from_headers(request)
-    workspace_id = request.headers.get("X-Workspace-Id") or request.query_params.get("workspace_id")
-    org_id = request.headers.get("X-Org-Id") or request.query_params.get("org_id")
-
-    if api_workspace.uses_user_workspace(user_id):
-        workspace_id = user_id
-        org_id = None
-    elif not workspace_id:
-        workspace_id = os.getenv("DEFAULT_WORKSPACE") or os.getenv("TARGET")
+    # A route the middleware skipped (or an app without it): the same resolution, once.
+    principal = get_request_principal(request)
+    if principal is None:
+        requested = request.headers.get("X-Workspace-Id") or request.query_params.get("workspace_id")
+        principal = resolve_principal(request, _identity_from_headers(request), requested)
+    workspace_id = principal.workspace_id or os.getenv("DEFAULT_WORKSPACE") or os.getenv("TARGET")
     if not workspace_id:
         raise HTTPException(status_code=400, detail="workspace_id is required")
+    principal = replace(principal, workspace_id=workspace_id)
+    request.state.principal = principal
 
     try:
-        ctx = api_workspace.load(workspace_id, org_id=org_id, user_id=user_id)
+        ctx = api_workspace.load(workspace_id, org_id=principal.org_id, user_id=principal.user_id)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     request.state.workspace_ctx = ctx
@@ -73,10 +74,19 @@ def save_config(request: Request, config: Dict[str, Any]) -> None:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-def get_actor_ids(request: Request) -> Dict[str, Optional[str]]:
+def get_actor_ids(request: Request) -> Dict[str, Any]:
+    """Who is acting: the workspace, the org and the user id as always, plus ``principal_id``
+    and ``principal`` (the public form: email, name, roles, teams, source). Callers spread
+    this into job payloads, so the new keys are only these two: a payload's own ``name`` or
+    ``email`` is never overwritten. ``user_id`` stays what it was, so every ``actor=`` works."""
     ctx = get_workspace_context(request)
-    return {
+    actor: Dict[str, Any] = {
         "workspace_id": ctx.workspace_id,
         "org_id": ctx.org_id,
         "user_id": ctx.user_id,
     }
+    principal = get_request_principal(request)
+    if principal is not None:
+        actor["principal_id"] = principal.id
+        actor["principal"] = principal.to_public()
+    return actor
