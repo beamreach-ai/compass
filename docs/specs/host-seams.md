@@ -47,7 +47,7 @@ and status sections, public paths, admin prefixes, identity headers
 entry point (or `COMPASS_HOSTS`) names; `tests/compass_core/test_core_hosts.py:44-93`
 installs a fake one.
 
-**Who is calling.** Four middlewares in this order:
+**Who is calling.** The middlewares, outermost first (`compass_api/app.py:166-177`):
 
 1. `BearerAuthMiddleware` (`compass_api/middleware/bearer_auth.py:15-47`)
    resolves `Authorization: Bearer cmp_...` into an `ApiPrincipal`
@@ -56,19 +56,23 @@ installs a fake one.
    `required_scope(method, path)` (`compass_api/auth/scopes.py:55`), and
    answers a 403 with `detail`, `required_scope` and `token_scope`
    (`bearer_auth.py:34-43`).
-2. `SimpleAuthMiddleware` checks the `compass_session` cookie when
-   `APP_USERNAME` is set. A cookie session is not scoped: it may do anything.
-3. `WorkspaceContextMiddleware` (`compass_api/middleware/workspace.py:25-93`)
+2. `WorkspaceContextMiddleware` (`compass_api/middleware/workspace.py:25-93`)
    takes the user id from the token, else from an identity header the host
    registered, else `X-User-Id` (`workspace.py:14-22`), and the workspace id
    from the token, else the header or query, else the default. When the host
    says a user's own id is their workspace (`compass_api/workspace.py:65`),
    **the workspace id is derived from the identity** (`workspace.py:63-65`).
    `/api/auth/me` and the health paths skip this middleware entirely
-   (`workspace.py:44-47`).
-4. `SessionContextMiddleware` (`compass_api/middleware/sessions.py:1-5`) puts
-   the user on the request as the requester of every AWS session the request
-   opens.
+   (`workspace.py:44-47`). The cookie plays no part here: a cookie session's
+   `user_id` is whatever the headers said, usually None.
+3. `SimpleAuthMiddleware` checks the `compass_session` cookie when
+   `APP_USERNAME` is set and answers 401 under `/api/`. A cookie session is
+   not scoped: it may do anything.
+4. `CaptainGateMiddleware` and `DemoAdminMiddleware`, which read the
+   workspace config.
+5. `SessionContextMiddleware` (`compass_api/middleware/sessions.py:1-5`),
+   innermost, puts the user on the request as the requester of every AWS
+   session the request opens.
 
 Routes read the result through `get_actor_ids(request)`
 (`compass_api/routes/_workspace.py:76-82`): `workspace_id`, `org_id`,
@@ -175,23 +179,30 @@ context with `user_id=principal.id`, so nothing downstream changes.
 
 1. `request.state.api_principal` set: from the token, workspace from the
    token (a conflicting header is still a 403, as today).
-2. A valid `compass_session` cookie: `Principal(id=APP_USERNAME, kind="user",
-   roles=("admin",), source="session")`.
-3. An identity header (`extensions.identity_headers()`, then `X-User-Id`):
+2. An identity header (`extensions.identity_headers()`, then `X-User-Id`):
    `Principal(id=<header>, kind="user", roles=("admin",), source="header")`.
-   This is today's behaviour: the header is trusted because a proxy set it.
-4. Auth disabled (no `APP_USERNAME`): `Principal(id="anonymous", kind="user",
-   roles=("admin",), source="anonymous")`, which is what the open edition is
-   today.
+   This is today's behaviour: the header is trusted because a proxy set it,
+   and it is today's `user_id`, so it comes before the cookie.
+3. A valid `compass_session` cookie: `Principal(id=APP_USERNAME, kind="user",
+   roles=("admin",), source="session")`. New information: today a cookie
+   session's `user_id` is None, so `approved_by` and `created_by` say
+   `"user"`; after, they say the username.
+4. Nobody (auth off, or no valid cookie, which `SimpleAuthMiddleware` still
+   turns into a 401 under `/api/`): `Principal(id="anonymous", kind="user",
+   roles=("admin",), source="anonymous")`, whose `user_id` is None, so
+   nothing that reads `ctx.user_id` changes.
 
 In each case `workspace_id` is the requested one, or the user's own when
 `uses_user_workspace`, or the middleware's default.
 
 **Where it surfaces.**
 
-- `get_actor_ids(request)` adds `principal_id`, `email`, `name`, `roles`,
-  `teams`, `source`. Every `actor=` already passed to grants, the responder
-  and the watcher keeps working; `user_id` stays `principal.id`.
+- `get_actor_ids(request)` adds `principal_id` and `principal` (the public
+  form). Captains spread it into job payloads (`{**payload, **actor}`), so
+  flat keys like `name` or `email` would shadow a payload's own; two keys
+  that cannot collide are all it adds. Every `actor=` already passed to
+  grants, the responder and the watcher keeps working; `user_id` stays
+  `principal.user_id`.
 - `GET /api/auth/me` keeps every key it returns today (`authenticated`,
   `auth_enabled`, `method`, `username`, the token's public form) and adds
   `principal: {id, kind, email, name, roles, teams, source, workspace_id}`.
@@ -490,7 +501,7 @@ code, in its install function. No environment variable is added.
 | `compass_api/auth/scopes.py` | unchanged API; `required_scope` feeds the default authoriser; the dead `/api/notifications/routing` prefix goes |
 | `compass_api/middleware/bearer_auth.py` | authenticates only; the scope check leaves |
 | `compass_api/middleware/workspace.py` | resolves the principal first, derives the workspace from it, runs the generic authorisation |
-| `compass_api/routes/_workspace.py` | `get_actor_ids` gains the principal's fields |
+| `compass_api/routes/_workspace.py` | `get_actor_ids` gains `principal_id` and `principal` |
 | `compass_api/routes/auth.py` | `/api/auth/me` adds `principal`, keeps today's keys |
 | first-party routes (§3.2) | `require(...)` on the specific thing; approve routes call `approvals.approve` |
 | `compass_core/inbox.py`, `routes/inbox.py` | `Action.action`; the list filters by the authoriser |
@@ -618,3 +629,26 @@ weeks (the table and the patching mapping); 6 five weeks.
 ## Open decisions
 
 None at 2026-10-30.
+
+## Implementation notes (2026-10-30, PR 1)
+
+- `Principal.workspace_id` is Optional: the resolver names the workspace when
+  it knows it (a token, a personal workspace), and the middleware fills the
+  default in; `request.state.principal` always carries the final one.
+- `Principal.user_id` is the id, or None for `source="anonymous"`. The
+  middleware passes that to the workspace loader, so `ctx.user_id` is what
+  it was: nobody is still None, not `"anonymous"`.
+- The identity header comes before the cookie (§3.1), because the header is
+  today's `user_id`; the spec's original order would have changed it behind
+  a proxy that also sets `APP_USERNAME`.
+- `/api/auth/me` resolves the principal itself, outside the middleware, and
+  keeps every key it had. `compass whoami` in the TypeScript CLI prints the
+  `principal` key, and stands in for an older engine from the keys it finds.
+- The Python `compass whoami` has no request to resolve: it answers for the
+  operator of the install (`APP_USERNAME`, else the OS user), `admin`,
+  `source="cli"`, in the same shape.
+- `get_actor_ids` adds two keys, not six: the example captain spreads it
+  into its job payload and a flat `name` overwrote the payload's `name`
+  (found by `tests/test_writing_a_captain.py`).
+- Job payloads do not carry `principal_id` yet; it equals `user_id` until a
+  host resolves people, and PR 3's `requested_by` is where it is first read.

@@ -322,6 +322,21 @@ def access(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 # ── serve ────────────────────────────────────────────────────────────────────
 
+def whoami(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Who this shell is to Compass: the operator of the install, ``admin`` for the workspace.
+    The same shape ``GET /api/auth/me`` returns as ``principal`` and the ``compass whoami``
+    of the TypeScript CLI prints; a host that resolves people differently answers there."""
+    import getpass
+
+    from compass_core.workspace import default_workspace_id
+
+    identity = os.environ.get("APP_USERNAME", "").strip() or getpass.getuser()
+    return {
+        "id": identity, "kind": "user", "workspace_id": payload.get("workspace_id") or default_workspace_id(),
+        "org_id": None, "email": None, "name": None, "roles": ["admin"], "teams": [], "source": "cli",
+    }
+
+
 def serve(payload: Dict[str, Any]) -> Dict[str, Any]:
     from compass_core.serve import serve as _serve
 
@@ -542,7 +557,7 @@ COMMANDS = {
     "init_config": init_config, "init_tables": init_tables, "serve": serve, "api": api, "login": login,
     "captains": captains, "enable": enable, "disable": disable, "configure": configure, "catalog": catalog,
     "install": install, "uninstall": uninstall, "validate": validate, "migrate": migrate, "update": update,
-    "connect": connect, "access": access, "demo": demo,
+    "connect": connect, "access": access, "demo": demo, "whoami": whoami,
 }
 
 dispatch.register("core", COMMANDS)
