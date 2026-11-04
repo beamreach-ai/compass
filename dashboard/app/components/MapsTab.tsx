@@ -1057,13 +1057,16 @@ const MapsTab: React.FC<MapsTabProps> = ({ infraScan = null, mapperJob = null, o
   // The graph payload is ~850 KB. Mount, `scanned` and `last_completed_at` used
   // to drive three separate effects, so opening the tab fired three identical
   // requests back to back. Reload only when the scan signature actually changes.
+  // The node budget depends on the bootstrap (a demo asks for the whole world), so the
+  // first request waits for it rather than asking for the default and never asking again.
   const loadedSignatureRef = useRef<string | null>(null);
   useEffect(() => {
-    const signature = `${orgInput}|${infraScan?.scanned === true}|${infraScan?.last_completed_at || ""}`;
+    if (!settingsBootstrap) return;
+    const signature = `${orgInput}|${demo}|${infraScan?.scanned === true}|${infraScan?.last_completed_at || ""}`;
     if (loadedSignatureRef.current === signature) return;
     loadedSignatureRef.current = signature;
     void loadMap();
-  }, [orgInput, infraScan?.scanned, infraScan?.last_completed_at, loadMap]);
+  }, [settingsBootstrap, demo, orgInput, infraScan?.scanned, infraScan?.last_completed_at, loadMap]);
 
   useEffect(() => {
     if (!mapData) return;

@@ -430,7 +430,8 @@ export default function DashboardClient() {
   };
 
   const fetchQueueJobs = useCallback(async () => {
-    if (!queueEnabled) {
+    // in demo mode the jobs list is the operator's (403 for a visitor): nothing to ask for
+    if (!queueEnabled || (demoConfig && !demoConfig.admin)) {
       setQueueJobs([]);
       setQueueError(null);
       return;
