@@ -430,8 +430,9 @@ export default function DashboardClient() {
   };
 
   const fetchQueueJobs = useCallback(async () => {
-    // in demo mode the jobs list is the operator's (403 for a visitor): nothing to ask for
-    if (!queueEnabled || (demoConfig && !demoConfig.admin)) {
+    // in demo mode the jobs list is the operator's (403 for a visitor): nothing to ask for,
+    // and nothing to ask before the bootstrap says which this is
+    if (!queueEnabled || !settingsBootstrap || (demoConfig && !demoConfig.admin)) {
       setQueueJobs([]);
       setQueueError(null);
       return;
@@ -488,7 +489,7 @@ export default function DashboardClient() {
       console.error("Failed to load queue jobs", error);
       setQueueError("Failed to load queue jobs");
     }
-  }, [queueEnabled, refreshSettingsBootstrap]);
+  }, [queueEnabled, settingsBootstrap, demoConfig, refreshSettingsBootstrap]);
 
   useEffect(() => {
     fetchQueueJobs();
