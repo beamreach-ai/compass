@@ -112,3 +112,41 @@ def test_a_payload_with_a_float_lands_on_the_table(monkeypatch):
                                queue="compass", workspace_id="ws")
         stored = store.get_job(job["job_id"], workspace_id="ws")
         assert stored["payload"]["advisory"]["cvss"] == Decimal("9.2") and stored["payload"]["advisory"]["affected"][0]["ranges"] == [Decimal("0.5")]
+
+
+class _Table:
+    """The two calls the store makes, and a refusal when asked for one."""
+
+    def __init__(self, refuse=False):
+        self.items, self.refuse = [], refuse
+
+    def put_item(self, Item):
+        if self.refuse:
+            from botocore.exceptions import ClientError
+
+            raise ClientError({"Error": {"Code": "ValidationException", "Message": "Item size has exceeded the maximum allowed size"}}, "PutItem")
+        self.items.append(Item)
+
+
+def test_a_job_keeps_its_first_and_latest_events_only(local_store):
+    from compass_core.jobs import MAX_JOB_EVENTS
+
+    local_store._table = table = _Table()
+    events = [{"timestamp": n, "message": str(n)} for n in range(MAX_JOB_EVENTS * 3)]
+    local_store._persist_item({"job_id": "j", "workspace_id": "ws", "events": events})
+    kept = table.items[0]["events"]
+    assert len(kept) == MAX_JOB_EVENTS
+    assert kept[0]["message"] == "0" and kept[-1]["message"] == str(MAX_JOB_EVENTS * 3 - 1)
+
+
+def test_an_item_the_table_refuses_does_not_take_the_table_away(local_store):
+    local_store._table = table = _Table(refuse=True)
+    local_store._persist_item({"job_id": "big", "workspace_id": "ws"})
+    assert local_store._table is table, "the next job can still be written"
+
+
+def test_the_local_store_takes_what_dynamodb_returned(local_store):
+    from decimal import Decimal
+
+    stored = local_store._persist_item({"job_id": "d", "workspace_id": "ws", "updated_at": Decimal("1793180254709"), "score": Decimal("7.5")})
+    assert stored["updated_at"] == 1793180254709 and stored["score"] == 7.5

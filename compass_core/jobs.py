@@ -68,6 +68,9 @@ def _job_event(
     return event
 
 
+MAX_JOB_EVENTS = 200
+
+
 def _decimals(value: Any) -> Any:
     """The value with every float a Decimal, which is the only number DynamoDB takes."""
     if isinstance(value, float):
@@ -77,6 +80,25 @@ def _decimals(value: Any) -> Any:
     if isinstance(value, (list, tuple)):
         return [_decimals(v) for v in value]
     return value
+
+
+def _plain(value: Any) -> Any:
+    """The value as JSON takes it: what comes back from DynamoDB has its numbers as Decimals."""
+    if isinstance(value, Decimal):
+        return int(value) if value == value.to_integral_value() else float(value)
+    if isinstance(value, dict):
+        return {k: _plain(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_plain(v) for v in value]
+    return value
+
+
+def _bounded_events(item: Dict[str, Any]) -> Dict[str, Any]:
+    """A job keeps its first event and its latest: DynamoDB refuses an item over 400 KB."""
+    events = item.get("events")
+    if not isinstance(events, list) or len(events) <= MAX_JOB_EVENTS:
+        return item
+    return {**item, "events": events[:1] + events[-(MAX_JOB_EVENTS - 1):]}
 
 
 class CaptainJobStore:
@@ -139,19 +161,23 @@ class CaptainJobStore:
         return enriched
 
     def _persist_item(self, item: Dict[str, Any]) -> Dict[str, Any]:
-        payload = self._ensure_storage_keys(item)
+        payload = _bounded_events(self._ensure_storage_keys(item))
         if self._table:
             try:
                 self._table.put_item(Item=_decimals(payload))  # a payload or result with a float (a CVSS score) is a Decimal on the table
                 return payload
             except (BotoCoreError, ClientError) as exc:
+                # one item the table refuses says nothing about the table: the next job is fine
+                if isinstance(exc, ClientError) and exc.response.get("Error", {}).get("Code") == "ValidationException":
+                    logger.error("DynamoDB refused job %s: %s", item.get("job_id"), exc)
+                    return payload
                 logger.warning(
                     "DynamoDB write failed for job %s; switching to local store: %s",
                     item.get("job_id"),
                     exc,
                 )
                 self._table = None
-        return local_state_store.create_job(item["job_id"], payload)
+        return local_state_store.create_job(item["job_id"], _plain(payload))
 
     def _load_job(self, job_id: str, workspace_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
         if self._table:
