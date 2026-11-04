@@ -263,7 +263,7 @@ _bootstrap_sections_cache: Dict[str, Any] = {}
 _bootstrap_sections_lock = threading.Lock()
 
 
-def _timed(name: str, fn: Any) -> Tuple[Any, float]:
+def _timed(name: str, fn: Any) -> tuple[Any, float]:
     started = time.monotonic()
     return fn(), time.monotonic() - started
 
