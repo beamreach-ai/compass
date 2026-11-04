@@ -429,8 +429,14 @@ export default function DashboardClient() {
     window.location.href = "/api/integrations/github/connect";
   };
 
+  // Booleans, not the bootstrap object: fetchQueueJobs refreshes the bootstrap, so depending
+  // on the object would recreate it on every answer and the effect below would loop.
+  const bootstrapReady = settingsBootstrap !== null;
+  const demoVisitor = Boolean(demoConfig && !demoConfig.admin);
   const fetchQueueJobs = useCallback(async () => {
-    if (!queueEnabled) {
+    // in demo mode the jobs list is the operator's (403 for a visitor): nothing to ask for,
+    // and nothing to ask before the bootstrap says which this is
+    if (!queueEnabled || !bootstrapReady || demoVisitor) {
       setQueueJobs([]);
       setQueueError(null);
       return;
@@ -487,7 +493,7 @@ export default function DashboardClient() {
       console.error("Failed to load queue jobs", error);
       setQueueError("Failed to load queue jobs");
     }
-  }, [queueEnabled, refreshSettingsBootstrap]);
+  }, [queueEnabled, bootstrapReady, demoVisitor, refreshSettingsBootstrap]);
 
   useEffect(() => {
     fetchQueueJobs();

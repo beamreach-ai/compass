@@ -263,6 +263,11 @@ _bootstrap_sections_cache: Dict[str, Any] = {}
 _bootstrap_sections_lock = threading.Lock()
 
 
+def _timed(name: str, fn: Any) -> tuple[Any, float]:
+    started = time.monotonic()
+    return fn(), time.monotonic() - started
+
+
 def _bootstrap_sections(config: Dict[str, Any], request: Request, workspace_id: Optional[str]) -> Dict[str, Any]:
     cache_key = str(workspace_id or "")
     now = time.monotonic()
@@ -275,9 +280,14 @@ def _bootstrap_sections(config: Dict[str, Any], request: Request, workspace_id: 
 
     providers = {name: (lambda fn=fn: fn(config, request)) for name, fn in extensions.bootstrap_sections().items()}
     providers["infra_scan"] = lambda: current_infra_scan_summary(request, config=config)
+    started = time.monotonic()
     with ThreadPoolExecutor(max_workers=max(1, len(providers))) as pool:
-        pending = {name: pool.submit(fn) for name, fn in providers.items()}
-        sections = {name: future.result() for name, future in pending.items()}
+        pending = {name: pool.submit(_timed, name, fn) for name, fn in providers.items()}
+        results = {name: future.result() for name, future in pending.items()}
+    sections = {name: value for name, (value, _) in results.items()}
+    if time.monotonic() - started > 1.0:  # the slow provider is the one to cache or fix
+        logger.info("bootstrap sections took %.1fs: %s", time.monotonic() - started,
+                    ", ".join(f"{name} {seconds:.1f}s" for name, (_, seconds) in sorted(results.items(), key=lambda kv: -kv[1][1])))
 
     if _BOOTSTRAP_SECTIONS_TTL_SECONDS > 0:
         with _bootstrap_sections_lock:

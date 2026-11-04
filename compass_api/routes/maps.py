@@ -8,7 +8,8 @@ from pydantic import BaseModel, Field
 from captains.mapper.ownership_resolver import InfraMapOwnershipResolver
 from compass_api.routes._infra_map import resolve_infra_map_context
 from compass_api.routes._infra_scan import enqueue_full_infra_scan, mark_infra_scan_pending_for_request
-from compass_api.routes._workspace import get_actor_ids
+from compass_api.routes._workspace import get_actor_ids, get_workspace_config
+from compass_core import demo
 from compass_core.queue import queue_proxy
 from infra_map.graph_store import GraphStore
 from infra_map.models import RelationshipEdge, ResourceNode
@@ -298,6 +299,8 @@ def get_iac_suggestions(
 
     for node in graph.get("nodes", []):
         attrs = node.attributes or {}
+        if attrs.get("synthetic"):
+            continue  # the demo's world: no pull request goes to a repository that is not there
         if node.type == "github_repo" and node.name:
             repos.append(node.name)
         elif node.type == "tf_root_module":
@@ -306,8 +309,13 @@ def get_iac_suggestions(
             if repo and path:
                 modules.append({"repo": repo, "path": path})
 
+    ordered = sorted(set(repos))
+    # in demo mode the visitors' pull requests go to one repository: the form starts there
+    visitor_repo = demo.settings(get_workspace_config(request)).get("visitor_repo") if demo.enabled() else ""
+    if visitor_repo:
+        ordered = [visitor_repo] + [r for r in ordered if r != visitor_repo]
     return {
-        "repos": sorted(set(repos)),
+        "repos": ordered,
         "modules": sorted(modules, key=lambda m: (m["repo"], m["path"])),
     }
 
