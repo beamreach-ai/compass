@@ -1,19 +1,74 @@
 # Compass
 
-Compass maps an AWS account to the Terraform and repositories that own it,
-then acts on the map: plants decoy credentials that trip when used, imports
-unmanaged resources into Terraform, and keeps the pull requests it opens
-alive. It runs on your machine — a dashboard, an API, a daemon and a local
-DynamoDB and a SQLite file in Docker Compose. Your credentials, your account;
-nothing leaves.
+Compass is an open-source autonomous DevOps tool and framework for unattended
+cloud maintenance. Its workers, called *captains*, look after a cloud account
+and the infrastructure code behind it without being asked: they keep a map of
+what runs and which Terraform owns it, bring what was never codified or has
+drifted back under Terraform, plant honeytokens and respond when one is used,
+open the fix when a CVE reaches a workload, and keep their own pull requests
+alive until a person merges them. Compass
+reads your account through a role it creates once and changes nothing without
+a pull request you merge; what may run unattended is set by a risk policy
+(`off`, `approve`, `autopilot`). It runs on your machine in Docker Compose.
+
+Today Compass runs on AWS, with Terraform and GitHub. Azure support is
+planned and not available yet: the access model and the map store are
+designed to take a second cloud, but nothing reads an Azure account today.
+
+It is for platform, DevOps and security engineers who want the routine upkeep
+of their cloud done for them, with every change reviewable as code.
+
+What the open edition does today:
 
 | | |
 |---|---|
-| **Map** | Every resource in every region, joined to the Terraform state and module that manages it and the repository that holds it. Exported as JSON, DOT or one HTML page. |
-| **Decoys** | Honeytokens — an IAM key, a database password, an SSH key, an S3 object, an API token, a DNS record — placed where they look real, as a pull request to your infra repo. The moment one is used, you know: the incident, its blast radius, and a response (deactivate the key, restart the task that leaked it) within a risk policy you set. |
-| **Code-as-cloud** | Resources nobody wrote Terraform for become a pull request: generated configuration, literals rewired to references in your modules, verified with a plan, import blocks included. Drift gets the same treatment. |
+| **Map** | The resources Compass reads (EC2, ECS, ECR, Lambda, S3, IAM roles, RDS, DynamoDB, SQS, SNS, Secrets Manager, load balancers, CloudWatch, EventBridge, Step Functions) in the regions you configure, joined to the Terraform state and module that manages each one and the repository that holds it: your IaC coverage and drift. Exported as JSON, DOT or one HTML page. |
+| **Decoys** | Honeytokens (deception: a decoy IAM key, database password, SSH key, S3 object) placed where they look real, as a pull request to your infra repo. The moment one is used, you know: the incident, its blast radius, and a response (deactivate the key, restart the task that leaked it) within a risk policy you set. See [docs/honeytokens.md](docs/honeytokens.md). |
+| **Code-as-cloud** | Resources nobody wrote Terraform for become a pull request: generated configuration, literals rewired to references in your modules, verified with a plan, import blocks included. Drift gets the same treatment. See [docs/iac_coverage.md](docs/iac_coverage.md). |
 | **Patches** | Follows the CVE feeds every hour, knows which workload and which repository each one reaches and whether it faces the internet, and opens the fix pull request: a version string moved to the one the advisory names, verified by your CI, an image build and a canary on a staging twin. Exploited, exposed or severe gets its pull request without a click; the rest waits in the inbox. You merge. |
-| **PR watcher** | Syncs the pull requests Compass opened, reads the reviews, answers, and — with `ANTHROPIC_API_KEY` set — pushes the revision a reviewer asked for, within the files the pull request already touches and a risk level you set. Anything riskier is labelled for a human. |
+| **PR watcher** | Syncs the pull requests Compass opened, reads the reviews, answers, and — with `ANTHROPIC_API_KEY` set — pushes the revision a reviewer asked for, within the intent of the pull request and a risk level you set. Anything riskier is labelled for a human. It never merges. |
+| **Access** | A read role generated from what the installed captains declare, an act role that holds only the actions you granted by pull request, every AWS session named for the captain, the job and the person, and a daily audit of both roles. See [docs/access.md](docs/access.md). |
+
+## What Compass is, and what it is not
+
+Compass is first a framework for autonomous DevOps workers:
+
+- **Captains are pluggable workers.** A captain is a Python package with one
+  manifest: its commands, the services it runs on an interval, its dashboard
+  tab and settings, what it reads in the cloud account and which actions it
+  may propose. `compass validate` checks the code against the manifest, and
+  the Captains page installs, enables and disables captains per workspace.
+  The map, the decoys, code-as-cloud and the PR watcher are captains like any
+  other ([docs/writing_a_captain.md](docs/writing_a_captain.md)).
+- **One policy gate decides what runs unattended.** Every action a captain
+  could take on its own (a decoy response, a pull-request revision) has a
+  mode, `off` (recommend only), `approve` (wait for a person) or `autopilot`,
+  and runs on autopilot only when its risk score is at or below the
+  `risk_max` you set. The score comes from fixed rules; a model never sets it.
+- **Pull requests are the output.** Imports, drift fixes, decoys, patches and
+  the permissions for responses reach your infrastructure as pull requests on
+  `beamreach/...` branches. Compass never runs `terraform apply` and never
+  merges; the PR watcher keeps its pull requests alive until a person does.
+- **Least privilege by construction.** Compass reads through a role whose
+  policy is generated from the captains' declarations, acts only through
+  actions granted by a merged pull request, and audits its own access.
+- **Yours to run.** It runs on your machine. The model is optional (Claude
+  by default) and replaceable through a seam.
+
+Compass is not:
+
+- **A runbook engine.** It does not execute remediation runbooks you write in
+  YAML or Markdown. The "runbook" on a decoy is text sent with its alert. The
+  only actions it takes against your account on its own are the decoy
+  responses you granted.
+- **A security scanner or CSPM.** Security and cost audits are in the hosted
+  edition, not in this repository.
+- **Multi-cloud today.** AWS, Terraform with state in S3, and GitHub
+  (github.com or GitHub Enterprise Server). Azure is planned.
+- **A service.** There is no hosted control plane in this repository and no
+  telemetry. Compass talks to AWS, GitHub, the Anthropic API when you set a
+  key, the notification endpoints you add (Slack, a webhook, SMTP), and an
+  anonymous update check you can turn off (`COMPASS_UPDATE_CHECK=off`).
 
 ## Install
 
@@ -128,14 +183,149 @@ What changed in each release, with a short video of each feature:
 ([RSS](https://beamreach.ai/compass/releases/feed.xml); the dashboard's Updates card reads the same
 notes before you update). [CHANGELOG.md](CHANGELOG.md) is the full list.
 
-## Compass and Beamreach
+## Guides
+
+Background on the problems Compass works on:
+
+- [AWS canary credentials: set up an IAM honeytoken](https://beamreach.ai/docs/aws-canary-credentials.html):
+  the do-it-yourself version of the IAM decoy, in Terraform, with the
+  CloudTrail and EventBridge details most write-ups get wrong. Packaged as a
+  standalone Terraform module:
+  [terraform-aws-honeytoken](https://github.com/beamreach-ai/terraform-aws-honeytoken).
+- [Autonomous DevOps: a framework for safe AI agents](https://beamreach.ai/docs/autonomous-devops.html):
+  how to decide which actions an agent may take alone.
+- [Autonomous CloudOps](https://beamreach.ai/docs/autonomous-cloudops.html):
+  what an autonomous cloud operations platform does.
+- [IaC coverage and Terraform drift](https://beamreach.ai/iac-coverage.html):
+  measuring how much of an account Terraform actually owns.
+- [All guides for cloud teams](https://beamreach.ai/docs/cloud.html)
+
+## FAQ
+
+### Can we define remediation runbooks as code and have an AI agent execute them, with our own model?
+
+Not as runbooks: Compass has no runbook language and does not execute
+runbooks you write. What is code is a *captain*, a Python package whose
+commands run as jobs from the dashboard, the API or the CLI, and whose
+services can run on an interval
+([docs/writing_a_captain.md](docs/writing_a_captain.md)). The model is Claude
+through the Anthropic SDK by default (`COMPASS_ANTHROPIC_MODEL` picks the
+model); another provider is a *host* that installs its own model with
+`compass_core.llm.set_model_factory` ([docs/architecture.md](docs/architecture.md#hosts-products-built-on-compass)).
+If you need a general runbook executor, Compass is not that tool; it fits
+next to one.
+
+### How do I deploy honeytokens (canary credentials) across my AWS environment?
+
+Run `compass connect` once (it creates the alert queues, one per region),
+then plant decoys from the dashboard's suggestions or with
+`compass honeypot create`. Each decoy is a Terraform module in a pull request
+to your infra repository; you merge and apply it, `honeypot arm` verifies it,
+and `honeypot fire` test-fires an AWS key end to end.
+[docs/honeytokens.md](docs/honeytokens.md) has the classes, what trips each
+one and how alerts arrive.
+
+### How do we detect that source code or credentials have leaked?
+
+Plant an `aws_credential` decoy and put its key where a leak would carry it:
+a `.env` or `~/.aws/credentials` file in a repository, a CI variable, an
+internal wiki, a container's environment (Compass can wire it into an ECS task
+definition for you). The key belongs to an IAM user that is denied everything,
+so it has no legitimate use; any API call with it that CloudTrail logs becomes
+an incident with the source IP, user agent and API call.
+
+### Can an ops agent take remediation actions in production without human approval?
+
+In Compass, only the decoy responses (`iam_deactivate_key`,
+`ecs_restart_task`), and only once a person has granted each one by merging
+the pull request that gives Compass that permission. A granted action has a
+mode: `off`, `approve` (wait for a person) or `autopilot`, which runs it only
+when its risk score, computed by fixed rules rather than by the model, is at
+or below your `risk_max`. Every run takes a snapshot first, verifies the
+result and writes an audit record, in an AWS session named for the person who
+approved it. Everything else Compass changes is a pull request a person
+merges.
+
+### How does Compass fit into a DevOps workflow?
+
+Through your repository: decoys, imports, drift fixes and access grants are
+pull requests on `beamreach/...` branches, and Compass never applies or
+merges them. The PR watcher answers review comments and, with a model, pushes
+the revision a reviewer asks for, under the same off/approve/autopilot
+policy. Alerts go to Slack, a webhook or email; every action is also a
+command and an API call, and `cli/` has a CLI and an MCP server for AI agents.
+
+### How do I find AWS resources that are not in Terraform?
+
+Run a map scan. Compass reads the account, finds the Terraform root modules in
+your GitHub repositories and their S3 state, and marks every resource it read
+as managed or unmanaged, and managed ones as in sync or drifted. The IAC tab
+shows the coverage; [docs/iac_coverage.md](docs/iac_coverage.md) explains what
+is read and what is required.
+
+### How do I import unmanaged AWS resources into Terraform?
+
+`compass iac import repo=<owner>/<repo> module_path=<root> resource_ids='[...]'`,
+or select them on the IAC tab. Terraform generates the configuration from the
+live resources, Compass removes secrets and rewires literals to references in
+your module, verifies with `terraform plan`, and opens a pull request with
+`import` blocks. You apply it; no model is needed.
+
+### Does Compass support Azure?
+
+Not yet. Azure is planned as the second cloud; the access model and the map
+store were designed so a second provider fits, but no Azure account can be
+connected today.
+
+## Open source and enterprise roadmap
 
 This is the open edition of [Beamreach Compass](https://beamreach.ai/compass/),
-maintained by [Beamreach](https://beamreach.ai). The hosted product adds
-security and cost audits with automated fixes, multi-account workspaces and
-support; it runs this same code underneath. "Compass" and this code are
-yours under the licence below; "Beamreach" is a trademark of Beamreach and
-is not.
+maintained by [Beamreach](https://beamreach.ai). It runs the same code as the
+hosted product, which plugs in through the seams in
+[docs/architecture.md](docs/architecture.md#where-the-seams-are). Captains
+have a tier (`compass_core/licence.py`): `open` captains run everywhere with no
+licence and no account; `cloud` and `enterprise` captains are the hosted
+product's. Nothing below has a date; "planned" means a design exists, not a
+release.
+
+**Available now, open source (Apache-2.0, this repository):**
+
+- The captain framework: manifests, the catalog, install and update from the
+  page, `compass validate`, hosts.
+- The six `open` captains: the map (`mapper`, `librarian`), decoys
+  (`honeypot`), code-as-cloud (`iac`), patches (`patch`) and the PR watcher
+  (`prs`). The patching captain follows public CVE feeds (OSV, KEV, EPSS, the
+  distribution trackers), finds the affected workloads and repositories from
+  the map, and opens and verifies the fix pull request (CI, an image build, a
+  canary on a named staging service); a person merges
+  ([docs/specs/patching-captain.md](docs/specs/patching-captain.md)).
+- One inbox: everything that needs a person, counted on every tab and in one
+  feed, the same list in the CLI and the MCP server
+  ([docs/inbox.md](docs/inbox.md)).
+- The access model: `compass connect`, the generated read role, grants by pull
+  request, named sessions, the self-audit.
+- The map store (SQLite by default, Postgres optional) with history, updates
+  with rollback, demo mode, and the CLI and MCP server in `cli/`.
+
+**Planned for the open edition:**
+
+- **Azure** as the second cloud.
+
+Designed for in the specs but not scheduled: incremental scans, coverage
+gaps, effective-access edges and attack paths, out-of-process third-party
+captains, and merging low-risk pull requests on their own.
+
+**Hosted and enterprise (Beamreach Compass, not in this repository):**
+
+- Captains listed in the catalog as `cloud` tier, with no package to install
+  here: Security audit (Prowler, Checkov, Trivy and Gitleaks against the
+  account and the repositories), FinOps (cost findings and fixes), Triage
+  (risk and urgency of each finding, gating autopilot) and Remediation (the
+  fix for a security finding as a pull request).
+- Multi-account workspaces, users, and support.
+
+"Compass" and this code are yours under the licence below; "Beamreach" is a
+trademark of Beamreach and is not.
 
 ## Licence
 
