@@ -128,6 +128,21 @@ What changed in each release, with a short video of each feature:
 ([RSS](https://beamreach.ai/compass/releases/feed.xml); the dashboard's Updates card reads the same
 notes before you update). [CHANGELOG.md](CHANGELOG.md) is the full list.
 
+## Guides
+
+Background on the problems Compass works on:
+
+- [AWS canary credentials: set up an IAM honeytoken](https://beamreach.ai/docs/aws-canary-credentials.html):
+  the do-it-yourself version of the IAM decoy, in Terraform, with the
+  CloudTrail and EventBridge details most write-ups get wrong.
+- [Autonomous DevOps: a framework for safe AI agents](https://beamreach.ai/docs/autonomous-devops.html):
+  how to decide which actions an agent may take alone.
+- [Autonomous CloudOps](https://beamreach.ai/docs/autonomous-cloudops.html):
+  what an autonomous cloud operations platform does.
+- [IaC coverage and Terraform drift](https://beamreach.ai/iac-coverage.html):
+  measuring how much of an account Terraform actually owns.
+- [All guides for cloud teams](https://beamreach.ai/docs/cloud.html)
+
 ## Compass and Beamreach
 
 This is the open edition of [Beamreach Compass](https://beamreach.ai/compass/),
