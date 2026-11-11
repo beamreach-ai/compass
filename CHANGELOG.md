@@ -13,7 +13,10 @@ visitor through sign-in to their tour row (`POST /api/demo/tour/start`) and on
 to the pilot page, and a product can register tour steps of its own
 (`compass_core.demo.register_tour_step`). With `demo.links.pilot` set, every
 pull-request step says what the PR would cost on the visitor's own account and
-every exit points to the pilot. [docs/demo.md](docs/demo.md#the-tour).
+every exit points to the pilot, and posts an event. `GET /api/demo/funnel` and
+`compass demo funnel` count the visitors by source and story: the steps they
+reached, the pull requests, the pilot clicks; a "Demo funnel" card at the top of
+Settings shows it to the operator. [docs/demo.md](docs/demo.md#the-tour).
 
 ## 0.9.0 — 2026-10-25
 

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
 import { useShell } from "../lib/shell";
-import { completeTourStep, pilotHref, readTourSource, startTour, TOUR_COLLAPSED_KEY, tourStarted, tourStepHref, type Tour } from "../lib/tour";
+import { completeTourStep, pilotHref, readTourSource, recordTourEvent, startTour, TOUR_COLLAPSED_KEY, tourStarted, tourStepHref, type Tour } from "../lib/tour";
 
 // The tour: a panel bottom-right, collapsible to a pill ("Tour · 3 of 7"), opened by itself
 // on a visitor's first visit, resumable from the pill. Steps are facts about the world,
@@ -157,7 +157,10 @@ export default function TourPanel() {
                           target="_blank"
                           rel="noopener noreferrer"
                           data-tour-pilot
-                          onClick={() => completeTourStep("run_it")}
+                          onClick={() => {
+                            recordTourEvent("pilot_click", pilot);
+                            completeTourStep("run_it");
+                          }}
                           className="block font-semibold text-amber-800 hover:underline"
                         >
                           Start a pilot on your account: 10 pull requests free →
@@ -167,7 +170,10 @@ export default function TourPanel() {
                         href={String(step.detail?.links?.install ?? "https://beamreach.ai/compass/install.html")}
                         target="_blank"
                         rel="noopener noreferrer"
-                        onClick={() => completeTourStep("run_it")}
+                        onClick={() => {
+                          recordTourEvent("install_click");
+                          completeTourStep("run_it");
+                        }}
                         className="block font-semibold text-blue-700 hover:underline"
                       >
                         Install Compass: one compose file →
@@ -176,7 +182,10 @@ export default function TourPanel() {
                         href={String(step.detail?.links?.repository ?? "https://github.com/beamreach-ai/compass")}
                         target="_blank"
                         rel="noopener noreferrer"
-                        onClick={() => completeTourStep("run_it")}
+                        onClick={() => {
+                          recordTourEvent("repository_click");
+                          completeTourStep("run_it");
+                        }}
                         className="block text-blue-700 hover:underline"
                       >
                         The repository on GitHub →
@@ -196,7 +205,7 @@ export default function TourPanel() {
       </ol>
       {pilot && !(current?.id === "run_it") && (
         <div className="border-t border-amber-200 bg-amber-50 px-4 py-2 text-xs">
-          <a href={pilot} target="_blank" rel="noopener noreferrer" data-tour-pilot className="font-semibold text-amber-900 hover:underline">
+          <a href={pilot} target="_blank" rel="noopener noreferrer" data-tour-pilot onClick={() => recordTourEvent("pilot_click", pilot)} className="font-semibold text-amber-900 hover:underline">
             Start a pilot on your account: 10 pull requests free →
           </a>
         </div>

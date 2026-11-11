@@ -371,8 +371,30 @@ def mark_tour_step(table: Any, pk: str, user_id: str, step: str, *, skipped: boo
 
 
 def _row_keep(row: Dict[str, Any]) -> Dict[str, Any]:
-    """What a tour row carries besides its steps: the story and the source, written once."""
-    return {k: row[k] for k in ("story", "source", "landed_at") if row.get(k)}
+    """What a tour row carries besides its steps: the story and the source, written once, and the events."""
+    return {k: row[k] for k in ("story", "source", "landed_at", "events") if row.get(k)}
+
+
+TOUR_EVENTS = ("pilot_click", "install_click", "repository_click")  # what the dashboard may report besides steps
+TOUR_EVENTS_MAX = 50
+
+
+def record_tour_event(table: Any, pk: str, user_id: str, event: str, *, detail: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Something the visitor did that is not a step: the pilot link, the install page, the repository.
+    Appended to the row's events, newest last, the oldest dropped past TOUR_EVENTS_MAX."""
+    from compass_core.keys import demo_tour_sort_key
+
+    if event not in TOUR_EVENTS:
+        raise LookupError(f"no tour event {event!r}: one of {', '.join(TOUR_EVENTS)}")
+    row = tour_row(table, pk, user_id)
+    now = epoch_ms()
+    events = list(row.get("events") or [])
+    events.append({"event": event, "at": now, **{k: str(v)[:SOURCE_MAX_LEN] for k, v in (detail or {}).items() if v}})
+    row["events"] = events[-TOUR_EVENTS_MAX:]
+    row = {**_row_keep(row), "pk": pk, "sk": demo_tour_sort_key(user_id), "user_id": user_id, "steps": dict(row.get("steps") or {}),
+           "started_at": row.get("started_at") or now, "updated_at": now}
+    table.put_item(Item=row)
+    return _native(row)
 
 
 def start_tour(table: Any, pk: str, user_id: str, *, story: Optional[str] = None, source: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -472,6 +494,66 @@ def tour(table: Any, pk: str, config: Dict[str, Any], *, user_id: Optional[str],
     return {"steps": steps, "completed": completed, "total": len(steps), "current": current, "finished": passed == len(steps),
             "story": story, "source": dict(row.get("source") or {}), "pilot": pilot,
             "started_at": row.get("started_at"), "updated_at": row.get("updated_at")}
+
+
+def funnel(table: Any, pk: str, *, since_ms: int, prs: List[Dict[str, Any]], now_ms: Optional[int] = None) -> Dict[str, Any]:
+    """The visitors since ``since_ms``, by where they came from and which story: how many
+    started, reached each step, opened a pull request, clicked the pilot link. From the tour
+    rows and the registry; nothing else is counted and nobody is named."""
+    from boto3.dynamodb.conditions import Key
+
+    from compass_core.keys import demo_tour_prefix
+
+    now_ms = now_ms or epoch_ms()
+    pr_users: Dict[str, int] = {}
+    for pr in prs:
+        origin = pr.get("origin") if isinstance(pr.get("origin"), dict) else {}
+        if origin.get("seeded"):
+            continue
+        who = str(origin.get("user_id") or "anonymous")
+        pr_users[who] = pr_users.get(who, 0) + 1
+
+    def bucket() -> Dict[str, Any]:
+        return {"visitors": 0, "steps": {}, "pr_opened": 0, "pilot_click": 0, "install_click": 0, "repository_click": 0, "finished": 0}
+
+    by_source: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    total = bucket()
+    rows = table.query(KeyConditionExpression=Key("pk").eq(pk) & Key("sk").begins_with(demo_tour_prefix())).get("Items", [])
+    all_steps = tour_step_ids()
+    for raw in rows:
+        row = _native(raw)
+        started = int(row.get("landed_at") or row.get("started_at") or 0)
+        if started < since_ms:
+            continue
+        source = row.get("source") if isinstance(row.get("source"), dict) else {}
+        key = (str(source.get("src") or "direct"), str(story_name(row.get("story")) or DEFAULT_STORY))
+        steps = row.get("steps") if isinstance(row.get("steps"), dict) else {}
+        events = [e.get("event") for e in (row.get("events") or []) if isinstance(e, dict)]
+        done = {step for step, entry in steps.items() if isinstance(entry, dict) and entry.get("done_at")}
+        who = str(row.get("user_id") or "anonymous")
+        if pr_users.get(who):
+            done.update(s for s in ("import_pr",) if s in all_steps)
+        for target in (by_source.setdefault(key, bucket()), total):
+            target["visitors"] += 1
+            for step in done:
+                target["steps"][step] = target["steps"].get(step, 0) + 1
+            if pr_users.get(who):
+                target["pr_opened"] += 1
+            for name in ("pilot_click", "install_click", "repository_click"):
+                if name in events:
+                    target[name] += 1
+            if all(step in done for step in ("map", "unmanaged", "decoys", "run_it")):
+                target["finished"] += 1
+    sources = [{"src": src, "story": story, **counts} for (src, story), counts in sorted(by_source.items(), key=lambda kv: (-kv[1]["visitors"], kv[0]))]
+    by_story: Dict[str, Dict[str, Any]] = {}
+    for entry in sources:
+        agg = by_story.setdefault(entry["story"], bucket())
+        for name in ("visitors", "pr_opened", "pilot_click", "install_click", "repository_click", "finished"):
+            agg[name] += entry[name]
+        for step, n in entry["steps"].items():
+            agg["steps"][step] = agg["steps"].get(step, 0) + n
+    return {"since": since_ms, "until": now_ms, "steps": all_steps, "total": total, "by_source": sources,
+            "by_story": [{"story": story, **counts} for story, counts in sorted(by_story.items(), key=lambda kv: -kv[1]["visitors"])]}
 
 
 def tour_completions(table: Any, pk: str, *, since_ms: int) -> int:

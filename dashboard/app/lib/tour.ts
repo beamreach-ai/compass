@@ -95,6 +95,22 @@ export const tourStarted = (): boolean => {
   }
 };
 
+export type TourEvent = "pilot_click" | "install_click" | "repository_click";
+
+/** An exit the visitor took (not a step): counted in the funnel, fire and forget. */
+export const recordTourEvent = (event: TourEvent, href?: string | null): void => {
+  try {
+    void fetch("/api/demo/tour/event", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ event, href: href ?? null }),
+      keepalive: true,
+    }).catch(() => undefined);
+  } catch {
+    // the funnel is a convenience
+  }
+};
+
 export const completeTourStep = (step: string, body?: { incident_id?: string | null }): void => {
   try {
     void fetch(`/api/demo/tour/${encodeURIComponent(step)}`, {

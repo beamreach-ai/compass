@@ -219,3 +219,50 @@ def test_a_product_step_joins_the_tour_and_the_story_that_names_it(env):
     tour = client.get("/api/demo/tour").json()
     assert tour["total"] == 7 and [s["id"] for s in tour["steps"]][:2] == ["unmanaged", "import_pr"] and tour["story"] == "cost"
     assert client.post("/api/demo/tour/cost_fix").status_code == 404
+
+
+def test_exits_are_events_and_the_funnel_counts_them_for_the_operator(env, monkeypatch):
+    from compass_api import demo_guard
+
+    client, table, actor, prs = env
+    # three visitors from two ads, one direct
+    client.post("/api/demo/tour/start", json={"story": "drift", "src": "gads", "gclid": "x"})
+    client.post("/api/demo/tour/unmanaged")
+    prs.append({"repo": "acme/infra", "number": 8, "pr_url": "https://github.com/acme/infra/pull/8", "origin": {"captain": "iac", "command": "import", "user_id": "visitor-1"}})
+    assert client.post("/api/demo/tour/event", json={"event": "pilot_click", "href": "https://beamreach.ai/compass/pilot.html?src=demo"}).json() == {"ok": True}
+    assert client.post("/api/demo/tour/event", json={"event": "nope"}).status_code == 404
+    row = demo.tour_row(table, PK, "visitor-1")
+    assert [e["event"] for e in row["events"]] == ["pilot_click"] and row["events"][0]["href"].endswith("src=demo") and row["events"][0]["at"]
+    actor["user_id"] = "visitor-2"
+    client.post("/api/demo/tour/start", json={"story": "drift", "src": "gads"})
+    client.post("/api/demo/tour/event", json={"event": "install_click"})
+    actor["user_id"] = "visitor-3"
+    client.post("/api/demo/tour/start", json={"story": "honeytoken", "src": "reddit"})
+    client.post("/api/demo/tour/decoys")
+    actor["user_id"] = "visitor-4"
+    client.get("/api/demo/tour")  # looked, never started: not a visitor in the funnel
+    prs.append({"repo": "acme/infra", "number": 1, "url": "https://github.com/acme/infra/pull/1", "origin": {"command": "seed_pr", "seeded": True}})
+
+    # a visitor is not the operator
+    monkeypatch.setattr(demo_guard, "is_demo_admin", lambda request, config=None: False)
+    assert client.get("/api/demo/funnel").status_code == 403
+    monkeypatch.setattr(demo_guard, "is_demo_admin", lambda request, config=None: True)
+    funnel = client.get("/api/demo/funnel?days=7").json()
+    assert funnel["total"]["visitors"] == 3 and funnel["total"]["pr_opened"] == 1 and funnel["total"]["pilot_click"] == 1 and funnel["total"]["install_click"] == 1
+    assert funnel["total"]["steps"] == {"unmanaged": 1, "import_pr": 1, "decoys": 1} and funnel["steps"][0] == "map"
+    gads = next(r for r in funnel["by_source"] if r["src"] == "gads")
+    assert gads["story"] == "drift" and gads["visitors"] == 2 and gads["pr_opened"] == 1 and gads["pilot_click"] == 1 and gads["steps"] == {"unmanaged": 1, "import_pr": 1}
+    reddit = next(r for r in funnel["by_source"] if r["src"] == "reddit")
+    assert reddit["story"] == "honeytoken" and reddit["visitors"] == 1 and reddit["steps"] == {"decoys": 1} and reddit["pr_opened"] == 0
+    assert [s["story"] for s in funnel["by_story"]] == ["drift", "honeytoken"] and funnel["by_story"][0]["visitors"] == 2
+    assert funnel["by_source"][0]["src"] == "gads", "most visitors first"
+    # nothing before the window
+    table.update_item(Key={"pk": PK, "sk": demo.tour_row(table, PK, "visitor-3")["sk"]}, UpdateExpression="SET landed_at = :t", ExpressionAttributeValues={":t": 1})
+    assert client.get("/api/demo/funnel?days=7").json()["total"]["visitors"] == 2
+    # the CLI's line
+    from compass_core import demo_reset
+
+    monkeypatch.setattr(demo_reset, "PRRegistry", type("R", (), {"from_config": staticmethod(lambda config, workspace_id: type("L", (), {"list": lambda self, limit: list(prs)})())}))
+    monkeypatch.setattr(demo_reset, "dynamo_table", lambda name: table)
+    out = demo_reset.funnel(CONFIG, workspace_id=WS, days=7)
+    assert out["summary"].splitlines()[1].startswith("gads") and out["summary"].splitlines()[-1].startswith("total") and " 2 " in out["summary"].splitlines()[-1]

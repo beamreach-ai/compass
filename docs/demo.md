@@ -291,6 +291,15 @@ the last step link to it, and the link carries `src=demo`, `story`, `gclid`
 and `from` (the original `src`), so the page that receives the application
 knows which ad it came from without a cookie. Empty hides all of it.
 
+**The funnel.** Every exit the panel offers posts an event (`POST
+/api/demo/tour/event`: `pilot_click`, `install_click`, `repository_click`) onto
+the tour row. `GET /api/demo/funnel?days=30` (the demo's operator only, 403 for
+a visitor; `compass demo funnel [days=30]` prints it) counts the visitors who
+started in that window by `src` and story: how many reached each step, opened a
+pull request, clicked the pilot link, finished. Nobody is named. In the
+dashboard it is the "Demo funnel" card at the top of Settings, which only the
+operator sees.
+
 **A product's steps.** `compass_core.demo.register_tour_step(spec, fact)` adds
 a step: `spec` has the same keys as the core's (`id`, `kind`, `title`, `why`,
 `done_when`, and `pr: true` for a step that opens a pull request), `fact(ctx)`

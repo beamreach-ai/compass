@@ -110,6 +110,39 @@ def start_tour(request: Request, body: TourStart = TourStart()) -> Dict[str, Any
     return demo.tour(table, pk, get_workspace_config(request), user_id=actor.get("user_id"), prs=_prs(request))
 
 
+class TourEventBody(BaseModel):
+    event: str  # pilot_click | install_click | repository_click
+    href: Optional[str] = None
+
+
+@router.post("/api/demo/tour/event")
+def post_tour_event(request: Request, body: TourEventBody) -> Dict[str, Any]:
+    """The visitor clicked an exit: the pilot link, the install page, the repository. Not a step;
+    counted in the funnel."""
+    require_demo_mode()
+    actor, table, pk = _tour_context(request)
+    try:
+        demo.record_tour_event(table, pk, str(actor.get("user_id") or "anonymous"), body.event, detail={"href": body.href})
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"ok": True}
+
+
+@router.get("/api/demo/funnel")
+def get_funnel(request: Request, days: int = 30) -> Dict[str, Any]:
+    """The demo's funnel, for its operator: visitors by source and story, the steps they reached,
+    the pull requests they opened, the pilot clicks. Anyone else gets 403."""
+    from compass_api import demo_guard
+
+    require_demo_mode()
+    config = get_workspace_config(request)
+    if not demo_guard.is_demo_admin(request, config):
+        raise HTTPException(status_code=403, detail="The funnel is the demo operator's")
+    actor, table, pk = _tour_context(request)
+    since = demo.epoch_ms() - max(1, min(int(days), 365)) * 86_400_000
+    return demo.funnel(table, pk, since_ms=since, prs=_prs(request))
+
+
 @router.post("/api/demo/tour/{step}")
 def post_tour_step(request: Request, step: str, body: TourEvent = TourEvent()) -> Dict[str, Any]:
     """A client-only step happened (a node's detail opened, the IaC tab viewed, a decoy's detail
