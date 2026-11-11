@@ -4,11 +4,13 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
 import { useShell } from "../lib/shell";
-import { completeTourStep, TOUR_COLLAPSED_KEY, tourStepHref, type Tour } from "../lib/tour";
+import { completeTourStep, pilotHref, readTourSource, recordTourEvent, startTour, TOUR_COLLAPSED_KEY, tourStarted, tourStepHref, type Tour } from "../lib/tour";
 
 // The tour: a panel bottom-right, collapsible to a pill ("Tour · 3 of 7"), opened by itself
 // on a visitor's first visit, resumable from the pill. Steps are facts about the world,
 // read from the API every 10 s while the panel is open; a client-only step posts itself.
+// The first load of a session posts the story and source the visitor landed with; the
+// order of the steps is the story's. Every exit points to the pilot page when one is set.
 export default function TourPanel() {
   const { settingsBootstrap } = useShell();
   const demo = settingsBootstrap?.app?.mode === "demo";
@@ -17,9 +19,13 @@ export default function TourPanel() {
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch("/api/demo/tour");
-      if (!res.ok) return;
-      const next = (await res.json()) as Tour;
+      let next: Tour | null = null;
+      if (!tourStarted()) next = await startTour(readTourSource());
+      if (!next) {
+        const res = await fetch("/api/demo/tour");
+        if (!res.ok) return;
+        next = (await res.json()) as Tour;
+      }
       setTour(next);
       setOpen((current) => {
         if (current !== null) return current;
@@ -81,6 +87,7 @@ export default function TourPanel() {
   }
 
   const current = tour.steps.find((s) => s.id === tour.current) ?? null;
+  const pilot = pilotHref(tour);
   return (
     <aside
       data-tour-panel
@@ -114,6 +121,11 @@ export default function TourPanel() {
                 <div className="min-w-0 flex-1">
                   <div className={`text-sm font-semibold ${step.done ? "text-gray-500 line-through" : "text-gray-900"}`}>{step.title}</div>
                   {(active || (!step.done && !step.skipped)) && <p className="mt-0.5 text-xs text-gray-600">{step.why}</p>}
+                  {active && step.pr && step.detail?.pilot?.note && (
+                    <p className="mt-1 text-xs text-amber-800" data-tour-pilot-note>
+                      {String(step.detail.pilot.note)}
+                    </p>
+                  )}
                   {active && step.id !== "run_it" && (
                     <div className="mt-1.5 flex flex-wrap items-center gap-3 text-xs">
                       {href && (
@@ -139,11 +151,29 @@ export default function TourPanel() {
                   )}
                   {active && step.id === "run_it" && (
                     <div className="mt-2 space-y-1.5 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-xs">
+                      {pilot && (
+                        <a
+                          href={pilot}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          data-tour-pilot
+                          onClick={() => {
+                            recordTourEvent("pilot_click", pilot);
+                            completeTourStep("run_it");
+                          }}
+                          className="block font-semibold text-amber-800 hover:underline"
+                        >
+                          Start a pilot on your account: 10 pull requests free →
+                        </a>
+                      )}
                       <a
                         href={String(step.detail?.links?.install ?? "https://beamreach.ai/compass/install.html")}
                         target="_blank"
                         rel="noopener noreferrer"
-                        onClick={() => completeTourStep("run_it")}
+                        onClick={() => {
+                          recordTourEvent("install_click");
+                          completeTourStep("run_it");
+                        }}
                         className="block font-semibold text-blue-700 hover:underline"
                       >
                         Install Compass: one compose file →
@@ -152,7 +182,10 @@ export default function TourPanel() {
                         href={String(step.detail?.links?.repository ?? "https://github.com/beamreach-ai/compass")}
                         target="_blank"
                         rel="noopener noreferrer"
-                        onClick={() => completeTourStep("run_it")}
+                        onClick={() => {
+                          recordTourEvent("repository_click");
+                          completeTourStep("run_it");
+                        }}
                         className="block text-blue-700 hover:underline"
                       >
                         The repository on GitHub →
@@ -170,8 +203,17 @@ export default function TourPanel() {
           );
         })}
       </ol>
+      {pilot && !(current?.id === "run_it") && (
+        <div className="border-t border-amber-200 bg-amber-50 px-4 py-2 text-xs">
+          <a href={pilot} target="_blank" rel="noopener noreferrer" data-tour-pilot onClick={() => recordTourEvent("pilot_click", pilot)} className="font-semibold text-amber-900 hover:underline">
+            Start a pilot on your account: 10 pull requests free →
+          </a>
+        </div>
+      )}
       {tour.finished && !current && (
-        <div className="border-t border-gray-200 px-4 py-2 text-xs text-gray-600">That is the demo. The install page has the rest.</div>
+        <div className="border-t border-gray-200 px-4 py-2 text-xs text-gray-600">
+          {pilot ? "That is the demo. The pilot runs it on your account." : "That is the demo. The install page has the rest."}
+        </div>
       )}
     </aside>
   );

@@ -1,13 +1,14 @@
 """What the dashboard asks about the demo: ``GET /api/demo`` is the mode, the synthetic
 world (seeded or not, its rows beside the real scan's), the links, the pinned settings
-and the trips in force; ``/api/demo/tour`` is this visitor's tour. Outside demo mode
+and the trips in force; ``/api/demo/tour`` is this visitor's tour, ``/api/demo/tour/start`` the
+story and source they arrived with. Outside demo mode
 every route here answers 404: there is no demo to describe."""
 
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from compass_api.routes._infra_map import resolve_infra_map_context
@@ -88,6 +89,81 @@ def get_tour(request: Request) -> Dict[str, Any]:
 
 class TourEvent(BaseModel):
     incident_id: Optional[str] = None
+
+
+class TourStart(BaseModel):
+    story: Optional[str] = None  # drift | honeytoken | cost; anything else is the default order
+    src: Optional[str] = None  # the ad or page the visitor came from, as the landing URL said
+    gclid: Optional[str] = None
+    referrer: Optional[str] = None
+
+
+@router.post("/api/demo/tour/start")
+def start_tour(request: Request, body: TourStart = TourStart()) -> Dict[str, Any]:
+    """The visitor arrived, from an ad or a page: the story they came for and the source, written
+    once on their tour row. The dashboard posts it on the first load of a session; a landing
+    without any of this is still a landing (`landed_at`)."""
+    require_demo_mode()
+    actor, table, pk = _tour_context(request)
+    demo.start_tour(table, pk, str(actor.get("user_id") or "anonymous"), story=body.story,
+                    source={"src": body.src, "gclid": body.gclid, "referrer": body.referrer})
+    return demo.tour(table, pk, get_workspace_config(request), user_id=actor.get("user_id"), prs=_prs(request))
+
+
+class TourEventBody(BaseModel):
+    event: str  # pilot_click | install_click | repository_click
+    href: Optional[str] = None
+
+
+@router.post("/api/demo/tour/event")
+def post_tour_event(request: Request, body: TourEventBody) -> Dict[str, Any]:
+    """The visitor clicked an exit: the pilot link, the install page, the repository. Not a step;
+    counted in the funnel."""
+    require_demo_mode()
+    actor, table, pk = _tour_context(request)
+    try:
+        demo.record_tour_event(table, pk, str(actor.get("user_id") or "anonymous"), body.event, detail={"href": body.href})
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"ok": True}
+
+
+@router.get("/api/demo/funnel")
+def get_funnel(request: Request, days: int = 30) -> Dict[str, Any]:
+    """The demo's funnel, for its operator: visitors by source and story, the steps they reached,
+    the pull requests they opened, the pilot clicks. Anyone else gets 403."""
+    from compass_api import demo_guard
+
+    require_demo_mode()
+    config = get_workspace_config(request)
+    if not demo_guard.is_demo_admin(request, config):
+        raise HTTPException(status_code=403, detail="The funnel is the demo operator's")
+    actor, table, pk = _tour_context(request)
+    since = demo.epoch_ms() - max(1, min(int(days), 365)) * 86_400_000
+    return demo.funnel(table, pk, since_ms=since, prs=_prs(request), config=config)
+
+
+@router.get("/healthz/visitor")
+def get_visitor_health(request: Request, response: Response) -> Dict[str, Any]:
+    """Public, no sign-in: would a visitor arriving now get the demo the ads promise? 200 when
+    every check passes, 503 with the failing ones otherwise (compass_core.demo.visitor_health).
+    The campaign scripts poll it and pause the ads after two failures (docs/demo.md)."""
+    from compass_api import extensions
+    from compass_api.routes.status import _queue_client
+
+    require_demo_mode()
+    actor, table, pk = _tour_context(request)
+    config = get_workspace_config(request)
+    workspace_id = actor.get("workspace_id")
+    try:
+        jobs = _queue_client.list_jobs(limit=200, workspace_id=workspace_id)
+    except Exception:  # noqa: BLE001 - no queue is no stuck job; the product's worker check says more
+        jobs = []
+    extra = {name: (lambda fn=fn: fn(config, workspace_id)) for name, fn in extensions.health_checks().items()}
+    out = demo.visitor_health(table, pk, config, prs=_prs(request), jobs=jobs, extra_checks=extra)
+    if out["status"] != "ok":
+        response.status_code = 503
+    return out
 
 
 @router.post("/api/demo/tour/{step}")

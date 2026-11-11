@@ -273,6 +273,55 @@ one call to action. The open edition has one login and no user id, so there
 every visitor is the same one; the product's Cognito id makes the tour per
 visitor.
 
+**Stories.** A visitor who arrives with `?story=drift`, `?story=honeytoken` or
+`?story=cost` on any page of the dashboard gets the same steps in the order
+that story wants: drift starts on the IaC tab and the import pull request,
+honeytoken on the decoys, cost on a product's cost-fix step when one is
+registered (below) and otherwise like drift. `?src=` and `?gclid=` ride along.
+The landing page keeps the three for the session (`sessionStorage`, nothing
+is set before sign-in but that), and the panel posts them once to
+`POST /api/demo/tour/start`, which writes `story`, `source` and `landed_at` on
+the tour row, first landing wins. The tour's response carries `story` and
+`source`; `compass demo status` can count visitors per story from the rows.
+
+**The pilot exit.** With `demo.links.pilot` set (the pilot application page),
+every pull-request step shows `demo.tour.pilot_note` ("On your own account
+this would be 1 of your 10 free pilot pull requests."), the panel's footer and
+the last step link to it, and the link carries `src=demo`, `story`, `gclid`
+and `from` (the original `src`), so the page that receives the application
+knows which ad it came from without a cookie. Empty hides all of it.
+
+**The funnel.** Every exit the panel offers posts an event (`POST
+/api/demo/tour/event`: `pilot_click`, `install_click`, `repository_click`) onto
+the tour row. `GET /api/demo/funnel?days=30` (the demo's operator only, 403 for
+a visitor; `compass demo funnel [days=30]` prints it) counts the visitors who
+started in that window by `src` and story: how many reached each step, opened a
+pull request, clicked the pilot link, finished. Nobody is named. In the
+dashboard it is the "Demo funnel" card at the top of Settings, which only the
+operator sees.
+
+**The health URL.** `GET /healthz/visitor` is public (nginx passes it to the API
+without sign-in; it leaks nothing but up or down) and answers 200 while a
+visitor arriving now would get the demo the ads promise, 503 otherwise, with
+`failing` naming the checks: `tour` (the tour computes), `pull_requests` (a
+visitor's pull request within `demo.health.pr_max_age_hours`, default 24, or a
+probe's within `probe_max_age_hours`, default 2; the probe is whoever
+`demo.health.probe_users` names, and the funnel leaves them out; 0 hours turns
+the check off), `jobs` (nothing queued longer than `queued_max_minutes`,
+default 15: a worker is down), `model_budget` (this hour's and today's calls
+under their limits), and the product's own checks
+(`compass_api.extensions.register_health_check`: its workers, its spend cap).
+The campaign scripts poll it hourly and pause the ads after two failures.
+
+**A product's steps.** `compass_core.demo.register_tour_step(spec, fact)` adds
+a step: `spec` has the same keys as the core's (`id`, `kind`, `title`, `why`,
+`done_when`, and `pr: true` for a step that opens a pull request), `fact(ctx)`
+returns `{"done": bool, "detail": {...}}` from `ctx` (`table`, `pk`, `config`,
+`user_id`, `pull_requests`, `now_ms`). A `detail.href` is the dashboard path the step's
+"Open →" goes to. A story may name the step; where nobody registered it, it
+drops out. A fact that raises is a step not done, logged, never a tour that
+fails.
+
 ## Reset and status
 
 `compass demo reset` brings the golden world back, idempotent, in this order,

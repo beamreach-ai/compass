@@ -281,4 +281,21 @@ def status(config: Dict[str, Any], *, workspace_id: str, now_ms: Optional[int] =
     }
 
 
-__all__: List[str] = ["reset", "status", "next_run"]
+def funnel(config: Dict[str, Any], *, workspace_id: str, days: int = 30, now_ms: Optional[int] = None) -> Dict[str, Any]:
+    """`compass demo funnel`: the visitors of the last ``days`` by source and story (compass_core.demo.funnel)."""
+    demo.require_demo_mode("demo funnel")
+    now_ms = now_ms or demo.epoch_ms()
+    table = dynamo_table(tables(config).items)
+    pk = workspace_pk(workspace_id)
+    prs = PRRegistry.from_config(config, workspace_id=workspace_id).list(limit=500)
+    out = demo.funnel(table, pk, since_ms=now_ms - max(1, days) * 86_400_000, prs=prs, now_ms=now_ms)
+    lines = [f"{'source':<12} {'story':<11} {'visitors':>8} {'PR':>5} {'pilot':>6} {'done':>5}"]
+    for row in out["by_source"]:
+        lines.append(f"{row['src'][:12]:<12} {row['story'][:11]:<11} {row['visitors']:>8} {row['pr_opened']:>5} {row['pilot_click']:>6} {row['finished']:>5}")
+    total = out["total"]
+    lines.append(f"{'total':<12} {'':<11} {total['visitors']:>8} {total['pr_opened']:>5} {total['pilot_click']:>6} {total['finished']:>5}")
+    out["summary"] = "\n".join(lines)
+    return out
+
+
+__all__: List[str] = ["reset", "status", "funnel", "next_run"]

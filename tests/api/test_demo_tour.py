@@ -1,7 +1,9 @@
 """The tour (docs/demo.md): seven steps per visitor. Client-only steps need the post; the
 others are read from the world: a pull request by this visitor, their trip (or the one in
 force they were shown), the verified response on that incident. Skip works on each; a
-second visitor starts at step 1; outside demo mode the routes are not there."""
+second visitor starts at step 1; outside demo mode the routes are not there. A story
+(drift, honeytoken, cost) is an order, written once with the source the visitor arrived
+from; a product registers steps of its own and a story may name them."""
 
 from __future__ import annotations
 
@@ -127,3 +129,170 @@ def test_outside_demo_mode_the_tour_is_not_there(env, monkeypatch):
     client, *_ = env
     monkeypatch.setenv("APP_MODE", "production")
     assert client.get("/api/demo/tour").status_code == 404 and client.post("/api/demo/tour/map").status_code == 404
+
+
+def test_a_story_is_an_order_written_once_with_the_source(env):
+    client, table, actor, prs = env
+    default = [s["id"] for s in client.get("/api/demo/tour").json()["steps"]]
+    assert default == ["map", "unmanaged", "import_pr", "decoys", "trip", "response", "run_it"]
+
+    # the ad about drift: the IaC tab first, every step still there, the source kept
+    tour = client.post("/api/demo/tour/start", json={"story": "drift", "src": "gads", "gclid": "Cj0K" * 80, "referrer": "https://beamreach.ai/compass/pilot.html"}).json()
+    assert [s["id"] for s in tour["steps"]][:3] == ["unmanaged", "import_pr", "map"] and tour["total"] == 7
+    assert tour["story"] == "drift" and tour["current"] == "unmanaged"
+    assert tour["source"]["src"] == "gads" and len(tour["source"]["gclid"]) == 200 and tour["source"]["referrer"].endswith("pilot.html")
+
+    # a second landing, on another story and from elsewhere, changes nothing: the tour is under way
+    again = client.post("/api/demo/tour/start", json={"story": "honeytoken", "src": "reddit"}).json()
+    assert again["story"] == "drift" and again["source"]["src"] == "gads"
+    row = demo.tour_row(table, PK, "visitor-1")
+    assert row["story"] == "drift" and row["landed_at"] and row["started_at"]
+
+    # the steps keep the story's order while they complete
+    client.post("/api/demo/tour/unmanaged")
+    tour = client.get("/api/demo/tour").json()
+    assert tour["current"] == "import_pr" and [s["id"] for s in tour["steps"]][0] == "unmanaged"
+
+    # the honeytoken story for another visitor; an unknown story is the default order with no story
+    actor["user_id"] = "visitor-2"
+    tour = client.post("/api/demo/tour/start", json={"story": "honeytoken"}).json()
+    assert [s["id"] for s in tour["steps"]][:3] == ["decoys", "trip", "response"] and tour["story"] == "honeytoken"
+    actor["user_id"] = "visitor-3"
+    tour = client.post("/api/demo/tour/start", json={"story": "whatever", "src": "site"}).json()
+    assert [s["id"] for s in tour["steps"]] == default and tour["story"] is None and tour["source"] == {"src": "site"}
+    # a landing with nothing on it is still a landing
+    actor["user_id"] = "visitor-4"
+    assert client.post("/api/demo/tour/start").status_code == 200
+    assert demo.tour_row(table, PK, "visitor-4")["landed_at"]
+
+
+def test_the_pilot_line_shows_on_pull_request_steps_when_the_link_is_set(env, monkeypatch):
+    client, table, actor, prs = env
+    tour = client.get("/api/demo/tour").json()
+    assert tour["pilot"] is None and "pilot" not in tour["steps"][2]["detail"]
+    config = {**CONFIG, "demo": {**CONFIG["demo"], "links": {"pilot": "https://beamreach.ai/compass/pilot.html"}}}
+    monkeypatch.setattr(demo_routes, "get_workspace_config", lambda request: dict(config))
+    tour = client.get("/api/demo/tour").json()
+    assert tour["pilot"] == {"url": "https://beamreach.ai/compass/pilot.html", "note": demo.DEFAULTS["tour"]["pilot_note"]}
+    by_id = {s["id"]: s for s in tour["steps"]}
+    assert by_id["import_pr"]["detail"]["pilot"]["url"].endswith("pilot.html") and "pilot" not in by_id["map"]["detail"]
+    assert by_id["run_it"]["detail"]["links"]["pilot"].endswith("pilot.html")
+
+
+def test_a_product_step_joins_the_tour_and_the_story_that_names_it(env):
+    client, table, actor, prs = env
+    seen: List[Dict[str, Any]] = []
+
+    def cost_fact(ctx: Dict[str, Any]) -> Dict[str, Any]:
+        seen.append(ctx)
+        mine = [p for p in ctx["pull_requests"] if (p.get("origin") or {}).get("command") == "solve" and demo.same_visitor((p.get("origin") or {}).get("user_id"), ctx["user_id"])]
+        return {"done": bool(mine), "detail": {"href": "/workspace?tab=finops", "pr_url": mine[0]["pr_url"] if mine else None}}
+
+    demo.register_tour_step({"id": "cost_fix", "kind": "api", "pr": True, "title": "Fix a cost finding", "why": "…", "done_when": "A cost-fix pull request by you exists."}, cost_fact)
+    try:
+        # the cost story starts on it; the default order puts it last; the count says 8
+        tour = client.post("/api/demo/tour/start", json={"story": "cost", "src": "gads"}).json()
+        assert [s["id"] for s in tour["steps"]][:2] == ["cost_fix", "unmanaged"] and tour["total"] == 8 and tour["current"] == "cost_fix"
+        assert tour["steps"][0]["detail"]["href"] == "/workspace?tab=finops" and tour["steps"][0]["pr"] is True
+        assert seen and seen[-1]["user_id"] == "visitor-1" and seen[-1]["pk"] == PK
+        actor["user_id"] = "visitor-2"
+        assert [s["id"] for s in client.get("/api/demo/tour").json()["steps"]][-1] == "cost_fix"
+        actor["user_id"] = "visitor-1"
+
+        # the fact decides: another visitor's fix is not mine; mine completes the step; skip works on it
+        prs.append({"repo": "acme/infra", "number": 3, "pr_url": "https://github.com/acme/infra/pull/3", "origin": {"captain": "finops_engine", "command": "solve", "user_id": "visitor-2"}})
+        assert not client.get("/api/demo/tour").json()["steps"][0]["done"]
+        prs.append({"repo": "acme/infra", "number": 4, "pr_url": "https://github.com/acme/infra/pull/4", "origin": {"captain": "finops_engine", "command": "solve", "user_id": "visitor-1"}})
+        tour = client.get("/api/demo/tour").json()
+        assert tour["steps"][0]["done"] and tour["steps"][0]["detail"]["pr_url"].endswith("/4") and tour["current"] == "unmanaged"
+        assert "cost_fix" in _ids(client.post("/api/demo/tour/cost_fix/skip").json(), "skipped")
+
+        # a fact that fails is a step not done, not a tour that fails
+        demo.register_tour_step({"id": "flaky", "kind": "api", "title": "Flaky", "why": "", "done_when": ""}, lambda ctx: 1 / 0)
+        tour = client.get("/api/demo/tour").json()
+        assert tour["total"] == 9 and not {s["id"]: s for s in tour["steps"]}["flaky"]["done"]
+    finally:
+        demo.unregister_tour_step("cost_fix")
+        demo.unregister_tour_step("flaky")
+
+    # unregistered: the cost story falls back to the drift order, the row still says cost
+    tour = client.get("/api/demo/tour").json()
+    assert tour["total"] == 7 and [s["id"] for s in tour["steps"]][:2] == ["unmanaged", "import_pr"] and tour["story"] == "cost"
+    assert client.post("/api/demo/tour/cost_fix").status_code == 404
+
+
+def test_exits_are_events_and_the_funnel_counts_them_for_the_operator(env, monkeypatch):
+    from compass_api import demo_guard
+
+    client, table, actor, prs = env
+    # three visitors from two ads, one direct
+    client.post("/api/demo/tour/start", json={"story": "drift", "src": "gads", "gclid": "x"})
+    client.post("/api/demo/tour/unmanaged")
+    prs.append({"repo": "acme/infra", "number": 8, "pr_url": "https://github.com/acme/infra/pull/8", "origin": {"captain": "iac", "command": "import", "user_id": "visitor-1"}})
+    assert client.post("/api/demo/tour/event", json={"event": "pilot_click", "href": "https://beamreach.ai/compass/pilot.html?src=demo"}).json() == {"ok": True}
+    assert client.post("/api/demo/tour/event", json={"event": "nope"}).status_code == 404
+    row = demo.tour_row(table, PK, "visitor-1")
+    assert [e["event"] for e in row["events"]] == ["pilot_click"] and row["events"][0]["href"].endswith("src=demo") and row["events"][0]["at"]
+    actor["user_id"] = "visitor-2"
+    client.post("/api/demo/tour/start", json={"story": "drift", "src": "gads"})
+    client.post("/api/demo/tour/event", json={"event": "install_click"})
+    actor["user_id"] = "visitor-3"
+    client.post("/api/demo/tour/start", json={"story": "honeytoken", "src": "reddit"})
+    client.post("/api/demo/tour/decoys")
+    actor["user_id"] = "visitor-4"
+    client.get("/api/demo/tour")  # looked, never started: not a visitor in the funnel
+    prs.append({"repo": "acme/infra", "number": 1, "url": "https://github.com/acme/infra/pull/1", "origin": {"command": "seed_pr", "seeded": True}})
+
+    # a visitor is not the operator
+    monkeypatch.setattr(demo_guard, "is_demo_admin", lambda request, config=None: False)
+    assert client.get("/api/demo/funnel").status_code == 403
+    monkeypatch.setattr(demo_guard, "is_demo_admin", lambda request, config=None: True)
+    funnel = client.get("/api/demo/funnel?days=7").json()
+    assert funnel["total"]["visitors"] == 3 and funnel["total"]["pr_opened"] == 1 and funnel["total"]["pilot_click"] == 1 and funnel["total"]["install_click"] == 1
+    assert funnel["total"]["steps"] == {"unmanaged": 1, "import_pr": 1, "decoys": 1} and funnel["steps"][0] == "map"
+    gads = next(r for r in funnel["by_source"] if r["src"] == "gads")
+    assert gads["story"] == "drift" and gads["visitors"] == 2 and gads["pr_opened"] == 1 and gads["pilot_click"] == 1 and gads["steps"] == {"unmanaged": 1, "import_pr": 1}
+    reddit = next(r for r in funnel["by_source"] if r["src"] == "reddit")
+    assert reddit["story"] == "honeytoken" and reddit["visitors"] == 1 and reddit["steps"] == {"decoys": 1} and reddit["pr_opened"] == 0
+    assert [s["story"] for s in funnel["by_story"]] == ["drift", "honeytoken"] and funnel["by_story"][0]["visitors"] == 2
+    assert funnel["by_source"][0]["src"] == "gads", "most visitors first"
+    # nothing before the window
+    table.update_item(Key={"pk": PK, "sk": demo.tour_row(table, PK, "visitor-3")["sk"]}, UpdateExpression="SET landed_at = :t", ExpressionAttributeValues={":t": 1})
+    assert client.get("/api/demo/funnel?days=7").json()["total"]["visitors"] == 2
+    # the CLI's line
+    from compass_core import demo_reset
+
+    monkeypatch.setattr(demo_reset, "PRRegistry", type("R", (), {"from_config": staticmethod(lambda config, workspace_id: type("L", (), {"list": lambda self, limit: list(prs)})())}))
+    monkeypatch.setattr(demo_reset, "dynamo_table", lambda name: table)
+    out = demo_reset.funnel(CONFIG, workspace_id=WS, days=7)
+    assert out["summary"].splitlines()[1].startswith("gads") and out["summary"].splitlines()[-1].startswith("total") and " 2 " in out["summary"].splitlines()[-1]
+
+
+def test_an_event_and_a_step_from_the_same_click_both_land(env):
+    """The dashboard posts install_click and run_it together. Each handler reads the row and writes
+    it back; the write is conditional on what it read, so the one that lost the race reads again."""
+    from compass_core import demo
+
+    client, table, actor, prs = env
+    pk = f"WORKSPACE#{WS}"
+    puts = {"n": 0}
+    real_put = table.put_item
+
+    def interleaved_put(**kwargs):
+        # the first write of record_tour_event sees mark_tour_step land in between, as it would under load
+        puts["n"] += 1
+        if puts["n"] == 1:
+            demo.mark_tour_step(table, pk, actor["user_id"], "run_it")
+        return real_put(**kwargs)
+
+    class Racy:
+        def __getattr__(self, name):
+            return interleaved_put if name == "put_item" else getattr(table, name)
+
+    row = demo.record_tour_event(Racy(), pk, actor["user_id"], "install_click")
+    assert [e["event"] for e in row["events"]] == ["install_click"]
+    assert "done_at" in row["steps"]["run_it"]
+    assert puts["n"] == 2  # one refused, one that landed
+
+    tour = client.get("/api/demo/tour").json()
+    assert "run_it" in _ids(tour)

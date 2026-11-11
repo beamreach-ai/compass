@@ -1,4 +1,5 @@
 import '../styles/global.css';
+import TourSource from "./components/TourSource";
 import { PRODUCT_NAME } from "./lib/edition";
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -10,7 +11,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <link rel="icon" href="/favicon.ico" />
         <title>{title}</title>
       </head>
-      <body className="bg-gray-50 text-gray-900">{children}</body>
+      <body className="bg-gray-50 text-gray-900">
+        <TourSource />
+        {children}
+      </body>
     </html>
   );
 }

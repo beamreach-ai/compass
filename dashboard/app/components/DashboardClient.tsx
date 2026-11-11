@@ -14,6 +14,7 @@ import type { SettingsSlot } from "../lib/extensions";
 import { ShellProvider } from "../lib/shell";
 import { DEMO_BANNER_DISMISSED_KEY, DEMO_BANNER_TEXT, PINNED_TITLE, isDemoApp, isPinned, pinnedProps } from "../lib/demo";
 import { completeTourStep } from "../lib/tour";
+import DemoFunnel from "./DemoFunnel";
 import TourPanel from "./TourPanel";
 import CaptainsSection from "./CaptainsSection";
 import CompassSection, { UpdateBanner } from "./CompassUpdates";
@@ -721,6 +722,7 @@ export default function DashboardClient() {
             )}
 
             <SettingsSections slot="top" />
+            {isDemo && demoConfig?.admin && <DemoFunnel />}
 
             <SettingsHeading view="integrations" title="Integrations">
               The AWS account Compass maps, the GitHub it opens pull requests on, and where it sends alerts.

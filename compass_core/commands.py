@@ -501,22 +501,26 @@ def update(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def demo(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """seed [resources=10000] [seed=7] | reset | status: the synthetic world on the map, the demo back to
-    its golden world, what the demo is up to. Demo mode only (compass_core.demo, compass_core.demo_reset).
-    The reset's decoy work and its rescan are the captains' jobs, named here as every follow-up job is."""
+    """seed [resources=10000] [seed=7] | reset | status | funnel [days=30]: the synthetic world on the
+    map, the demo back to its golden world, what the demo is up to, who came from where and how far
+    they got. Demo mode only (compass_core.demo, compass_core.demo_reset). The reset's decoy work and
+    its rescan are the captains' jobs, named here as every follow-up job is."""
     from compass_core import demo as _demo
     from compass_core import demo_reset as _reset
 
     verb = str(payload.get("verb") or "").strip().lower()
     if verb == "seed":
         return _demo.seed(payload)
-    if verb not in ("reset", "status"):
-        raise ValueError("verb must be seed, reset or status: `compass demo seed [resources=10000] [seed=7]`, `compass demo reset`, `compass demo status`")
+    if verb not in ("reset", "status", "funnel"):
+        raise ValueError("verb must be seed, reset, status or funnel: `compass demo seed [resources=10000] [seed=7]`, `compass demo reset`, "
+                         "`compass demo status`, `compass demo funnel [days=30]`")
     workspace = resolve(payload)
     config = dict(workspace.config)
     config.setdefault("workspace_id", workspace.workspace_id)
     if verb == "status":
         return _reset.status(config, workspace_id=workspace.workspace_id)
+    if verb == "funnel":
+        return _reset.funnel(config, workspace_id=workspace.workspace_id, days=int(payload.get("days") or 30))
     ids = {"workspace_id": workspace.workspace_id, "org_id": config.get("org_id") or workspace.org_id, "user_id": payload.get("user_id")}
 
     def decoys() -> Dict[str, Any]:

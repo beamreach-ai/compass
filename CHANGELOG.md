@@ -5,6 +5,22 @@ workflow refuses a tag without one, and reads from it what the dashboard shows
 next to the Update button: the first paragraph is the summary, the bullets under
 `### After the update` are the notes an operator needs after applying it.
 
+## Unreleased
+
+The demo's tour has stories: `?story=drift|honeytoken|cost` on the landing URL
+puts the step the ad promised first, `?src=` and `?gclid=` travel with the
+visitor through sign-in to their tour row (`POST /api/demo/tour/start`) and on
+to the pilot page, and a product can register tour steps of its own
+(`compass_core.demo.register_tour_step`). With `demo.links.pilot` set, every
+pull-request step says what the PR would cost on the visitor's own account and
+every exit points to the pilot, and posts an event. `GET /api/demo/funnel` and
+`compass demo funnel` count the visitors by source and story: the steps they
+reached, the pull requests, the pilot clicks; a "Demo funnel" card at the top of
+Settings shows it to the operator. `GET /healthz/visitor`, public, is 200 while a
+visitor arriving now gets the demo the ads promise and 503 naming what is wrong
+(the tour, no recent pull request, a job nobody picked up, the model budget, the
+product's own checks). [docs/demo.md](docs/demo.md#the-tour).
+
 ## 0.9.0 — 2026-10-25
 
 The inbox: everything that needs a person, as one list. `GET /api/inbox` derives

@@ -30,6 +30,7 @@ JobRestartGuard = Callable[[Any, Dict[str, Any]], None]
 _bootstrap_sections: Dict[str, BootstrapSection] = {}
 _bootstrap_hooks: List[BootstrapHook] = []
 _status_sections: Dict[str, StatusSection] = {}
+_health_checks: Dict[str, Any] = {}  # name -> fn(config, workspace_id) -> {"ok": bool, "detail": {...}} (GET /healthz/visitor)
 _aws_saved_hooks: List[AwsSavedHook] = []
 _job_restart_guards: List[JobRestartGuard] = []
 # Paths and prefixes the product adds to the auth gates (compass_api.middleware.simple_auth,
@@ -159,6 +160,17 @@ def run_bootstrap_hooks(config: Dict[str, Any], ctx: Any, request: Any) -> None:
 
 def status_sections() -> Dict[str, StatusSection]:
     return dict(_status_sections)
+
+
+def register_health_check(name: str, fn: Any) -> None:
+    """A check the product adds to ``GET /healthz/visitor`` (compass_core.demo.visitor_health): the
+    workers it runs, the spend cap it enforces. ``fn(config, workspace_id)`` returns
+    ``{"ok": bool, "detail": {...}}``; a raise is a failed check with the error as its detail."""
+    _health_checks[name] = fn
+
+
+def health_checks() -> Dict[str, Any]:
+    return dict(_health_checks)
 
 
 def run_aws_saved_hooks(request: Any, config: Dict[str, Any]) -> Dict[str, Any]:
