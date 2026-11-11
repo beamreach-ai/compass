@@ -9,6 +9,7 @@ from compass_api.routes.auth import _auth_enabled, validate_session
 
 _PUBLIC_PATHS = frozenset({
     "/health",
+    "/healthz/visitor",
     "/readyz",
     "/livez",
     "/api/auth/login",

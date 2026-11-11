@@ -300,6 +300,19 @@ pull request, clicked the pilot link, finished. Nobody is named. In the
 dashboard it is the "Demo funnel" card at the top of Settings, which only the
 operator sees.
 
+**The health URL.** `GET /healthz/visitor` is public (nginx passes it to the API
+without sign-in; it leaks nothing but up or down) and answers 200 while a
+visitor arriving now would get the demo the ads promise, 503 otherwise, with
+`failing` naming the checks: `tour` (the tour computes), `pull_requests` (a
+visitor's pull request within `demo.health.pr_max_age_hours`, default 24, or a
+probe's within `probe_max_age_hours`, default 2; the probe is whoever
+`demo.health.probe_users` names, and the funnel leaves them out; 0 hours turns
+the check off), `jobs` (nothing queued longer than `queued_max_minutes`,
+default 15: a worker is down), `model_budget` (this hour's and today's calls
+under their limits), and the product's own checks
+(`compass_api.extensions.register_health_check`: its workers, its spend cap).
+The campaign scripts poll it hourly and pause the ads after two failures.
+
 **A product's steps.** `compass_core.demo.register_tour_step(spec, fact)` adds
 a step: `spec` has the same keys as the core's (`id`, `kind`, `title`, `why`,
 `done_when`, and `pr: true` for a step that opens a pull request), `fact(ctx)`

@@ -43,6 +43,9 @@ DEFAULTS: Dict[str, Any] = {
              "pilot_note": "On your own account this would be 1 of your 10 free pilot pull requests."},  # shown on PR steps when links.pilot is set
     "pinned_settings": ["github", "aws", "demo", "notifications.endpoints"],
     "admins": [],  # the email addresses that may change the demo from the dashboard (compass_api.demo_guard)
+    # GET /healthz/visitor: a pull request by a visitor or a probe this recent, no job queued unclaimed
+    # this long, the model budget not spent; 0 hours turns the pull-request check off
+    "health": {"pr_max_age_hours": 24, "probe_max_age_hours": 2, "probe_users": [], "queued_max_minutes": 15},
     "links": {"install": "https://beamreach.ai/compass/install.html", "repository": "https://github.com/beamreach-ai/compass",
               "slack": "",  # an invite link to the channel the alerts go to; empty hides it
               "pilot": ""},  # the pilot application page; empty hides the pilot line and the pilot exit (docs/demo.md)
@@ -496,7 +499,8 @@ def tour(table: Any, pk: str, config: Dict[str, Any], *, user_id: Optional[str],
             "started_at": row.get("started_at"), "updated_at": row.get("updated_at")}
 
 
-def funnel(table: Any, pk: str, *, since_ms: int, prs: List[Dict[str, Any]], now_ms: Optional[int] = None) -> Dict[str, Any]:
+def funnel(table: Any, pk: str, *, since_ms: int, prs: List[Dict[str, Any]], now_ms: Optional[int] = None,
+           config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """The visitors since ``since_ms``, by where they came from and which story: how many
     started, reached each step, opened a pull request, clicked the pilot link. From the tour
     rows and the registry; nothing else is counted and nobody is named."""
@@ -505,10 +509,11 @@ def funnel(table: Any, pk: str, *, since_ms: int, prs: List[Dict[str, Any]], now
     from compass_core.keys import demo_tour_prefix
 
     now_ms = now_ms or epoch_ms()
+    probe_users = {str(u) for u in (settings(config)["health"].get("probe_users") or [])} if config is not None else set()
     pr_users: Dict[str, int] = {}
     for pr in prs:
         origin = pr.get("origin") if isinstance(pr.get("origin"), dict) else {}
-        if origin.get("seeded"):
+        if origin.get("seeded") or str(origin.get("user_id") or "") in probe_users:
             continue
         who = str(origin.get("user_id") or "anonymous")
         pr_users[who] = pr_users.get(who, 0) + 1
@@ -523,7 +528,7 @@ def funnel(table: Any, pk: str, *, since_ms: int, prs: List[Dict[str, Any]], now
     for raw in rows:
         row = _native(raw)
         started = int(row.get("landed_at") or row.get("started_at") or 0)
-        if started < since_ms:
+        if started < since_ms or str(row.get("user_id") or "") in probe_users:
             continue
         source = row.get("source") if isinstance(row.get("source"), dict) else {}
         key = (str(source.get("src") or "direct"), str(story_name(row.get("story")) or DEFAULT_STORY))
@@ -554,6 +559,81 @@ def funnel(table: Any, pk: str, *, since_ms: int, prs: List[Dict[str, Any]], now
             agg["steps"][step] = agg["steps"].get(step, 0) + n
     return {"since": since_ms, "until": now_ms, "steps": all_steps, "total": total, "by_source": sources,
             "by_story": [{"story": story, **counts} for story, counts in sorted(by_story.items(), key=lambda kv: -kv[1]["visitors"])]}
+
+
+# ── GET /healthz/visitor: would a visitor arriving now get the demo the ads promise? ───────
+
+QUEUED_STATUSES = frozenset({"queued", "pending", "scheduled"})
+
+
+def visitor_health(table: Any, pk: str, config: Dict[str, Any], *, prs: List[Dict[str, Any]], jobs: List[Dict[str, Any]],
+                   extra_checks: Optional[Dict[str, Callable[[], Dict[str, Any]]]] = None, now_ms: Optional[int] = None) -> Dict[str, Any]:
+    """The checks behind the public health URL the campaign scripts poll: the tour answers, a pull
+    request opened recently (a visitor's within ``pr_max_age_hours``, a probe's within
+    ``probe_max_age_hours``), nothing sits queued longer than ``queued_max_minutes`` (a worker is
+    down), the model-call budget has room, and whatever the product adds (its workers, its spend
+    cap). ``status`` is ``ok`` or ``fail``; ``failing`` names the checks, the route turns that into 503."""
+    now_ms = now_ms or epoch_ms()
+    health = settings(config)["health"]
+    checks: Dict[str, Dict[str, Any]] = {}
+
+    try:
+        tour(table, pk, config, user_id=None, prs=prs, now_ms=now_ms)
+        checks["tour"] = {"ok": True}
+    except Exception as exc:  # noqa: BLE001 - the tour failing is the finding
+        checks["tour"] = {"ok": False, "detail": {"error": f"{type(exc).__name__}: {exc}"[:200]}}
+
+    pr_hours = float(health.get("pr_max_age_hours") or 0)
+    if pr_hours > 0:
+        probe_users = {str(u) for u in (health.get("probe_users") or [])}
+        probe_hours = float(health.get("probe_max_age_hours") or 0)
+        newest_visitor: Optional[int] = None
+        newest_probe: Optional[int] = None
+        for pr in prs:
+            origin = pr.get("origin") if isinstance(pr.get("origin"), dict) else {}
+            if origin.get("seeded"):
+                continue
+            at = int(pr.get("created_at") or 0)
+            if str(origin.get("user_id") or "") in probe_users:
+                newest_probe = max(newest_probe or 0, at)
+            else:
+                newest_visitor = max(newest_visitor or 0, at)
+        visitor_ok = newest_visitor is not None and now_ms - newest_visitor <= pr_hours * 3_600_000
+        probe_ok = newest_probe is not None and probe_hours > 0 and now_ms - newest_probe <= probe_hours * 3_600_000
+        checks["pull_requests"] = {"ok": visitor_ok or probe_ok,
+                                   "detail": {"newest_visitor_pr_age_minutes": (now_ms - newest_visitor) // 60_000 if newest_visitor else None,
+                                              "newest_probe_pr_age_minutes": (now_ms - newest_probe) // 60_000 if newest_probe else None,
+                                              "max_age_hours": pr_hours, "probe_max_age_hours": probe_hours}}
+
+    queued_max = float(health.get("queued_max_minutes") or 0)
+    if queued_max > 0:
+        stuck = []
+        for job in jobs:
+            if str(job.get("status") or "").lower() not in QUEUED_STATUSES:
+                continue
+            created = int(job.get("created_at") or 0)
+            if created and now_ms - created > queued_max * 60_000:
+                stuck.append({"job_id": job.get("job_id"), "captain": job.get("captain"), "command": job.get("command"), "queued_minutes": (now_ms - created) // 60_000})
+        checks["jobs"] = {"ok": not stuck, "detail": {"stuck": stuck[:5], "max_queued_minutes": queued_max}}
+
+    try:
+        from compass_core import model_budget
+
+        use = model_budget.usage(config, table=table)
+        spent = [w for w, v in use.items() if v.get("limit") is not None and int(v.get("used") or 0) >= int(v["limit"])]
+        checks["model_budget"] = {"ok": not spent, "detail": {**use, "exhausted": spent}}
+    except Exception as exc:  # noqa: BLE001 - no budget table is no budget to exhaust
+        checks["model_budget"] = {"ok": True, "detail": {"error": f"{type(exc).__name__}: {exc}"[:200]}}
+
+    for name, check in (extra_checks or {}).items():
+        try:
+            result = check() or {}
+            checks[name] = {"ok": bool(result.get("ok")), "detail": dict(result.get("detail") or {})}
+        except Exception as exc:  # noqa: BLE001 - a check that raises has failed
+            checks[name] = {"ok": False, "detail": {"error": f"{type(exc).__name__}: {exc}"[:200]}}
+
+    failing = [name for name, c in checks.items() if not c["ok"]]
+    return {"status": "fail" if failing else "ok", "failing": failing, "checks": checks, "checked_at": now_ms}
 
 
 def tour_completions(table: Any, pk: str, *, since_ms: int) -> int:

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from compass_api.routes._infra_map import resolve_infra_map_context
@@ -140,7 +140,30 @@ def get_funnel(request: Request, days: int = 30) -> Dict[str, Any]:
         raise HTTPException(status_code=403, detail="The funnel is the demo operator's")
     actor, table, pk = _tour_context(request)
     since = demo.epoch_ms() - max(1, min(int(days), 365)) * 86_400_000
-    return demo.funnel(table, pk, since_ms=since, prs=_prs(request))
+    return demo.funnel(table, pk, since_ms=since, prs=_prs(request), config=config)
+
+
+@router.get("/healthz/visitor")
+def get_visitor_health(request: Request, response: Response) -> Dict[str, Any]:
+    """Public, no sign-in: would a visitor arriving now get the demo the ads promise? 200 when
+    every check passes, 503 with the failing ones otherwise (compass_core.demo.visitor_health).
+    The campaign scripts poll it and pause the ads after two failures (docs/demo.md)."""
+    from compass_api import extensions
+    from compass_api.routes.status import _queue_client
+
+    require_demo_mode()
+    actor, table, pk = _tour_context(request)
+    config = get_workspace_config(request)
+    workspace_id = actor.get("workspace_id")
+    try:
+        jobs = _queue_client.list_jobs(limit=200, workspace_id=workspace_id)
+    except Exception:  # noqa: BLE001 - no queue is no stuck job; the product's worker check says more
+        jobs = []
+    extra = {name: (lambda fn=fn: fn(config, workspace_id)) for name, fn in extensions.health_checks().items()}
+    out = demo.visitor_health(table, pk, config, prs=_prs(request), jobs=jobs, extra_checks=extra)
+    if out["status"] != "ok":
+        response.status_code = 503
+    return out
 
 
 @router.post("/api/demo/tour/{step}")
