@@ -112,6 +112,7 @@ model. Each seam is a module-level default plus an `install`/`set_*` hook:
 
 | Seam | Open default | Hook |
 |---|---|---|
+| Principal (who is calling) | an API token, else the proxy's identity header, else the cookie session, else nobody; everyone signed in is `admin` | `compass_api.auth.principal.set_principal_resolver` |
 | Job queue | `compass_core.queue.StoreQueue` (the jobs table, polled by the daemon) | `set_job_queue` |
 | Map store | `infra_map.graph_store.open_store`: the SQLite file | `set_graph_store_factory` |
 | Workspace config | the JSON file | `set_workspace_config_loader` / `saver` |
@@ -175,8 +176,13 @@ start of the CLI and before the API is assembled, so with a host installed
 
 A host works through the same seams as everything else:
 `compass_core.queue.set_job_queue`, `compass_core.config.set_workspace_config_loader`,
-`compass_core.llm.set_model_factory`, `compass_core.captains.register`, and in
+`compass_core.llm.set_model_factory`, `compass_core.captains.register`,
+`compass_api.auth.principal.set_principal_resolver` (who is calling: the
+workspace middleware resolves one `Principal` per request, before the workspace,
+and `get_actor_ids`, `/api/auth/me` and `compass whoami` show it), and in
 the API `compass_api.extensions` (`register_router`, `register_startup`,
-`register_shutdown`, the bootstrap and status sections). The open defaults step
+`register_shutdown`, the bootstrap and status sections). The seams an
+organisation needs next are specified in
+[docs/specs/host-seams.md](specs/host-seams.md). The open defaults step
 aside for what a host set: the job queue, and the flags that hide closed tabs.
 A host that fails to install is logged and the open defaults stay in effect.

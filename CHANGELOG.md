@@ -5,6 +5,32 @@ workflow refuses a tag without one, and reads from it what the dashboard shows
 next to the Update button: the first paragraph is the summary, the bullets under
 `### After the update` are the notes an operator needs after applying it.
 
+## 0.10.0 — 2026-10-30
+
+Who is calling, as a seam. The API resolves one principal per request (id,
+kind, roles, teams, email, name, source, workspace) before it settles the
+workspace, and a product built on Compass installs its own resolver with
+`compass_api.auth.principal.set_principal_resolver`. Without one, an API
+token, else the identity header a proxy set, else the dashboard session,
+else nobody; everyone signed in is admin, as before. `compass whoami` says
+who a connection is. First of the pull requests in
+[docs/specs/host-seams.md](docs/specs/host-seams.md).
+
+- `GET /api/auth/me` keeps every key it had and adds `principal`.
+- `get_actor_ids` adds `principal_id` and `principal` (its public form);
+  `user_id` is unchanged for tokens, proxies and nobody.
+- `compass whoami` in both CLIs, and the `compass_whoami` MCP tool.
+- A dashboard session signed in with `APP_USERNAME` is now that user: who
+  approved a parked response, accepted a grant or asked for a revision is
+  recorded as the username instead of `user`, and the AWS sessions those
+  clicks open carry it as their `SourceIdentity` instead of `scheduler`.
+
+### After the update
+
+- In CloudTrail, actions taken from the dashboard now show the dashboard
+  username as the source identity. Alerts or queries that matched
+  `scheduler` for dashboard clicks should match the username too.
+
 ## 0.9.0 — 2026-10-25
 
 The inbox: everything that needs a person, as one list. `GET /api/inbox` derives
