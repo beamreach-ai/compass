@@ -356,21 +356,53 @@ def mark_tour_step(table: Any, pk: str, user_id: str, step: str, *, skipped: boo
     ids = tour_step_ids()
     if step not in ids:
         raise LookupError(f"no tour step {step!r}: one of {', '.join(ids)}")
-    row = tour_row(table, pk, user_id)
-    steps = dict(row.get("steps") or {})
-    now = epoch_ms()
-    entry = dict(steps.get(step) or {})
-    if skipped:
-        entry.setdefault("skipped_at", now)
-    else:
-        entry.setdefault("done_at", now)
-    if detail:
-        entry.update({k: v for k, v in detail.items() if v is not None})
-    steps[step] = entry
-    row = {**_row_keep(row), "pk": pk, "sk": demo_tour_sort_key(user_id), "user_id": user_id, "steps": steps,
-           "started_at": row.get("started_at") or now, "updated_at": now}
-    table.put_item(Item=row)
-    return _native(row)
+    def mutate(row: Dict[str, Any]) -> Dict[str, Any]:
+        steps = dict(row.get("steps") or {})
+        now = epoch_ms()
+        entry = dict(steps.get(step) or {})
+        if skipped:
+            entry.setdefault("skipped_at", now)
+        else:
+            entry.setdefault("done_at", now)
+        if detail:
+            entry.update({k: v for k, v in detail.items() if v is not None})
+        steps[step] = entry
+        return {**_row_keep(row), "pk": pk, "sk": demo_tour_sort_key(user_id), "user_id": user_id, "steps": steps,
+                "started_at": row.get("started_at") or now, "updated_at": now}
+
+    return _tour_write(table, pk, user_id, mutate)
+
+
+def _tour_write(table: Any, pk: str, user_id: str, mutate: Callable[[Dict[str, Any]], Optional[Dict[str, Any]]]) -> Dict[str, Any]:
+    """Read the visitor's row, let `mutate` change it, and write it back only if nobody wrote in
+    between; otherwise read again. The dashboard fires an event and a step from one click, and the
+    two requests used to read the same row and the later put erased the earlier one. `mutate`
+    returns None when there is nothing to write."""
+    from botocore.exceptions import ClientError
+
+    for _ in range(TOUR_WRITE_ATTEMPTS):
+        row = tour_row(table, pk, user_id)
+        out = mutate(row)
+        if out is None:
+            return row
+        seen = row.get("updated_at")
+        kwargs: Dict[str, Any] = {"Item": out}
+        if seen is None:
+            kwargs["ConditionExpression"] = "attribute_not_exists(pk)"
+        else:
+            kwargs["ConditionExpression"] = "updated_at = :seen"
+            kwargs["ExpressionAttributeValues"] = {":seen": seen}
+        try:
+            table.put_item(**kwargs)
+        except ClientError as exc:
+            if exc.response.get("Error", {}).get("Code") != "ConditionalCheckFailedException":
+                raise
+            continue
+        return _native(out)
+    raise RuntimeError(f"the tour row of {user_id} kept changing under {TOUR_WRITE_ATTEMPTS} writes")
+
+
+TOUR_WRITE_ATTEMPTS = 8
 
 
 def _row_keep(row: Dict[str, Any]) -> Dict[str, Any]:
@@ -389,15 +421,15 @@ def record_tour_event(table: Any, pk: str, user_id: str, event: str, *, detail: 
 
     if event not in TOUR_EVENTS:
         raise LookupError(f"no tour event {event!r}: one of {', '.join(TOUR_EVENTS)}")
-    row = tour_row(table, pk, user_id)
-    now = epoch_ms()
-    events = list(row.get("events") or [])
-    events.append({"event": event, "at": now, **{k: str(v)[:SOURCE_MAX_LEN] for k, v in (detail or {}).items() if v}})
-    row["events"] = events[-TOUR_EVENTS_MAX:]
-    row = {**_row_keep(row), "pk": pk, "sk": demo_tour_sort_key(user_id), "user_id": user_id, "steps": dict(row.get("steps") or {}),
-           "started_at": row.get("started_at") or now, "updated_at": now}
-    table.put_item(Item=row)
-    return _native(row)
+    def mutate(row: Dict[str, Any]) -> Dict[str, Any]:
+        now = epoch_ms()
+        events = list(row.get("events") or [])
+        events.append({"event": event, "at": now, **{k: str(v)[:SOURCE_MAX_LEN] for k, v in (detail or {}).items() if v}})
+        row = dict(row, events=events[-TOUR_EVENTS_MAX:])
+        return {**_row_keep(row), "pk": pk, "sk": demo_tour_sort_key(user_id), "user_id": user_id, "steps": dict(row.get("steps") or {}),
+                "started_at": row.get("started_at") or now, "updated_at": now}
+
+    return _tour_write(table, pk, user_id, mutate)
 
 
 def start_tour(table: Any, pk: str, user_id: str, *, story: Optional[str] = None, source: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -405,26 +437,28 @@ def start_tour(table: Any, pk: str, user_id: str, *, story: Optional[str] = None
     a second landing on another story keeps the first (the tour is already under way)."""
     from compass_core.keys import demo_tour_sort_key
 
-    row = tour_row(table, pk, user_id)
-    now = epoch_ms()
     story = story_name(story)
     fields = source_fields(source or {})
-    changed = False
-    if story and not row.get("story"):
-        row["story"] = story
-        changed = True
-    if fields and not row.get("source"):
-        row["source"] = fields
-        changed = True
-    if not row.get("landed_at"):
-        row["landed_at"] = now
-        changed = True
-    if not changed and row.get("started_at"):
-        return row
-    row = {**_row_keep(row), "pk": pk, "sk": demo_tour_sort_key(user_id), "user_id": user_id, "steps": dict(row.get("steps") or {}),
-           "started_at": row.get("started_at") or now, "updated_at": now}
-    table.put_item(Item=row)
-    return _native(row)
+
+    def mutate(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        now = epoch_ms()
+        row = dict(row)
+        changed = False
+        if story and not row.get("story"):
+            row["story"] = story
+            changed = True
+        if fields and not row.get("source"):
+            row["source"] = fields
+            changed = True
+        if not row.get("landed_at"):
+            row["landed_at"] = now
+            changed = True
+        if not changed and row.get("started_at"):
+            return None
+        return {**_row_keep(row), "pk": pk, "sk": demo_tour_sort_key(user_id), "user_id": user_id, "steps": dict(row.get("steps") or {}),
+                "started_at": row.get("started_at") or now, "updated_at": now}
+
+    return _tour_write(table, pk, user_id, mutate)
 
 
 def same_visitor(a: Optional[str], b: Optional[str]) -> bool:

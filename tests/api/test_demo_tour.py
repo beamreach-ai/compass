@@ -266,3 +266,33 @@ def test_exits_are_events_and_the_funnel_counts_them_for_the_operator(env, monke
     monkeypatch.setattr(demo_reset, "dynamo_table", lambda name: table)
     out = demo_reset.funnel(CONFIG, workspace_id=WS, days=7)
     assert out["summary"].splitlines()[1].startswith("gads") and out["summary"].splitlines()[-1].startswith("total") and " 2 " in out["summary"].splitlines()[-1]
+
+
+def test_an_event_and_a_step_from_the_same_click_both_land(env):
+    """The dashboard posts install_click and run_it together. Each handler reads the row and writes
+    it back; the write is conditional on what it read, so the one that lost the race reads again."""
+    from compass_core import demo
+
+    client, table, actor, prs = env
+    pk = f"WORKSPACE#{WS}"
+    puts = {"n": 0}
+    real_put = table.put_item
+
+    def interleaved_put(**kwargs):
+        # the first write of record_tour_event sees mark_tour_step land in between, as it would under load
+        puts["n"] += 1
+        if puts["n"] == 1:
+            demo.mark_tour_step(table, pk, actor["user_id"], "run_it")
+        return real_put(**kwargs)
+
+    class Racy:
+        def __getattr__(self, name):
+            return interleaved_put if name == "put_item" else getattr(table, name)
+
+    row = demo.record_tour_event(Racy(), pk, actor["user_id"], "install_click")
+    assert [e["event"] for e in row["events"]] == ["install_click"]
+    assert "done_at" in row["steps"]["run_it"]
+    assert puts["n"] == 2  # one refused, one that landed
+
+    tour = client.get("/api/demo/tour").json()
+    assert "run_it" in _ids(tour)
