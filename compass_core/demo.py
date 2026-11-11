@@ -39,11 +39,13 @@ DEFAULTS: Dict[str, Any] = {
     "visitor_repo": "",
     "seeded_pr": {},
     "reset": {"schedule": "cron(0 3 ? * SUN *)", "prune_jobs_days": 7},
-    "tour": {"import_resource": "acme-legacy-exports"},  # the real, unmanaged resource step 3 imports
+    "tour": {"import_resource": "acme-legacy-exports",  # the real, unmanaged resource the import step imports
+             "pilot_note": "On your own account this would be 1 of your 10 free pilot pull requests."},  # shown on PR steps when links.pilot is set
     "pinned_settings": ["github", "aws", "demo", "notifications.endpoints"],
     "admins": [],  # the email addresses that may change the demo from the dashboard (compass_api.demo_guard)
     "links": {"install": "https://beamreach.ai/compass/install.html", "repository": "https://github.com/beamreach-ai/compass",
-              "slack": ""},  # slack: an invite link to the channel the alerts go to; empty hides it
+              "slack": "",  # an invite link to the channel the alerts go to; empty hides it
+              "pilot": ""},  # the pilot application page; empty hides the pilot line and the pilot exit (docs/demo.md)
 }
 
 
@@ -244,8 +246,14 @@ def _native(item: Any) -> Any:
 # ── The tour: seven steps, each completed by a fact about the world ──────────
 #
 # State is one row per visitor, DEMO#TOUR#<user>: the client-only steps the dashboard
-# reported and the skips. The other steps are read from the world on every GET: a pull
-# request by this visitor, their trip, the response on its incident.
+# reported, the skips, the story the visitor arrived on and where they came from. The other
+# steps are read from the world on every GET: a pull request by this visitor, their trip,
+# the response on its incident.
+#
+# A story is an order: the visitor who clicked an ad about drift starts at the IaC tab, the
+# one who clicked about decoys starts at the decoys. Every story has every step, so
+# "Tour · 3 of 7" means the same thing whichever way round. A product registers steps of its
+# own (register_tour_step): a story may name them, and they drop out where nobody did.
 
 TOUR_STEPS: List[Dict[str, Any]] = [
     {"id": "map", "kind": "client", "title": "See the account",
@@ -254,7 +262,7 @@ TOUR_STEPS: List[Dict[str, Any]] = [
     {"id": "unmanaged", "kind": "client", "title": "What Terraform doesn't manage",
      "why": "40% of this account is not in any state file; the IaC tab lists it, with the drift on what is.",
      "done_when": "You looked at the IaC tab."},
-    {"id": "import_pr", "kind": "api", "title": "Open an import pull request",
+    {"id": "import_pr", "kind": "api", "pr": True, "title": "Open an import pull request",
      "why": "Import a real, unmanaged resource: Compass writes the Terraform and opens the pull request; nothing is applied in the demo.",
      "done_when": "A pull request by you exists."},
     {"id": "decoys", "kind": "client", "title": "Meet the decoys",
@@ -270,7 +278,65 @@ TOUR_STEPS: List[Dict[str, Any]] = [
      "why": "The install is a compose file; `compass connect` uses your profile once and the services never see it.",
      "done_when": "You opened the install page or the repository."},
 ]
-TOUR_STEP_IDS = [s["id"] for s in TOUR_STEPS]
+DEFAULT_STORY = "default"
+STORIES: Dict[str, List[str]] = {
+    DEFAULT_STORY: ["map", "unmanaged", "import_pr", "decoys", "trip", "response", "run_it"],
+    "drift": ["unmanaged", "import_pr", "map", "decoys", "trip", "response", "run_it"],
+    "honeytoken": ["decoys", "trip", "response", "map", "unmanaged", "import_pr", "run_it"],
+    "cost": ["cost_fix", "unmanaged", "import_pr", "map", "decoys", "trip", "response", "run_it"],
+}
+SOURCE_FIELDS = ("src", "gclid", "referrer")
+SOURCE_MAX_LEN = 200
+
+# A product's step: its spec (the same keys as TOUR_STEPS, plus ``pr: True`` for a step that
+# opens a pull request) and a fact: ctx -> {"done": bool, "detail": {...}}. ctx carries table,
+# pk, config, user_id, prs, now_ms. The detail may carry ``href`` (a dashboard path the step
+# opens) and whatever the fact wants shown.
+TourFact = Callable[[Dict[str, Any]], Dict[str, Any]]
+_tour_steps: Dict[str, Tuple[Dict[str, Any], TourFact]] = {}
+
+
+def register_tour_step(spec: Dict[str, Any], fact: TourFact) -> None:
+    if not spec.get("id") or spec["id"] in {s["id"] for s in TOUR_STEPS}:
+        raise ValueError(f"a tour step needs an id of its own, not {spec.get('id')!r}")
+    _tour_steps[str(spec["id"])] = (dict(spec), fact)
+
+
+def unregister_tour_step(step_id: str) -> None:
+    _tour_steps.pop(step_id, None)
+
+
+def tour_steps() -> List[Dict[str, Any]]:
+    """The core's steps, then the product's, in registration order."""
+    return [dict(s) for s in TOUR_STEPS] + [dict(spec) for spec, _ in _tour_steps.values()]
+
+
+def tour_step_ids() -> List[str]:
+    return [s["id"] for s in tour_steps()]
+
+
+def story_name(value: Optional[str]) -> Optional[str]:
+    """A known story, or None for anything else (the default order)."""
+    name = str(value or "").strip().lower()
+    return name if name in STORIES and name != DEFAULT_STORY else None
+
+
+def story_order(story: Optional[str]) -> List[str]:
+    """The step ids in the story's order: the named ones first, every other registered step after,
+    in its default place; a product step nobody registered drops out."""
+    known = tour_step_ids()
+    named = [s for s in STORIES.get(story or DEFAULT_STORY, STORIES[DEFAULT_STORY]) if s in known]
+    return named + [s for s in known if s not in named]
+
+
+def source_fields(values: Dict[str, Any]) -> Dict[str, str]:
+    """The ad source as the dashboard reported it, clipped: src, gclid, referrer."""
+    out: Dict[str, str] = {}
+    for key in SOURCE_FIELDS:
+        value = str(values.get(key) or "").strip()
+        if value:
+            out[key] = value[:SOURCE_MAX_LEN]
+    return out
 
 
 def tour_row(table: Any, pk: str, user_id: str) -> Dict[str, Any]:
@@ -284,8 +350,9 @@ def mark_tour_step(table: Any, pk: str, user_id: str, step: str, *, skipped: boo
     """Record a client-only step as done (or any step as skipped) for this visitor, once."""
     from compass_core.keys import demo_tour_sort_key
 
-    if step not in TOUR_STEP_IDS:
-        raise LookupError(f"no tour step {step!r}: one of {', '.join(TOUR_STEP_IDS)}")
+    ids = tour_step_ids()
+    if step not in ids:
+        raise LookupError(f"no tour step {step!r}: one of {', '.join(ids)}")
     row = tour_row(table, pk, user_id)
     steps = dict(row.get("steps") or {})
     now = epoch_ms()
@@ -297,7 +364,39 @@ def mark_tour_step(table: Any, pk: str, user_id: str, step: str, *, skipped: boo
     if detail:
         entry.update({k: v for k, v in detail.items() if v is not None})
     steps[step] = entry
-    row = {"pk": pk, "sk": demo_tour_sort_key(user_id), "user_id": user_id, "steps": steps,
+    row = {**_row_keep(row), "pk": pk, "sk": demo_tour_sort_key(user_id), "user_id": user_id, "steps": steps,
+           "started_at": row.get("started_at") or now, "updated_at": now}
+    table.put_item(Item=row)
+    return _native(row)
+
+
+def _row_keep(row: Dict[str, Any]) -> Dict[str, Any]:
+    """What a tour row carries besides its steps: the story and the source, written once."""
+    return {k: row[k] for k in ("story", "source", "landed_at") if row.get(k)}
+
+
+def start_tour(table: Any, pk: str, user_id: str, *, story: Optional[str] = None, source: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """The visitor arrived: remember the story they came for and where from. Both are written once;
+    a second landing on another story keeps the first (the tour is already under way)."""
+    from compass_core.keys import demo_tour_sort_key
+
+    row = tour_row(table, pk, user_id)
+    now = epoch_ms()
+    story = story_name(story)
+    fields = source_fields(source or {})
+    changed = False
+    if story and not row.get("story"):
+        row["story"] = story
+        changed = True
+    if fields and not row.get("source"):
+        row["source"] = fields
+        changed = True
+    if not row.get("landed_at"):
+        row["landed_at"] = now
+        changed = True
+    if not changed and row.get("started_at"):
+        return row
+    row = {**_row_keep(row), "pk": pk, "sk": demo_tour_sort_key(user_id), "user_id": user_id, "steps": dict(row.get("steps") or {}),
            "started_at": row.get("started_at") or now, "updated_at": now}
     table.put_item(Item=row)
     return _native(row)
@@ -335,8 +434,22 @@ def tour(table: Any, pk: str, config: Dict[str, Any], *, user_id: Optional[str],
         "response": {"done": bool(incident and incident.get("action_verified_at")),
                      "detail": {"incident_id": incident_id, "action_verified_at": (incident or {}).get("action_verified_at")}},
     }
+    # the product's steps, each a fact of its own
+    ctx = {"table": table, "pk": pk, "config": config, "user_id": user_id, "prs": prs, "now_ms": now_ms}
+    for step_id, (_, fact_fn) in _tour_steps.items():
+        try:
+            fact = fact_fn(ctx) or {}
+        except Exception as exc:  # noqa: BLE001 - a product step that fails is a step not done, not a tour that 500s
+            logger.warning("tour step %s: %s", step_id, exc)
+            fact = {}
+        facts[step_id] = {"done": bool(fact.get("done")), "detail": dict(fact.get("detail") or {})}
+
+    story = story_name(row.get("story"))
+    pilot = {"url": settings_["links"]["pilot"], "note": settings_["tour"]["pilot_note"]} if settings_["links"].get("pilot") else None
+    by_id = {s["id"]: s for s in tour_steps()}
     steps: List[Dict[str, Any]] = []
-    for spec in TOUR_STEPS:
+    for step_id in story_order(story):
+        spec = by_id[step_id]
         entry = recorded.get(spec["id"]) or {}
         fact = facts.get(spec["id"])
         done = bool(fact["done"]) if fact else bool(entry.get("done_at"))
@@ -350,11 +463,14 @@ def tour(table: Any, pk: str, config: Dict[str, Any], *, user_id: Optional[str],
             detail["token"] = trippable[0] if trippable else None
         elif spec["id"] in ("response", "run_it"):
             detail["links"] = settings_["links"]
+        if spec.get("pr") and pilot:
+            detail["pilot"] = pilot
         steps.append({**spec, "done": done, "skipped": bool(entry.get("skipped_at")), "done_at": entry.get("done_at") if not fact else None, "detail": detail})
     completed = sum(1 for s in steps if s["done"])
     passed = sum(1 for s in steps if s["done"] or s["skipped"])
     current = next((s["id"] for s in steps if not (s["done"] or s["skipped"])), None)
     return {"steps": steps, "completed": completed, "total": len(steps), "current": current, "finished": passed == len(steps),
+            "story": story, "source": dict(row.get("source") or {}), "pilot": pilot,
             "started_at": row.get("started_at"), "updated_at": row.get("updated_at")}
 
 

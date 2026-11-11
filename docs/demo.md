@@ -273,6 +273,33 @@ one call to action. The open edition has one login and no user id, so there
 every visitor is the same one; the product's Cognito id makes the tour per
 visitor.
 
+**Stories.** A visitor who arrives with `?story=drift`, `?story=honeytoken` or
+`?story=cost` on any page of the dashboard gets the same steps in the order
+that story wants: drift starts on the IaC tab and the import pull request,
+honeytoken on the decoys, cost on a product's cost-fix step when one is
+registered (below) and otherwise like drift. `?src=` and `?gclid=` ride along.
+The landing page keeps the three for the session (`sessionStorage`, nothing
+is set before sign-in but that), and the panel posts them once to
+`POST /api/demo/tour/start`, which writes `story`, `source` and `landed_at` on
+the tour row, first landing wins. The tour's response carries `story` and
+`source`; `compass demo status` can count visitors per story from the rows.
+
+**The pilot exit.** With `demo.links.pilot` set (the pilot application page),
+every pull-request step shows `demo.tour.pilot_note` ("On your own account
+this would be 1 of your 10 free pilot pull requests."), the panel's footer and
+the last step link to it, and the link carries `src=demo`, `story`, `gclid`
+and `from` (the original `src`), so the page that receives the application
+knows which ad it came from without a cookie. Empty hides all of it.
+
+**A product's steps.** `compass_core.demo.register_tour_step(spec, fact)` adds
+a step: `spec` has the same keys as the core's (`id`, `kind`, `title`, `why`,
+`done_when`, and `pr: true` for a step that opens a pull request), `fact(ctx)`
+returns `{"done": bool, "detail": {...}}` from `ctx` (`table`, `pk`, `config`,
+`user_id`, `prs`, `now_ms`). A `detail.href` is the dashboard path the step's
+"Open →" goes to. A story may name the step; where nobody registered it, it
+drops out. A fact that raises is a step not done, logged, never a tour that
+fails.
+
 ## Reset and status
 
 `compass demo reset` brings the golden world back, idempotent, in this order,

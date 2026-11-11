@@ -1,7 +1,9 @@
 """The tour (docs/demo.md): seven steps per visitor. Client-only steps need the post; the
 others are read from the world: a pull request by this visitor, their trip (or the one in
 force they were shown), the verified response on that incident. Skip works on each; a
-second visitor starts at step 1; outside demo mode the routes are not there."""
+second visitor starts at step 1; outside demo mode the routes are not there. A story
+(drift, honeytoken, cost) is an order, written once with the source the visitor arrived
+from; a product registers steps of its own and a story may name them."""
 
 from __future__ import annotations
 
@@ -127,3 +129,93 @@ def test_outside_demo_mode_the_tour_is_not_there(env, monkeypatch):
     client, *_ = env
     monkeypatch.setenv("APP_MODE", "production")
     assert client.get("/api/demo/tour").status_code == 404 and client.post("/api/demo/tour/map").status_code == 404
+
+
+def test_a_story_is_an_order_written_once_with_the_source(env):
+    client, table, actor, prs = env
+    default = [s["id"] for s in client.get("/api/demo/tour").json()["steps"]]
+    assert default == ["map", "unmanaged", "import_pr", "decoys", "trip", "response", "run_it"]
+
+    # the ad about drift: the IaC tab first, every step still there, the source kept
+    tour = client.post("/api/demo/tour/start", json={"story": "drift", "src": "gads", "gclid": "Cj0K" * 80, "referrer": "https://beamreach.ai/compass/pilot.html"}).json()
+    assert [s["id"] for s in tour["steps"]][:3] == ["unmanaged", "import_pr", "map"] and tour["total"] == 7
+    assert tour["story"] == "drift" and tour["current"] == "unmanaged"
+    assert tour["source"]["src"] == "gads" and len(tour["source"]["gclid"]) == 200 and tour["source"]["referrer"].endswith("pilot.html")
+
+    # a second landing, on another story and from elsewhere, changes nothing: the tour is under way
+    again = client.post("/api/demo/tour/start", json={"story": "honeytoken", "src": "reddit"}).json()
+    assert again["story"] == "drift" and again["source"]["src"] == "gads"
+    row = demo.tour_row(table, PK, "visitor-1")
+    assert row["story"] == "drift" and row["landed_at"] and row["started_at"]
+
+    # the steps keep the story's order while they complete
+    client.post("/api/demo/tour/unmanaged")
+    tour = client.get("/api/demo/tour").json()
+    assert tour["current"] == "import_pr" and [s["id"] for s in tour["steps"]][0] == "unmanaged"
+
+    # the honeytoken story for another visitor; an unknown story is the default order with no story
+    actor["user_id"] = "visitor-2"
+    tour = client.post("/api/demo/tour/start", json={"story": "honeytoken"}).json()
+    assert [s["id"] for s in tour["steps"]][:3] == ["decoys", "trip", "response"] and tour["story"] == "honeytoken"
+    actor["user_id"] = "visitor-3"
+    tour = client.post("/api/demo/tour/start", json={"story": "whatever", "src": "site"}).json()
+    assert [s["id"] for s in tour["steps"]] == default and tour["story"] is None and tour["source"] == {"src": "site"}
+    # a landing with nothing on it is still a landing
+    actor["user_id"] = "visitor-4"
+    assert client.post("/api/demo/tour/start").status_code == 200
+    assert demo.tour_row(table, PK, "visitor-4")["landed_at"]
+
+
+def test_the_pilot_line_shows_on_pull_request_steps_when_the_link_is_set(env, monkeypatch):
+    client, table, actor, prs = env
+    tour = client.get("/api/demo/tour").json()
+    assert tour["pilot"] is None and "pilot" not in tour["steps"][2]["detail"]
+    config = {**CONFIG, "demo": {**CONFIG["demo"], "links": {"pilot": "https://beamreach.ai/compass/pilot.html"}}}
+    monkeypatch.setattr(demo_routes, "get_workspace_config", lambda request: dict(config))
+    tour = client.get("/api/demo/tour").json()
+    assert tour["pilot"] == {"url": "https://beamreach.ai/compass/pilot.html", "note": demo.DEFAULTS["tour"]["pilot_note"]}
+    by_id = {s["id"]: s for s in tour["steps"]}
+    assert by_id["import_pr"]["detail"]["pilot"]["url"].endswith("pilot.html") and "pilot" not in by_id["map"]["detail"]
+    assert by_id["run_it"]["detail"]["links"]["pilot"].endswith("pilot.html")
+
+
+def test_a_product_step_joins_the_tour_and_the_story_that_names_it(env):
+    client, table, actor, prs = env
+    seen: List[Dict[str, Any]] = []
+
+    def cost_fact(ctx: Dict[str, Any]) -> Dict[str, Any]:
+        seen.append(ctx)
+        mine = [p for p in ctx["prs"] if (p.get("origin") or {}).get("command") == "solve" and demo.same_visitor((p.get("origin") or {}).get("user_id"), ctx["user_id"])]
+        return {"done": bool(mine), "detail": {"href": "/workspace?tab=finops", "pr_url": mine[0]["pr_url"] if mine else None}}
+
+    demo.register_tour_step({"id": "cost_fix", "kind": "api", "pr": True, "title": "Fix a cost finding", "why": "…", "done_when": "A cost-fix pull request by you exists."}, cost_fact)
+    try:
+        # the cost story starts on it; the default order puts it last; the count says 8
+        tour = client.post("/api/demo/tour/start", json={"story": "cost", "src": "gads"}).json()
+        assert [s["id"] for s in tour["steps"]][:2] == ["cost_fix", "unmanaged"] and tour["total"] == 8 and tour["current"] == "cost_fix"
+        assert tour["steps"][0]["detail"]["href"] == "/workspace?tab=finops" and tour["steps"][0]["pr"] is True
+        assert seen and seen[-1]["user_id"] == "visitor-1" and seen[-1]["pk"] == PK
+        actor["user_id"] = "visitor-2"
+        assert [s["id"] for s in client.get("/api/demo/tour").json()["steps"]][-1] == "cost_fix"
+        actor["user_id"] = "visitor-1"
+
+        # the fact decides: another visitor's fix is not mine; mine completes the step; skip works on it
+        prs.append({"repo": "acme/infra", "number": 3, "pr_url": "https://github.com/acme/infra/pull/3", "origin": {"captain": "finops_engine", "command": "solve", "user_id": "visitor-2"}})
+        assert not client.get("/api/demo/tour").json()["steps"][0]["done"]
+        prs.append({"repo": "acme/infra", "number": 4, "pr_url": "https://github.com/acme/infra/pull/4", "origin": {"captain": "finops_engine", "command": "solve", "user_id": "visitor-1"}})
+        tour = client.get("/api/demo/tour").json()
+        assert tour["steps"][0]["done"] and tour["steps"][0]["detail"]["pr_url"].endswith("/4") and tour["current"] == "unmanaged"
+        assert "cost_fix" in _ids(client.post("/api/demo/tour/cost_fix/skip").json(), "skipped")
+
+        # a fact that fails is a step not done, not a tour that fails
+        demo.register_tour_step({"id": "flaky", "kind": "api", "title": "Flaky", "why": "", "done_when": ""}, lambda ctx: 1 / 0)
+        tour = client.get("/api/demo/tour").json()
+        assert tour["total"] == 9 and not {s["id"]: s for s in tour["steps"]}["flaky"]["done"]
+    finally:
+        demo.unregister_tour_step("cost_fix")
+        demo.unregister_tour_step("flaky")
+
+    # unregistered: the cost story falls back to the drift order, the row still says cost
+    tour = client.get("/api/demo/tour").json()
+    assert tour["total"] == 7 and [s["id"] for s in tour["steps"]][:2] == ["unmanaged", "import_pr"] and tour["story"] == "cost"
+    assert client.post("/api/demo/tour/cost_fix").status_code == 404

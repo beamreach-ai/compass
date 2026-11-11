@@ -1,6 +1,7 @@
 """What the dashboard asks about the demo: ``GET /api/demo`` is the mode, the synthetic
 world (seeded or not, its rows beside the real scan's), the links, the pinned settings
-and the trips in force; ``/api/demo/tour`` is this visitor's tour. Outside demo mode
+and the trips in force; ``/api/demo/tour`` is this visitor's tour, ``/api/demo/tour/start`` the
+story and source they arrived with. Outside demo mode
 every route here answers 404: there is no demo to describe."""
 
 from __future__ import annotations
@@ -88,6 +89,25 @@ def get_tour(request: Request) -> Dict[str, Any]:
 
 class TourEvent(BaseModel):
     incident_id: Optional[str] = None
+
+
+class TourStart(BaseModel):
+    story: Optional[str] = None  # drift | honeytoken | cost; anything else is the default order
+    src: Optional[str] = None  # the ad or page the visitor came from, as the landing URL said
+    gclid: Optional[str] = None
+    referrer: Optional[str] = None
+
+
+@router.post("/api/demo/tour/start")
+def start_tour(request: Request, body: TourStart = TourStart()) -> Dict[str, Any]:
+    """The visitor arrived, from an ad or a page: the story they came for and the source, written
+    once on their tour row. The dashboard posts it on the first load of a session; a landing
+    without any of this is still a landing (`landed_at`)."""
+    require_demo_mode()
+    actor, table, pk = _tour_context(request)
+    demo.start_tour(table, pk, str(actor.get("user_id") or "anonymous"), story=body.story,
+                    source={"src": body.src, "gclid": body.gclid, "referrer": body.referrer})
+    return demo.tour(table, pk, get_workspace_config(request), user_id=actor.get("user_id"), prs=_prs(request))
 
 
 @router.post("/api/demo/tour/{step}")
