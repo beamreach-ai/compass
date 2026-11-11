@@ -185,7 +185,7 @@ def test_a_product_step_joins_the_tour_and_the_story_that_names_it(env):
 
     def cost_fact(ctx: Dict[str, Any]) -> Dict[str, Any]:
         seen.append(ctx)
-        mine = [p for p in ctx["prs"] if (p.get("origin") or {}).get("command") == "solve" and demo.same_visitor((p.get("origin") or {}).get("user_id"), ctx["user_id"])]
+        mine = [p for p in ctx["pull_requests"] if (p.get("origin") or {}).get("command") == "solve" and demo.same_visitor((p.get("origin") or {}).get("user_id"), ctx["user_id"])]
         return {"done": bool(mine), "detail": {"href": "/workspace?tab=finops", "pr_url": mine[0]["pr_url"] if mine else None}}
 
     demo.register_tour_step({"id": "cost_fix", "kind": "api", "pr": True, "title": "Fix a cost finding", "why": "…", "done_when": "A cost-fix pull request by you exists."}, cost_fact)

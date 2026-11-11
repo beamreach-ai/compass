@@ -460,7 +460,7 @@ def tour(table: Any, pk: str, config: Dict[str, Any], *, user_id: Optional[str],
                      "detail": {"incident_id": incident_id, "action_verified_at": (incident or {}).get("action_verified_at")}},
     }
     # the product's steps, each a fact of its own
-    ctx = {"table": table, "pk": pk, "config": config, "user_id": user_id, "prs": prs, "now_ms": now_ms}
+    ctx = {"table": table, "pk": pk, "config": config, "user_id": user_id, "pull_requests": prs, "now_ms": now_ms}
     for step_id, (_, fact_fn) in _tour_steps.items():
         try:
             fact = fact_fn(ctx) or {}

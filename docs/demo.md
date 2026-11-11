@@ -317,7 +317,7 @@ The campaign scripts poll it hourly and pause the ads after two failures.
 a step: `spec` has the same keys as the core's (`id`, `kind`, `title`, `why`,
 `done_when`, and `pr: true` for a step that opens a pull request), `fact(ctx)`
 returns `{"done": bool, "detail": {...}}` from `ctx` (`table`, `pk`, `config`,
-`user_id`, `prs`, `now_ms`). A `detail.href` is the dashboard path the step's
+`user_id`, `pull_requests`, `now_ms`). A `detail.href` is the dashboard path the step's
 "Open →" goes to. A story may name the step; where nobody registered it, it
 drops out. A fact that raises is a step not done, logged, never a tour that
 fails.
