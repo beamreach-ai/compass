@@ -53,7 +53,7 @@ MANIFEST = CaptainManifest(
                 Statement(
                     sid="SelfAuditPolicies",
                     actions=("iam:GetPolicy", "iam:GetPolicyVersion"),
-                    resources=("arn:aws:iam::*:policy/*",),
+                    resources=("arn:aws:iam::{account_id}:policy/*", "arn:aws:iam::aws:policy/*"),
                 ),
             ),
         ),
