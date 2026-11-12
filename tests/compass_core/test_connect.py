@@ -251,3 +251,45 @@ def test_an_alert_queue_recorded_by_its_arn_alone_gets_its_url():
     arn = "arn:aws:sqs:us-east-1:662863386798:beamreach-honeypot-alerts-demo"
     assert alert_queues({"honeypot": {"alert_queue_arn": arn}}) == {"us-east-1": {"arn": arn, "url": "https://sqs.us-east-1.amazonaws.com/662863386798/beamreach-honeypot-alerts-demo"}}
     assert alert_queues({"aws": {"control": {"alert_queues": {"us-east-1": {"arn": arn, "url": "https://x"}}}}})["us-east-1"]["url"] == "https://x"
+
+
+def test_a_policy_naming_a_user_created_a_moment_ago_is_retried_until_aws_knows_the_user():
+    """Found on a first install off AWS: SQS refused the queue policy because the runtime user
+    it names did not exist yet (and, once created, is not known everywhere at once)."""
+    from botocore.exceptions import ClientError
+
+    connect = connect_module
+    calls = []
+
+    def put_policy():
+        calls.append(1)
+        if len(calls) < 3:
+            raise ClientError({"Error": {"Code": "InvalidAttributeValue", "Message": "Invalid value for the parameter Policy."}}, "SetQueueAttributes")
+        return "set"
+
+    assert connect._when_the_principal_exists(put_policy, sleep=lambda _s: None) == "set"
+    assert len(calls) == 3
+
+    def trust():
+        raise ClientError({"Error": {"Code": "MalformedPolicyDocument", "Message": "Invalid principal in policy"}}, "CreateRole")
+
+    with pytest.raises(ClientError):
+        connect._when_the_principal_exists(trust, seconds=0, sleep=lambda _s: None)
+
+    def other():
+        calls.append("other")
+        raise ClientError({"Error": {"Code": "AccessDenied", "Message": "no"}}, "SetQueueAttributes")
+
+    with pytest.raises(ClientError):
+        connect._when_the_principal_exists(other, sleep=lambda _s: None)
+    assert calls.count("other") == 1
+
+
+@mock_aws
+def test_the_runtime_user_exists_before_the_queue_policy_names_it(workspace, monkeypatch):
+    order = []
+    real_user, real_queues = connect_module.Connector.ensure_runtime_user, connect_module.Connector.alert_queues
+    monkeypatch.setattr(connect_module.Connector, "ensure_runtime_user", lambda self, name: order.append("user") or real_user(self, name))
+    monkeypatch.setattr(connect_module.Connector, "alert_queues", lambda self, *a, **k: order.append("queues") or real_queues(self, *a, **k))
+    connect({"workspace_id": "local", "account": ACCOUNT, "region": "us-east-1"})
+    assert order[:2] == ["user", "queues"]
