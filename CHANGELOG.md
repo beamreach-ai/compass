@@ -5,7 +5,7 @@ workflow refuses a tag without one, and reads from it what the dashboard shows
 next to the Update button: the first paragraph is the summary, the bullets under
 `### After the update` are the notes an operator needs after applying it.
 
-## Unreleased
+## 0.9.1 — 2026-11-12
 
 The demo's tour has stories: `?story=drift|honeytoken|cost` on the landing URL
 puts the step the ad promised first, `?src=` and `?gclid=` travel with the
@@ -20,6 +20,18 @@ Settings shows it to the operator. `GET /healthz/visitor`, public, is 200 while 
 visitor arriving now gets the demo the ads promise and 503 naming what is wrong
 (the tour, no recent pull request, a job nobody picked up, the model budget, the
 product's own checks). [docs/demo.md](docs/demo.md#the-tour).
+
+- A job keeps its first event and its latest 199 (`MAX_JOB_EVENTS`). A job a
+  scheduler touched every tick grew past DynamoDB's 400 KB item limit, and the
+  refusal switched the whole process to the local store, where bootstrap, the
+  inbox and every enqueue returned 500 until a restart. A refused item is now
+  logged and the table stays.
+- In demo mode the import form puts `demo.visitor_repo` first and skips
+  synthetic nodes; the Maps tab waits for the settings bootstrap before asking
+  for nodes; the dashboard asks for jobs only once it knows whose it is.
+- The README is rewritten (what Compass is and is not, an FAQ, the roadmap),
+  with [docs/honeytokens.md](docs/honeytokens.md) and
+  [docs/iac_coverage.md](docs/iac_coverage.md).
 
 ## 0.9.0 — 2026-10-25
 
