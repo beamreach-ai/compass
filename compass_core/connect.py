@@ -51,6 +51,7 @@ QUEUE_PREFIX = "compass-decoy-alerts"
 READ_POLICY_NAME = "inventory-read"
 RUNTIME_POLICY_NAME = "runtime"
 TAG = "managed-by"
+CALLER_IDENTITY_ACTION = permissions.CALLER_IDENTITY
 ASSUME_RETRY_SECONDS = 90  # a user and key made seconds ago: measured at over 30 s on a first install
 
 
@@ -379,8 +380,47 @@ class Connector:
                 iam.put_role_policy(RoleName=role_name, PolicyName=READ_POLICY_NAME, PolicyDocument=json.dumps(policy))
                 self.step("read role", f"{role_name}: {'created' if created else 'present'}; policy from {len(policy['Statement'])} statements",
                           created=created, statements=len(policy["Statement"]))
+                self.session_policies(iam)
             else:
                 self.step("act role", f"{role_name}: {'created' if created else 'present'}, no permissions until a grant is merged", created=created)
+
+    def session_policies(self, iam: Any) -> None:
+        """A captain whose declared reads do not fit an inline session policy gets them as a
+        managed policy of its own: not attached to anything (the role's inline policy already
+        allows the reads), only named when its session is assumed, which narrows the session to
+        it (sessions._narrowing reads ``aws.managed_policies``)."""
+        from compass_core import captains
+
+        account = str(self.aws_cfg.get("account_id") or "")
+        install_id = self.aws_cfg.get("install_id")
+        recorded: Dict[str, str] = {}
+        for manifest in captains.manifests():
+            declared = getattr(manifest, "permissions", None)
+            statements = permissions.captain_statements(declared, self.config)
+            if not statements or permissions.session_policy(declared, self.config) is not None:
+                continue
+            name = f"svc-compass-{manifest.name.replace('_', '-')}-{install_id}"
+            arn = f"arn:aws:iam::{account}:policy{ROLE_PATH}{name}"
+            document = json.dumps({"Version": "2012-10-17", "Statement": [{"Effect": "Allow", "Action": CALLER_IDENTITY_ACTION, "Resource": "*"}] + statements})
+            try:
+                iam.create_policy(PolicyName=name, Path=ROLE_PATH, PolicyDocument=document,
+                                  Description=f"What Compass's {manifest.name} captain may read (installation {install_id})",
+                                  Tags=[{"Key": TAG, "Value": self.aws_cfg.get("session_prefix") or sessions.DEFAULT_PREFIX}])
+                created = True
+            except iam.exceptions.EntityAlreadyExistsException:
+                # five versions at most: drop the ones that are not the default, then add this one as the default
+                for version in iam.list_policy_versions(PolicyArn=arn).get("Versions", []):
+                    if not version.get("IsDefaultVersion"):
+                        iam.delete_policy_version(PolicyArn=arn, VersionId=version["VersionId"])
+                iam.create_policy_version(PolicyArn=arn, PolicyDocument=document, SetAsDefault=True)
+                created = False
+            recorded[manifest.name] = arn
+            self.step("session policy", f"{name}: {'created' if created else 'updated'} ({manifest.name}'s reads are too many for an inline session policy)",
+                      captain=manifest.name, arn=arn, created=created)
+        if recorded:
+            self.aws_cfg["managed_policies"] = recorded
+        else:
+            self.aws_cfg.pop("managed_policies", None)
 
     # ── verify ────────────────────────────────────────────────────────────────
 
