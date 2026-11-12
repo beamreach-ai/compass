@@ -89,9 +89,13 @@ class TerraformRunner:
         plugin_cache_dir: Optional[str] = None,
         env: Optional[Dict[str, str]] = None,
         timeout_s: int = DEFAULT_TIMEOUT_S,
+        refresh: bool = True,
     ):
         self.binary = binary
         self.timeout_s = timeout_s
+        # False plans from the state as recorded: for an identity that may read the state and
+        # the resources being imported, but not everything else the root module manages
+        self.refresh = refresh
         self._env = dict(os.environ)
         for key, value in (env or {}).items():
             # A None value *removes* the variable. Needed for AWS_PROFILE: the
@@ -262,7 +266,10 @@ class TerraformRunner:
 
     def plan(self, cwd: str) -> PlanSummary:
         """A read-only plan, parsed into the shape the verify gate needs."""
-        self._run_checked(["plan", "-no-color", "-input=false", "-lock=false", "-out=tfplan.binary"], cwd)
+        args = ["plan", "-no-color", "-input=false", "-lock=false", "-out=tfplan.binary"]
+        if not self.refresh:
+            args.insert(-1, "-refresh=false")
+        self._run_checked(args, cwd)
         raw = json.loads(self._run_checked(["show", "-json", "-no-color", "tfplan.binary"], cwd) or "{}")
         return summarise_plan(raw)
 

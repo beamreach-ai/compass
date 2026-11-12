@@ -2,6 +2,7 @@ import logging
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import boto3
+from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError, EndpointConnectionError
 
 from compass_core import sessions
@@ -985,7 +986,10 @@ class AWSGraphCollector:
 
     def _collect_dynamodb(self, session: boto3.Session, region: str) -> None:
         try:
-            client = session.client("dynamodb")
+            # the account's DynamoDB, not Compass's own: with AWS_ENDPOINT_URL_DYNAMODB set (a local
+            # install keeps its tables in DynamoDB Local) the scan listed Compass's tables as the
+            # account's and missed the real ones
+            client = session.client("dynamodb", config=Config(ignore_configured_endpoint_urls=True))
             paginator = client.get_paginator("list_tables")
             for page in paginator.paginate():
                 table_names = page.get("TableNames", [])
