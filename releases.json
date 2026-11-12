@@ -1,10 +1,28 @@
 {
   "schema": 1,
   "channels": {
-    "stable": "0.9.0",
-    "prerelease": "0.9.0"
+    "stable": "0.9.1",
+    "prerelease": "0.9.1"
   },
   "releases": [
+    {
+      "version": "0.9.1",
+      "published_at": "2026-11-12T16:51:39Z",
+      "notes_url": "https://github.com/beamreach-ai/compass/releases/tag/v0.9.1",
+      "summary": "The demo's tour has stories: `?story=drift|honeytoken|cost` on the landing URL puts the step the ad promised first, `?src=` and `?gclid=` travel with the visitor through sign-in to their tour row (`POST /api/demo/tour/start`) and on to the pilot page, and a product can register tour steps of its own (`compass_core.demo.register_tour_step`). With `demo.links.pilot` set, every pull-request step says what the PR would cost on the visitor's own account and every exit points to the pilot, and posts an event. `GET /api/demo/funnel` and `compass demo funnel` count the visitors by source and story: the steps they reached, the pull requests, the pilot clicks; a \"Demo funnel\" card at the top of Settings shows it to the operator. `GET /healthz/visitor`, public, is 200 while a visitor arriving now gets the demo the ads promise and 503 naming what is wrong (the tour, no recent pull request, a job nobody picked up, the model budget, the product's own checks). [docs/demo.md](docs/demo.md#the-tour).",
+      "images": {
+        "compass": "sha256:f5a9c5365941c238e0e7185a9f73b52f8d146e22243344820090789f38a55136",
+        "compass-dashboard": "sha256:7efa2104c9fe01caafa205999cdcbfe94a9656222649377119df33ff4b579734",
+        "compass-updater": "sha256:5bacbc001a8663ff6a02034551c37fb513ee7c3b179de32d69c4cc6b179fe92d"
+      },
+      "min_from": "0.8.0",
+      "requires_restart": [
+        "api",
+        "compass",
+        "dashboard"
+      ],
+      "notes": []
+    },
     {
       "version": "0.9.0",
       "published_at": "2026-10-26T18:52:33Z",
