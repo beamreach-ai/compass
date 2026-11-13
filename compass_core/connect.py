@@ -27,6 +27,7 @@ Every call here writes to an AWS account; it is the one command that does.
 
 from __future__ import annotations
 
+import functools
 import json
 import logging
 import secrets
@@ -325,7 +326,7 @@ class Connector:
                 "Policy": json.dumps(queue_policy(arn, target_account=target_account, base_identity_arn=base_identity_arn)),
                 "SqsManagedSseEnabled": "true",
             }
-            _when_the_principal_exists(lambda: sqs.set_queue_attributes(QueueUrl=url, Attributes=attributes))
+            _when_the_principal_exists(functools.partial(sqs.set_queue_attributes, QueueUrl=url, Attributes=attributes))
             queues[region] = {"arn": arn, "url": url}
             self.step("alert queue", f"{arn} ({region}), SSE-SQS, the target account's roles may send", region=region, arn=arn)
         return queues
