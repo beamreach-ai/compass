@@ -45,8 +45,15 @@ MANIFEST = CaptainManifest(
                 Statement(
                     sid="SelfAudit",
                     actions=("iam:GetRole", "iam:GetRolePolicy", "iam:ListRolePolicies", "iam:ListAttachedRolePolicies",
-                             "iam:GetPolicy", "iam:GetPolicyVersion", "iam:SimulatePrincipalPolicy"),
+                             "iam:SimulatePrincipalPolicy"),
                     resources=("{read_role_arn}", "{act_role_arn}"),
+                ),
+                # the managed policies attached to them: a policy is its own resource, never a role, so
+                # naming the roles here granted nothing and `connect verify` reported the two as denied
+                Statement(
+                    sid="SelfAuditPolicies",
+                    actions=("iam:GetPolicy", "iam:GetPolicyVersion"),
+                    resources=("arn:aws:iam::{account_id}:policy/*", "arn:aws:iam::aws:policy/*"),
                 ),
             ),
         ),

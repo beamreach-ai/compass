@@ -27,6 +27,7 @@ Every call here writes to an AWS account; it is the one command that does.
 
 from __future__ import annotations
 
+import functools
 import json
 import logging
 import secrets
@@ -51,7 +52,8 @@ QUEUE_PREFIX = "compass-decoy-alerts"
 READ_POLICY_NAME = "inventory-read"
 RUNTIME_POLICY_NAME = "runtime"
 TAG = "managed-by"
-ASSUME_RETRY_SECONDS = 30
+CALLER_IDENTITY_ACTION = permissions.CALLER_IDENTITY
+ASSUME_RETRY_SECONDS = 90  # a user and key made seconds ago: measured at over 30 s on a first install
 
 
 def _now() -> str:
@@ -122,6 +124,28 @@ def queue_policy(queue_arn: str, *, target_account: str, base_identity_arn: str)
              "Action": ["sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:GetQueueAttributes"], "Resource": queue_arn},
         ],
     }
+
+
+PRINCIPAL_RETRY_SECONDS = 60
+
+
+def _when_the_principal_exists(call: Any, *, seconds: int = PRINCIPAL_RETRY_SECONDS, sleep: Any = time.sleep) -> Any:
+    """Run a call that names an IAM principal in a policy. A user created a moment ago is not
+    yet known to every AWS service: SQS answers InvalidAttributeValue for the queue policy and
+    IAM answers MalformedPolicyDocument for a trust policy until it is. Retried for a minute."""
+    from botocore.exceptions import ClientError
+
+    deadline = time.monotonic() + seconds
+    while True:
+        try:
+            return call()
+        except ClientError as exc:
+            code = (exc.response.get("Error") or {}).get("Code", "")
+            message = (exc.response.get("Error") or {}).get("Message", "")
+            not_yet = code == "InvalidAttributeValue" and "Policy" in message or code == "MalformedPolicyDocument" and "principal" in message.lower()
+            if not not_yet or time.monotonic() >= deadline:
+                raise
+            sleep(3)
 
 
 # ── the machine's own identity (D7) ───────────────────────────────────────────
@@ -226,6 +250,9 @@ class Connector:
         control = dict(control_config(self.config))
         control["account_id"] = control_account
         base_arn, source = self.base_identity(control, control_account, runtime_user)
+        if source == "access_key":
+            # the queue's policy and the roles' trust name this user: it has to exist first
+            self.ensure_runtime_user(runtime_user)
         queues = self.alert_queues(regions, control_account=control_account, target_account=target_account, base_identity_arn=base_arn)
         control["alert_queues"] = queues
         if source == "access_key":
@@ -295,21 +322,28 @@ class Connector:
             if arn.split(":")[4] != control_account:
                 raise RuntimeError(f"the profile created the queue in account {arn.split(':')[4]}, not the control account {control_account}: "
                                    "run connect with a profile for the control account")
-            sqs.set_queue_attributes(QueueUrl=url, Attributes={
+            attributes = {
                 "Policy": json.dumps(queue_policy(arn, target_account=target_account, base_identity_arn=base_identity_arn)),
                 "SqsManagedSseEnabled": "true",
-            })
+            }
+            _when_the_principal_exists(functools.partial(sqs.set_queue_attributes, QueueUrl=url, Attributes=attributes))
             queues[region] = {"arn": arn, "url": url}
             self.step("alert queue", f"{arn} ({region}), SSE-SQS, the target account's roles may send", region=region, arn=arn)
         return queues
 
-    def runtime_user(self, control: Dict[str, Any], user_name: str, *, role_arns: List[str], queue_arns: List[str]) -> None:
+    def ensure_runtime_user(self, user_name: str) -> bool:
+        """Create the runtime user if it is not there; True when this call created it."""
         iam = self.profile.client("iam")
         try:
             iam.create_user(UserName=user_name, Path=ROLE_PATH, Tags=[{"Key": TAG, "Value": self.aws_cfg.get("session_prefix") or sessions.DEFAULT_PREFIX}])
-            created = True
         except iam.exceptions.EntityAlreadyExistsException:
-            created = False
+            return False
+        self._created_runtime_user = True
+        return True
+
+    def runtime_user(self, control: Dict[str, Any], user_name: str, *, role_arns: List[str], queue_arns: List[str]) -> None:
+        iam = self.profile.client("iam")
+        created = self.ensure_runtime_user(user_name) or getattr(self, "_created_runtime_user", False)
         iam.put_user_policy(UserName=user_name, PolicyName=RUNTIME_POLICY_NAME, PolicyDocument=json.dumps(runtime_policy(role_arns, queue_arns)))
         existing = control.get("credentials") if isinstance(control.get("credentials"), dict) else {}
         known = {k["AccessKeyId"] for k in iam.list_access_keys(UserName=user_name)["AccessKeyMetadata"]}
@@ -330,13 +364,16 @@ class Connector:
             if kind == "act" and act_arn.rsplit("/", 1)[-1] != act_role:
                 self.step("act role", f"keeping the existing responder role {act_arn}", arn=act_arn)
                 continue
-            try:
-                iam.create_role(RoleName=role_name, Path=ROLE_PATH, AssumeRolePolicyDocument=trust, Tags=tags,
-                                Description=f"Compass {kind} role for installation {self.aws_cfg.get('install_id')}")
-                created = True
-            except iam.exceptions.EntityAlreadyExistsException:
-                iam.update_assume_role_policy(RoleName=role_name, PolicyDocument=trust)
-                created = False
+            def ensure(role_name: str = role_name, kind: str = kind) -> bool:
+                try:
+                    iam.create_role(RoleName=role_name, Path=ROLE_PATH, AssumeRolePolicyDocument=trust, Tags=tags,
+                                    Description=f"Compass {kind} role for installation {self.aws_cfg.get('install_id')}")
+                    return True
+                except iam.exceptions.EntityAlreadyExistsException:
+                    iam.update_assume_role_policy(RoleName=role_name, PolicyDocument=trust)
+                    return False
+
+            created = _when_the_principal_exists(ensure)
             if kind == "read":
                 from compass_core import captains
 
@@ -344,8 +381,47 @@ class Connector:
                 iam.put_role_policy(RoleName=role_name, PolicyName=READ_POLICY_NAME, PolicyDocument=json.dumps(policy))
                 self.step("read role", f"{role_name}: {'created' if created else 'present'}; policy from {len(policy['Statement'])} statements",
                           created=created, statements=len(policy["Statement"]))
+                self.session_policies(iam)
             else:
                 self.step("act role", f"{role_name}: {'created' if created else 'present'}, no permissions until a grant is merged", created=created)
+
+    def session_policies(self, iam: Any) -> None:
+        """A captain whose declared reads do not fit an inline session policy gets them as a
+        managed policy of its own: not attached to anything (the role's inline policy already
+        allows the reads), only named when its session is assumed, which narrows the session to
+        it (sessions._narrowing reads ``aws.managed_policies``)."""
+        from compass_core import captains
+
+        account = str(self.aws_cfg.get("account_id") or "")
+        install_id = self.aws_cfg.get("install_id")
+        recorded: Dict[str, str] = {}
+        for manifest in captains.manifests():
+            declared = getattr(manifest, "permissions", None)
+            statements = permissions.captain_statements(declared, self.config)
+            if not statements or permissions.session_policy(declared, self.config) is not None:
+                continue
+            name = f"svc-compass-{manifest.name.replace('_', '-')}-{install_id}"
+            arn = f"arn:aws:iam::{account}:policy{ROLE_PATH}{name}"
+            document = json.dumps({"Version": "2012-10-17", "Statement": [{"Effect": "Allow", "Action": CALLER_IDENTITY_ACTION, "Resource": "*"}] + statements})
+            try:
+                iam.create_policy(PolicyName=name, Path=ROLE_PATH, PolicyDocument=document,
+                                  Description=f"What Compass's {manifest.name} captain may read (installation {install_id})",
+                                  Tags=[{"Key": TAG, "Value": self.aws_cfg.get("session_prefix") or sessions.DEFAULT_PREFIX}])
+                created = True
+            except iam.exceptions.EntityAlreadyExistsException:
+                # five versions at most: drop the ones that are not the default, then add this one as the default
+                for version in iam.list_policy_versions(PolicyArn=arn).get("Versions", []):
+                    if not version.get("IsDefaultVersion"):
+                        iam.delete_policy_version(PolicyArn=arn, VersionId=version["VersionId"])
+                iam.create_policy_version(PolicyArn=arn, PolicyDocument=document, SetAsDefault=True)
+                created = False
+            recorded[manifest.name] = arn
+            self.step("session policy", f"{name}: {'created' if created else 'updated'} ({manifest.name}'s reads are too many for an inline session policy)",
+                      captain=manifest.name, arn=arn, created=created)
+        if recorded:
+            self.aws_cfg["managed_policies"] = recorded
+        else:
+            self.aws_cfg.pop("managed_policies", None)
 
     # ── verify ────────────────────────────────────────────────────────────────
 

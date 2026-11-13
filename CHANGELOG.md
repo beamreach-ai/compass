@@ -5,6 +5,35 @@ workflow refuses a tag without one, and reads from it what the dashboard shows
 next to the Update button: the first paragraph is the summary, the bullets under
 `### After the update` are the notes an operator needs after applying it.
 
+## 0.9.2 — 2026-11-13
+
+A first install on a machine outside AWS now goes from an empty folder to a
+map and a verified import pull request without a workaround. `compass connect`
+creates the runtime user before the queue policy that names it and waits for
+AWS to accept a new identity instead of failing on it; an import is verified
+with the read role when the machine has no AWS identity of its own
+(`terraform plan -refresh=false`), where it used to open unverified.
+
+- `connect` no longer reports a denied read on its own verification: the
+  self-audit's `iam:GetPolicy` and `iam:GetPolicyVersion` are granted on the
+  account's and AWS's managed policies.
+- A captain whose declared reads do not fit an inline session policy (2,048
+  characters) gets a managed policy, `svc-compass-<captain>-<install id>`,
+  created by `connect` and recorded under `aws.managed_policies`. Without it
+  the session was refused.
+- Coverage no longer reports drift for a number Terraform holds as a string,
+  or for a load balancer's `internal` against the map's `scheme`.
+- The mapper reads the account's DynamoDB, not the install's DynamoDB Local:
+  the install's own tables appeared on the map as unmanaged resources.
+- `docker-compose.yml` and `.env.example` defaulted to 0.9.0 after 0.9.1 was
+  released; they name 0.9.2 with this release.
+
+### After the update
+
+- Run `compass connect` again with the profile you connected with: it adds the
+  self-audit statement and, where a captain needs one, the managed session
+  policy. The policy is shown before anything is created.
+
 ## 0.9.1 — 2026-11-12
 
 The demo's tour has stories: `?story=drift|honeytoken|cost` on the landing URL

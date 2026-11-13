@@ -67,7 +67,12 @@ def _coerce(value: Any) -> Any:
     if isinstance(value, bool):
         return value
     if isinstance(value, str):
-        return value.strip().lower()
+        text = value.strip().lower()
+        # AWS hands some numbers back as text (an SQS queue's attributes): "30" is 30, not a drift
+        try:
+            return float(text)
+        except ValueError:
+            return text
     if isinstance(value, (int, float, Decimal)):
         return float(value)
     return value
@@ -136,6 +141,9 @@ def annotate_drift(
             actual = (aws_node.attributes or {}).get(aws_key)
             if declared is None or actual is None:
                 continue
+            if tf_key == "internal" and aws_key == "scheme":
+                # Terraform says internal = true|false, the load balancer says "internal" or "internet-facing"
+                actual = str(actual).strip().lower() == "internal"
             if _coerce(declared) != _coerce(actual):
                 drifted.append({
                     "field": aws_key,

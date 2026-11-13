@@ -251,3 +251,72 @@ def test_an_alert_queue_recorded_by_its_arn_alone_gets_its_url():
     arn = "arn:aws:sqs:us-east-1:662863386798:beamreach-honeypot-alerts-demo"
     assert alert_queues({"honeypot": {"alert_queue_arn": arn}}) == {"us-east-1": {"arn": arn, "url": "https://sqs.us-east-1.amazonaws.com/662863386798/beamreach-honeypot-alerts-demo"}}
     assert alert_queues({"aws": {"control": {"alert_queues": {"us-east-1": {"arn": arn, "url": "https://x"}}}}})["us-east-1"]["url"] == "https://x"
+
+
+def test_a_policy_naming_a_user_created_a_moment_ago_is_retried_until_aws_knows_the_user():
+    """Found on a first install off AWS: SQS refused the queue policy because the runtime user
+    it names did not exist yet (and, once created, is not known everywhere at once)."""
+    from botocore.exceptions import ClientError
+
+    connect = connect_module
+    calls = []
+
+    def put_policy():
+        calls.append(1)
+        if len(calls) < 3:
+            raise ClientError({"Error": {"Code": "InvalidAttributeValue", "Message": "Invalid value for the parameter Policy."}}, "SetQueueAttributes")
+        return "set"
+
+    assert connect._when_the_principal_exists(put_policy, sleep=lambda _s: None) == "set"
+    assert len(calls) == 3
+
+    def trust():
+        raise ClientError({"Error": {"Code": "MalformedPolicyDocument", "Message": "Invalid principal in policy"}}, "CreateRole")
+
+    with pytest.raises(ClientError):
+        connect._when_the_principal_exists(trust, seconds=0, sleep=lambda _s: None)
+
+    def other():
+        calls.append("other")
+        raise ClientError({"Error": {"Code": "AccessDenied", "Message": "no"}}, "SetQueueAttributes")
+
+    with pytest.raises(ClientError):
+        connect._when_the_principal_exists(other, sleep=lambda _s: None)
+    assert calls.count("other") == 1
+
+
+@mock_aws
+def test_the_runtime_user_exists_before_the_queue_policy_names_it(workspace, monkeypatch):
+    order = []
+    real_user, real_queues = connect_module.Connector.ensure_runtime_user, connect_module.Connector.alert_queues
+    monkeypatch.setattr(connect_module.Connector, "ensure_runtime_user", lambda self, name: order.append("user") or real_user(self, name))
+    monkeypatch.setattr(connect_module.Connector, "alert_queues", lambda self, *a, **k: order.append("queues") or real_queues(self, *a, **k))
+    connect({"workspace_id": "local", "account": ACCOUNT, "region": "us-east-1"})
+    assert order[:2] == ["user", "queues"]
+
+
+@mock_aws
+def test_a_captain_with_too_many_reads_for_an_inline_session_gets_a_managed_policy(workspace, monkeypatch):
+    """Found by running a scanner captain on a connected install: its reads did not fit the
+    2,048 characters of an inline session policy, and nothing ever created the managed one."""
+    from compass_core import captains, permissions
+    from compass_core.captains import CaptainManifest
+
+    wide = permissions.Permissions(aws=permissions.AwsPermissions(read=(
+        permissions.Statement(sid="Wide", actions=tuple(f"ec2:DescribeSomethingRatherLong{i:03d}" for i in range(80))),)))
+    assert permissions.session_policy(wide, {}) is None
+    scanner = CaptainManifest(name="scanner", label="Scanner", summary="reads a lot", tier="open", feature="scanner", permissions=wide)
+    real = captains.manifests
+    monkeypatch.setattr(captains, "manifests", lambda: list(real()) + [scanner])
+
+    out = connect({"workspace_id": "local", "account": ACCOUNT, "region": "us-east-1"})
+    arn = f"arn:aws:iam::{ACCOUNT}:policy/service/svc-compass-scanner-k3f9a2"
+    assert _config(workspace)["aws"]["managed_policies"] == {"scanner": arn}
+    assert any(step.get("captain") == "scanner" and step.get("created") for step in out["steps"])
+    iam = boto3.client("iam")
+    assert iam.get_policy(PolicyArn=arn)["Policy"]["AttachmentCount"] == 0, "named at AssumeRole, attached to nothing"
+
+    # a second run replaces the document, and keeps one policy
+    connect({"workspace_id": "local", "account": ACCOUNT, "region": "us-east-1"})
+    versions = iam.list_policy_versions(PolicyArn=arn)["Versions"]
+    assert len(versions) == 2 and sum(1 for v in versions if v["IsDefaultVersion"]) == 1

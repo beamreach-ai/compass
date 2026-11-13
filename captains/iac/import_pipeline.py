@@ -18,6 +18,7 @@ result is a less polished PR rather than a failed job.
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
@@ -51,6 +52,15 @@ provider "aws" {{
   region = "{region}"
 }}
 """
+
+
+_AMBIENT_AWS = ("AWS_PROFILE", "AWS_ACCESS_KEY_ID", "AWS_WEB_IDENTITY_TOKEN_FILE",
+                "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI", "AWS_CONTAINER_CREDENTIALS_FULL_URI")
+
+
+def _ambient_aws_identity() -> bool:
+    """Whether this process was given AWS credentials of its own through the environment."""
+    return any((os.environ.get(name) or "").strip() for name in _AMBIENT_AWS)
 
 
 @dataclass
@@ -112,7 +122,17 @@ class ImportPipeline:
         # control-plane account and reports every resource as
         # "Cannot import non-existent remote object", because from there they
         # genuinely do not exist.
+        #
+        # A machine with no AWS identity of its own (the open edition off AWS: Compass
+        # holds nothing but the roles `connect` made) has no ambient chain to inherit,
+        # and `init` against the S3 backend failed with "no valid credential sources",
+        # so no import was ever verified there. The read role may read the state
+        # buckets named at connect, and the plan runs unlocked and read-only: use it.
         self.tf = terraform or TerraformRunner()
+        if target_credentials and isinstance(self.tf, TerraformRunner) and not _ambient_aws_identity():
+            # the read role reads what Compass maps, not everything this root manages (tags on an
+            # ECR repository, say): the plan takes the rest from the state and reads the imports
+            self.tf = TerraformRunner(binary=self.tf.binary, env=target_credentials, timeout_s=self.tf.timeout_s, refresh=False)
         self.tf_target = (
             TerraformRunner(env=target_credentials, timeout_s=self.tf.timeout_s)
             if target_credentials
