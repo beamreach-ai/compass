@@ -26,7 +26,7 @@ with the read role when the machine has no AWS identity of its own
 - The mapper reads the account's DynamoDB, not the install's DynamoDB Local:
   the install's own tables appeared on the map as unmanaged resources.
 - `docker-compose.yml` and `.env.example` defaulted to 0.9.0 after 0.9.1 was
-  released.
+  released; they name 0.9.2 with this release.
 
 ### After the update
 
