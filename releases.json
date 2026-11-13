@@ -1,10 +1,30 @@
 {
   "schema": 1,
   "channels": {
-    "stable": "0.9.1",
-    "prerelease": "0.9.1"
+    "stable": "0.9.2",
+    "prerelease": "0.9.2"
   },
   "releases": [
+    {
+      "version": "0.9.2",
+      "published_at": "2026-11-13T19:21:28Z",
+      "notes_url": "https://github.com/beamreach-ai/compass/releases/tag/v0.9.2",
+      "summary": "A first install on a machine outside AWS now goes from an empty folder to a map and a verified import pull request without a workaround. `compass connect` creates the runtime user before the queue policy that names it and waits for AWS to accept a new identity instead of failing on it; an import is verified with the read role when the machine has no AWS identity of its own (`terraform plan -refresh=false`), where it used to open unverified.",
+      "images": {
+        "compass": "sha256:b28460872d62ea4e1f08b1f001c626ab4b2fa16e9398468e466386bf3737b911",
+        "compass-dashboard": "sha256:9edede404821fafb0ca5406f02a751bc9b6e2a2339dcb6aa4ce70aa45ab5c37d",
+        "compass-updater": "sha256:ad60e9a2c5e9486b254772bf103dbb04a42be9a88f5f2410cdd7896be7ecda18"
+      },
+      "min_from": "0.8.0",
+      "requires_restart": [
+        "api",
+        "compass",
+        "dashboard"
+      ],
+      "notes": [
+        "Run `compass connect` again with the profile you connected with: it adds the"
+      ]
+    },
     {
       "version": "0.9.1",
       "published_at": "2026-11-12T16:51:39Z",
