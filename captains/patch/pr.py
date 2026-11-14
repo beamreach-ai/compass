@@ -77,6 +77,21 @@ def branch_name(repo: str, findings: Iterable[Mapping[str, Any]], *, today: Opti
 
 # ── the body ──────────────────────────────────────────────────────────────────
 
+# A publish that failed is not tried again with the same content before this long: a tick runs
+# every 15 minutes, and each attempt asks the model and writes to the branch before it fails.
+RETRY_AFTER_SECONDS = 6 * 3600
+_FAILED: Dict[tuple, tuple] = {}  # (workspace, repo) -> (fingerprint, retry at, error); per process
+
+
+def reset_failures_for_tests() -> None:
+    _FAILED.clear()
+
+
+def _fingerprint(title: str, text: str, labels: Iterable[str], edits: Mapping[str, _fixes.Edit]) -> str:
+    parts = [title, text, ",".join(sorted(labels))] + [f"{path}\0{edit.after}" for path, edit in sorted(edits.items())]
+    return hashlib.sha256("\x1e".join(parts).encode("utf-8")).hexdigest()[:32]
+
+
 def _advisory_links(advisory_id: str) -> str:
     if advisory_id.startswith("CVE-"):
         return f"[{advisory_id}](https://nvd.nist.gov/vuln/detail/{advisory_id})"
@@ -186,6 +201,28 @@ class PullRequestOpener:
             self._registry = PRRegistry.from_config(dict(self.config), workspace_id=self.workspace_id)
         return self._registry
 
+    def _standing(self, gh_repo: Any, branch: str, applied: List[Dict[str, Any]], by_file: Mapping[str, _fixes.Edit], fingerprint: str) -> Optional[Dict[str, Any]]:
+        """The open pull request's record when it already carries exactly these findings and these
+        file contents; None when anything differs, is missing, or cannot be read (then it is published)."""
+        records = [f.get("pr") or {} for f in applied]
+        if not records or any(f.get("state") != "pr_open" for f in applied):
+            return None
+        if any(r.get("fingerprint") != fingerprint or r.get("branch") != branch for r in records):
+            return None
+        from compass_core.github_prs import find_open_pr
+
+        try:
+            pull = find_open_pr(gh_repo, branch)
+            if pull is None or str(getattr(pull, "number", "")) != str(records[0].get("number")):
+                return None
+            for path, edit in by_file.items():
+                if gh_repo.get_contents(path, ref=branch).decoded_content.decode("utf-8", errors="replace") != edit.after:
+                    return None
+        except Exception as exc:  # noqa: BLE001 - when in doubt, publish
+            logger.debug("%s not compared with its pull request: %s", branch, exc)
+            return None
+        return dict(records[0])
+
     def open_all(self, *, now_ms: Optional[int] = None) -> Dict[str, Any]:
         """Every repository with pending findings, within ``max_open_prs``."""
         rows = self.findings.list()
@@ -193,7 +230,7 @@ class PullRequestOpener:
         section = self.config.get("patch") if isinstance(self.config.get("patch"), dict) else {}
         max_open = int(section.get("max_open_prs", DEFAULT_MAX_OPEN) or 0)
         already_open = {str(r.get("repo")) for r in rows if r.get("state") == "pr_open" and r.get("repo")}
-        report: Dict[str, Any] = {"opened": [], "updated": [], "skipped": {}, "errors": {}}
+        report: Dict[str, Any] = {"opened": [], "updated": [], "unchanged": [], "skipped": {}, "errors": {}}
         budget = max(0, max_open - len(already_open)) if max_open else None
         for repo, group in sorted(groups.items(), key=lambda kv: (not any(f.get("exposed") for f in kv[1]), kv[0])):
             is_update = repo in already_open
@@ -209,6 +246,12 @@ class PullRequestOpener:
                 continue
             if result is None:
                 report["skipped"][repo] = "nothing to change on the base branch"
+                continue
+            if result.get("unchanged"):
+                report["unchanged"].append(result)
+                continue
+            if result.get("held"):
+                report["skipped"][repo] = result["reason"]
                 continue
             (report["updated"] if result.get("updated") else report["opened"]).append(result)
             if not is_update and budget is not None:
@@ -297,15 +340,32 @@ class PullRequestOpener:
                 by_file[manifest].notes.append(_lockfiles.note(entry, lock_mode))
         files = sorted(by_file)
         allowed_files = sorted(set(files) | {e.lockfile for e in lock_entries})
-        advisories = [a for a in (self.advisories.get(str(f.get("advisory_id"))) for f in applied) if a] if self.advisories is not None else []
-        text = body(repo, applied, by_file, explanation=explanation(self.model, applied, advisories))
         ids = sorted({str(f.get("advisory_id")) for f in applied})
         title = f"Security: {', '.join(ids[:2])}{f' and {len(ids) - 2} more' if len(ids) > 2 else ''} — {', '.join(sorted({str(f.get('package')) for f in applied})[:3])}"
-        ensure_branch(gh_repo, branch, base_branch)
-        commit_files(gh_repo, branch, {path: edit.after for path, edit in by_file.items()},
-                     add_message="compass: security patch, add {path}", update_message="compass: security patch, {path}")
-        published = open_or_update_pr(gh_repo, branch=branch, base_branch=base_branch, title=title, body=text)
         labels = list(LABELS) + ([EXPLOITED_LABEL] if any(f.get("kev") for f in applied) else [])
+        # what this pull request says and holds, without the model's paragraph: the same as last time means
+        # there is nothing to publish, so no model call, no commit, no edit (the tick runs every 15 minutes)
+        fingerprint = _fingerprint(title, body(repo, applied, by_file), labels, by_file)
+        standing = self._standing(gh_repo, branch, applied, by_file, fingerprint)
+        if standing is not None:
+            return {"repo": repo, "url": standing.get("url"), "number": standing.get("number"), "branch": branch, "files": files, "findings": len(applied),
+                    "updated": False, "unchanged": True, "labels": labels}
+        failed = _FAILED.get((self.workspace_id, repo))
+        if failed and failed[0] == fingerprint and failed[1] > time.time():
+            return {"repo": repo, "branch": branch, "files": files, "findings": len(applied), "held": True,
+                    "reason": f"the last attempt failed ({failed[2]}); the same change is tried again after "
+                              f"{datetime.fromtimestamp(failed[1], tz=timezone.utc).strftime('%H:%M UTC')}"}
+        advisories = [a for a in (self.advisories.get(str(f.get("advisory_id"))) for f in applied) if a] if self.advisories is not None else []
+        try:
+            text = body(repo, applied, by_file, explanation=explanation(self.model, applied, advisories))
+            ensure_branch(gh_repo, branch, base_branch)
+            commit_files(gh_repo, branch, {path: edit.after for path, edit in by_file.items()},
+                         add_message="compass: security patch, add {path}", update_message="compass: security patch, {path}")
+            published = open_or_update_pr(gh_repo, branch=branch, base_branch=base_branch, title=title, body=text)
+        except Exception as exc:
+            _FAILED[(self.workspace_id, repo)] = (fingerprint, time.time() + RETRY_AFTER_SECONDS, f"{type(exc).__name__}: {exc}"[:160])
+            raise
+        _FAILED.pop((self.workspace_id, repo), None)
         try:
             if published.number is not None:
                 gh_repo.get_pull(published.number).add_to_labels(*labels) if hasattr(gh_repo, "get_pull") else None
@@ -318,7 +378,8 @@ class PullRequestOpener:
         fresh_intent = intent_for_patch(repo, applied, allowed_files)
         self.registry().widen_scope(repo, published.number, files=allowed_files, done_criteria=fresh_intent["done_criteria"], resource_ids=fresh_intent["scope"]["resource_ids"])
         pr_record = {"url": published.url, "number": published.number, "branch": branch, "base_branch": base_branch, "repo": repo, "opened_at": int(time.time() * 1000),
-                     "files": files, "allowed_files": allowed_files, "lockfiles": [e.lockfile for e in lock_entries], "labels": labels, "updated": published.updated}
+                     "files": files, "allowed_files": allowed_files, "lockfiles": [e.lockfile for e in lock_entries], "labels": labels, "updated": published.updated,
+                     "fingerprint": fingerprint}
         previous = {str(f.get("key")): dict((f.get("pr") or {}).get("verification") or {}) for f in applied}
         for finding in applied:
             verification = previous.get(str(finding["key"])) or {}

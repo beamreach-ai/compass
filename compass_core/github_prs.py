@@ -71,10 +71,14 @@ def commit_files(
     add_message: str,
     update_message: str,
 ) -> None:
-    """Write each file on `branch` through the Contents API. `{path}` in a message is the file path."""
+    """Write each file on `branch` through the Contents API. `{path}` in a message is the file path.
+    A file the branch already holds with this content is left alone: no empty commit."""
     for path, content in files.items():
         try:
             existing = gh_repo.get_contents(path, ref=branch)
+            if _text(existing) == content:
+                logger.debug("%s on branch %s already has this content", path, branch)
+                continue
             gh_repo.update_file(path, update_message.replace("{path}", path), content, existing.sha, branch=branch)
             logger.info("Updated %s on branch %s", path, branch)
         except GithubException as exc:
@@ -82,6 +86,13 @@ def commit_files(
                 raise
             gh_repo.create_file(path, add_message.replace("{path}", path), content, branch=branch)
             logger.info("Created %s on branch %s", path, branch)
+
+
+def _text(blob: Any) -> Optional[str]:
+    try:
+        return blob.decoded_content.decode("utf-8", errors="replace")
+    except Exception:  # noqa: BLE001 - a directory, a submodule, a blob too large to inline
+        return None
 
 
 def find_open_pr(gh_repo: Any, branch: str) -> Optional[Any]:
