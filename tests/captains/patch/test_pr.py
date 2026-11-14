@@ -122,6 +122,7 @@ def world(monkeypatch):
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "test")
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "test")
     pr_registry.reset_memory_for_tests()
+    _pr.reset_failures_for_tests()
     with mock_aws():
         table = boto3.resource("dynamodb", region_name="us-east-1").create_table(
             TableName="items", KeySchema=[{"AttributeName": "pk", "KeyType": "HASH"}, {"AttributeName": "sk", "KeyType": "RANGE"}],
@@ -270,3 +271,39 @@ def test_the_body_stands_without_a_model_and_github_errors_are_reported_per_repo
     body = github.pulls[("acme/web", 7)].body
     assert body.startswith("Compass found 1 vulnerable version in this repository") and "## Findings" in body
     assert next(r for r in findings.list() if r["node_id"] == "f-legacy")["state"] == "open"
+
+
+def test_a_publish_that_fails_is_not_retried_every_tick_with_the_same_change(world, monkeypatch):
+    """What the demo did for three weeks: GitHub refused the workflow file, and every tick asked
+    the model and wrote the other files again before failing the same way."""
+    advisories, findings, github, registry, opener = world
+    nodes, edges = php_shop()
+    asked = []
+    opener.model = type("Counting", (), {"call": lambda self, messages, **kw: asked.append(1) or "why"})()
+    real = opener._github_client
+
+    def refusing(full_name):
+        gh = real(full_name)
+        write = gh.create_file
+
+        def create_file(path, message, content, **kw):
+            if path.startswith(".github/workflows/"):
+                raise GithubException(403, {"message": "Resource not accessible by integration"}, {})
+            return write(path, message, content, **kw)
+
+        gh.create_file = create_file
+        return gh
+
+    opener._github_client = refusing
+    first = tick(advisories, findings, opener, nodes, edges, now_ms=1000)
+    assert "Resource not accessible by integration" in first["prs"]["errors"]["acme/legacy"] and len(asked) == 2
+    commits = len(github.commits)
+    second = tick(advisories, findings, opener, nodes, edges, now_ms=2000)
+    assert "the last attempt failed" in second["prs"]["skipped"]["acme/legacy"] and "tried again after" in second["prs"]["skipped"]["acme/legacy"]
+    assert len(asked) == 2 and len(github.commits) == commits, "no model call and no commit while the same change is held"
+    # the hold ends with time, and a success clears it
+    monkeypatch.setattr(_pr, "RETRY_AFTER_SECONDS", 0)
+    _pr._FAILED[("ws-a", "acme/legacy")] = (_pr._FAILED[("ws-a", "acme/legacy")][0], 0, "x")
+    opener._github_client = real
+    third = tick(advisories, findings, opener, nodes, edges, now_ms=3000)
+    assert [r["repo"] for r in third["prs"]["opened"]] == ["acme/legacy"] and ("ws-a", "acme/legacy") not in _pr._FAILED

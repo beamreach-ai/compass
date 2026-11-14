@@ -77,6 +77,16 @@ def branch_name(repo: str, findings: Iterable[Mapping[str, Any]], *, today: Opti
 
 # ── the body ──────────────────────────────────────────────────────────────────
 
+# A publish that failed is not tried again with the same content before this long: a tick runs
+# every 15 minutes, and each attempt asks the model and writes to the branch before it fails.
+RETRY_AFTER_SECONDS = 6 * 3600
+_FAILED: Dict[tuple, tuple] = {}  # (workspace, repo) -> (fingerprint, retry at, error); per process
+
+
+def reset_failures_for_tests() -> None:
+    _FAILED.clear()
+
+
 def _fingerprint(title: str, text: str, labels: Iterable[str], edits: Mapping[str, _fixes.Edit]) -> str:
     parts = [title, text, ",".join(sorted(labels))] + [f"{path}\0{edit.after}" for path, edit in sorted(edits.items())]
     return hashlib.sha256("\x1e".join(parts).encode("utf-8")).hexdigest()[:32]
@@ -240,6 +250,9 @@ class PullRequestOpener:
             if result.get("unchanged"):
                 report["unchanged"].append(result)
                 continue
+            if result.get("held"):
+                report["skipped"][repo] = result["reason"]
+                continue
             (report["updated"] if result.get("updated") else report["opened"]).append(result)
             if not is_update and budget is not None:
                 budget -= 1
@@ -337,12 +350,22 @@ class PullRequestOpener:
         if standing is not None:
             return {"repo": repo, "url": standing.get("url"), "number": standing.get("number"), "branch": branch, "files": files, "findings": len(applied),
                     "updated": False, "unchanged": True, "labels": labels}
+        failed = _FAILED.get((self.workspace_id, repo))
+        if failed and failed[0] == fingerprint and failed[1] > time.time():
+            return {"repo": repo, "branch": branch, "files": files, "findings": len(applied), "held": True,
+                    "reason": f"the last attempt failed ({failed[2]}); the same change is tried again after "
+                              f"{datetime.fromtimestamp(failed[1], tz=timezone.utc).strftime('%H:%M UTC')}"}
         advisories = [a for a in (self.advisories.get(str(f.get("advisory_id"))) for f in applied) if a] if self.advisories is not None else []
-        text = body(repo, applied, by_file, explanation=explanation(self.model, applied, advisories))
-        ensure_branch(gh_repo, branch, base_branch)
-        commit_files(gh_repo, branch, {path: edit.after for path, edit in by_file.items()},
-                     add_message="compass: security patch, add {path}", update_message="compass: security patch, {path}")
-        published = open_or_update_pr(gh_repo, branch=branch, base_branch=base_branch, title=title, body=text)
+        try:
+            text = body(repo, applied, by_file, explanation=explanation(self.model, applied, advisories))
+            ensure_branch(gh_repo, branch, base_branch)
+            commit_files(gh_repo, branch, {path: edit.after for path, edit in by_file.items()},
+                         add_message="compass: security patch, add {path}", update_message="compass: security patch, {path}")
+            published = open_or_update_pr(gh_repo, branch=branch, base_branch=base_branch, title=title, body=text)
+        except Exception as exc:
+            _FAILED[(self.workspace_id, repo)] = (fingerprint, time.time() + RETRY_AFTER_SECONDS, f"{type(exc).__name__}: {exc}"[:160])
+            raise
+        _FAILED.pop((self.workspace_id, repo), None)
         try:
             if published.number is not None:
                 gh_repo.get_pull(published.number).add_to_labels(*labels) if hasattr(gh_repo, "get_pull") else None

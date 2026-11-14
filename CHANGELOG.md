@@ -16,6 +16,11 @@ request stayed open. A tick now compares what the pull request would say and
 hold with what it already does, and does nothing when they match. Any captain's
 pull request also stops committing a file whose content the branch already has.
 
+A patch pull request that cannot be published (GitHub refusing a file, for
+example a workflow file when the token or the GitHub App lacks the workflows
+permission) is no longer attempted on every tick either: the same change is
+tried again after six hours, and the Patches report says why it is waiting.
+
 ### After the update
 
 - Nothing to do. An open patch pull request gets one last refresh on the first
