@@ -167,11 +167,21 @@ def test_php2shell_opens_one_pull_request_per_repository_with_the_golden_diff(wo
     rows = {r["node_id"]: r for r in findings.list()}
     assert rows["f-web"]["state"] == "pr_open" and rows["f-web"]["pr"]["number"] == web["number"] and rows["f-legacy"]["state"] == "pr_open"
     assert rows["fn-0"]["state"] == "open", "no strategy for a Bref layer whose fixed release is unknown"
-    # the second tick changes nothing: the same pull request, refreshed, no new commit
+    # the second tick changes nothing: the same pull request, no commit, no edit, no call to the model
     commits = len(github.commits)
+    asked = []
+    opener.model = type("Counting", (), {"call": lambda self, messages, **kw: asked.append(1) or "again"})()
+    pull.edit = lambda **kw: asked.append("edit")
     again = tick(advisories, findings, opener, nodes, edges, now_ms=2000)
-    assert again["prs"]["opened"] == [] and {r["repo"] for r in again["prs"]["updated"]} == {"acme/web", "acme/legacy"} and len(github.pulls) == 2
-    assert len(github.commits) == commits + 3, "the files are rewritten from the base; the content is the same"
+    assert again["prs"]["opened"] == [] and again["prs"]["updated"] == [] and len(github.pulls) == 2
+    assert {r["repo"] for r in again["prs"]["unchanged"]} == {"acme/web", "acme/legacy"}
+    assert len(github.commits) == commits and asked == [], "a tick with nothing new writes nothing and asks nothing"
+    assert {r["state"] for r in findings.list() if r["node_id"] in ("f-web", "f-legacy")} == {"pr_open"}
+    # someone pushed over the fix: the next tick puts the file back, with one commit for that file
+    github.branches[("acme/web", web["branch"], "Dockerfile")] = "FROM php:8.3.30-fpm\n"
+    restored = tick(advisories, findings, opener, nodes, edges, now_ms=3000)
+    assert [r["repo"] for r in restored["prs"]["updated"]] == ["acme/web"] and len(github.commits) == commits + 1
+    assert github.branches[("acme/web", web["branch"], "Dockerfile")].startswith("FROM php:8.3.36-fpm")
 
 
 def test_a_new_finding_lands_on_the_open_pull_request_and_kev_adds_its_label(world):

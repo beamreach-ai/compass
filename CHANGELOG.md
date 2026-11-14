@@ -5,6 +5,22 @@ workflow refuses a tag without one, and reads from it what the dashboard shows
 next to the Update button: the first paragraph is the summary, the bullets under
 `### After the update` are the notes an operator needs after applying it.
 
+## 0.9.3 — 2026-11-14
+
+The patch captain no longer republishes an open fix pull request on every
+tick. Until now each 15-minute tick rewrote the pull request's files (a commit
+per file, with the same content), edited its description and, with a model
+configured, asked the model for the same paragraph again: a notification storm
+on the repository and a steady trickle of model spend for as long as the pull
+request stayed open. A tick now compares what the pull request would say and
+hold with what it already does, and does nothing when they match. Any captain's
+pull request also stops committing a file whose content the branch already has.
+
+### After the update
+
+- Nothing to do. An open patch pull request gets one last refresh on the first
+  tick after the update, then stays quiet until its findings or files change.
+
 ## 0.9.2 — 2026-11-13
 
 A first install on a machine outside AWS now goes from an empty folder to a
