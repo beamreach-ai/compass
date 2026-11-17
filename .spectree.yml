@@ -1,0 +1,3 @@
+# Spectree: the roadmap as a tree of specs under roadmap/. https://github.com/beamreach-ai/spectree
+# Trial: a pull request without a spec passes as before. Change to `fail` to require a spec for code.
+on_missing_spec: allow

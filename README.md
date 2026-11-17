@@ -288,6 +288,11 @@ licence and no account; `cloud` and `enterprise` captains are the hosted
 product's. Nothing below has a date; "planned" means a design exists, not a
 release.
 
+The roadmap item by item is the tree of specs under [roadmap/](roadmap/),
+kept with [spectree](https://github.com/beamreach-ai/spectree): a feature that
+is built has a spec with the tests that prove it, and a feature that is not
+built yet is marked `planned`.
+
 **Available now, open source (Apache-2.0, this repository):**
 
 - The captain framework: manifests, the catalog, install and update from the
