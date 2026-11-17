@@ -72,8 +72,11 @@ Compass is not:
 
 ## Install
 
-You need Docker, an AWS profile in `~/.aws` that can create two IAM roles (used once),
-and a GitHub token with `repo` scope (`gh auth token` prints yours).
+You need Docker, an AWS profile in `~/.aws` that may create IAM roles, an IAM user and
+an SQS queue (used once, by `connect`: a read role, an act role with no permissions, the
+queue decoy alerts report to, and a runtime user that may only assume the two roles; see
+[docs/access.md](docs/access.md)), and a GitHub token with `repo` scope (`gh auth token`
+prints yours).
 
 ```sh
 mkdir compass && cd compass
