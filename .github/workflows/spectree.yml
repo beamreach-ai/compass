@@ -1,0 +1,28 @@
+name: Spectree
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, edited, labeled, unlabeled, ready_for_review]
+  workflow_run:
+    workflows: ["Spectree signal"]
+    types: [completed]
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  statuses: write
+  pages: write
+  id-token: write
+
+jobs:
+  spectree:
+    uses: beamreach-ai/spectree/.github/workflows/spectree.yml@v1
+    # Used only with dashboard.host: cloudflare in .spectree.yml. No other secret is passed.
+    secrets:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

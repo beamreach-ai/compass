@@ -1,0 +1,17 @@
+name: Spectree signal
+# A review on a pull request from a fork cannot write the vote count.
+# This workflow has no permissions and does nothing; its completion starts "Spectree", which can.
+on:
+  pull_request_review:
+    types: [submitted, edited, dismissed]
+  # A comment can be a command, such as "/spectree for".
+  issue_comment:
+    types: [created, edited]
+
+permissions: {}
+
+jobs:
+  signal:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "A review or a comment was recorded."
